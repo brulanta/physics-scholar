@@ -1,0 +1,27 @@
+# git
+.git
+.gitignore
+
+# env
+.env
+.env.*
+
+# python
+__pycache__/
+*.pyc
+*.pyo
+
+# venv
+venv/
+.venv/
+
+# data
+data/pdfs/
+data/chroma_db/
+
+# IDE
+.vscode
+.idea
+
+# logs
+*.log

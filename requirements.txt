@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-dotenv
+pymupdf
+chromadb
+langchain
+langchain-openai
+langchain-chroma
+langchain-huggingface
+langgraph
+sympy
+numpy
+python-multipart
+requests
+duckduckgo-search

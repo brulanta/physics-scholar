@@ -1,0 +1,27 @@
+# ========= ENV =========
+.env
+
+# ========= Python =========
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ========= Virtual Env =========
+venv/
+.venv/
+env/
+
+# ========= Data =========
+data/pdfs/
+data/chroma_db/
+
+# ========= IDE =========
+.vscode/
+.idea/
+
+# ========= Logs =========
+*.log
+
+# ========= OS =========
+.DS_Store
+Thumbs.db
