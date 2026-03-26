@@ -5,7 +5,7 @@ import os
 
 load_dotenv()
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 
 DATA_DIR = ROOT / "data"
 PDF_DIR = DATA_DIR / "pdfs"

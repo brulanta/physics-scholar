@@ -1,0 +1,138 @@
+{
+  "12345": {
+    "doc_id": "12345",
+    "title": "巴啦啦",
+    "file_name": "2304.12345.pdf",
+    "page_count": 12,
+    "chunk_count": 87,
+    "upload_time": "2024-01-01T10:00:00",
+    "status": "indexed"
+  },
+  "a3f2c1d4...": {
+    "doc_id": "a3f2c1d4...",
+    "title": "不同类型胶原蛋白...",
+    "file_name": "2304.12345.pdf",
+    "page_count": 12,
+    "chunk_count": 87,
+    "upload_time": "2024-01-01T10:00:00",
+    "status": "indexed"
+  },
+  "banana": {
+    "doc_id": "banana",
+    "title": "香蕉！苹果！草莓！蛋白质！",
+    "file_name": "2304.12345.pdf",
+    "page_count": 12,
+    "chunk_count": 100,
+    "upload_time": "2024-01-01T10:00:00",
+    "status": "indexed"
+  },
+  "orange": {
+    "doc_id": "orange",
+    "title": "Recent advances in physical reservoir computing: A review",
+    "file_name": "2304.12345.pdf",
+    "page_count": 12,
+    "chunk_count": 100,
+    "upload_time": "2024-01-01T10:00:00",
+    "status": "indexed"
+  },
+  "watermellon": {
+    "doc_id": "watermellon",
+    "title": "Emerging opportunities and challenges for the future of reservoir computing",
+    "file_name": "2304.12345.pdf",
+    "page_count": 12,
+    "chunk_count": 100,
+    "upload_time": "2024-01-01T10:00:00",
+    "status": "indexed"
+  },
+  "parallel_optical": {
+    "doc_id": "parallel_optical",
+    "title": "Parallel reservoir computing using optical amplifiers",
+    "file_name": "2011.parallel_optical.pdf",
+    "page_count": 10,
+    "chunk_count": 85,
+    "upload_time": "2024-01-01T10:00:00",
+    "status": "indexed"
+  },
+  "efficient_parallel": {
+    "doc_id": "efficient_parallel",
+    "title": "Efficient parallel implementation of reservoir computing systems",
+    "file_name": "2020.efficient_impl.pdf",
+    "page_count": 15,
+    "chunk_count": 120,
+    "upload_time": "2024-01-02T11:30:00",
+    "status": "indexed"
+  },
+  "deep_reservoir": {
+    "doc_id": "deep_reservoir",
+    "title": "Parallel and deep reservoir computing using semiconductor lasers with optical feedback",
+    "file_name": "2023.deep_reservoir.pdf",
+    "page_count": 18,
+    "chunk_count": 150,
+    "upload_time": "2024-01-03T09:15:00",
+    "status": "indexed"
+  },
+  "scalable_photonic": {
+    "doc_id": "scalable_photonic",
+    "title": "Scalable photonic reservoir computing for parallel machine learning tasks",
+    "file_name": "2025.nature_aadhi.pdf",
+    "page_count": 14,
+    "chunk_count": 110,
+    "upload_time": "2024-01-05T14:20:00",
+    "status": "indexed"
+  },
+  "grammatical_structure": {
+    "doc_id": "grammatical_structure",
+    "title": "Real-time parallel processing of grammatical structure in the fronto-striatal system: A recurrent network simulation study using reservoir computing",
+    "file_name": "2013.grammatical_rc.pdf",
+    "page_count": 22,
+    "chunk_count": 200,
+    "upload_time": "2024-01-06T16:45:00",
+    "status": "indexed"
+  },
+  "optical_data": {
+    "doc_id": "optical_data",
+    "title": "Efficient optical reservoir computing for parallel data processing",
+    "file_name": "2022.optical_data.pdf",
+    "page_count": 8,
+    "chunk_count": 60,
+    "upload_time": "2024-01-07T08:00:00",
+    "status": "indexed"
+  },
+  "emerging_future": {
+    "doc_id": "emerging_future",
+    "title": "Emerging opportunities and challenges for the future of reservoir computing",
+    "file_name": "2024.future_rc.pdf",
+    "page_count": 25,
+    "chunk_count": 250,
+    "upload_time": "2024-01-08T12:00:00",
+    "status": "indexed"
+  },
+  "high_speed_parallel": {
+    "doc_id": "high_speed_parallel",
+    "title": "High-speed parallel processing with photonic feedforward reservoir computing",
+    "file_name": "2023.high_speed.pdf",
+    "page_count": 12,
+    "chunk_count": 95,
+    "upload_time": "2024-01-09T10:30:00",
+    "status": "indexed"
+  },
+  "mutually_coupled": {
+    "doc_id": "mutually_coupled",
+    "title": "Parallel information processing using a reservoir computing system based on mutually coupled semiconductor lasers",
+    "file_name": "2020.coupled_lasers.pdf",
+    "page_count": 16,
+    "chunk_count": 130,
+    "upload_time": "2024-01-10T15:10:00",
+    "status": "indexed"
+  },
+  "hybrid_parallel": {
+    "doc_id": "hybrid_parallel",
+    "title": "Hybrid parallel photonic reservoir computing with accelerated data processing speed",
+    "file_name": "2024.hybrid_parallel.pdf",
+    "page_count": 11,
+    "chunk_count": 88,
+    "upload_time": "2024-01-11T09:00:00",
+    "status": "indexed"
+  }
+  
+}
