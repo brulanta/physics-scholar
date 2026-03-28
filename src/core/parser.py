@@ -1,6 +1,5 @@
 import fitz
 import re
-from src.config import PDF_DIR
 
 MATH_CHARS = set("αβγδεζηθικλμνξπρστυφχψωΑΒΓΔΕΖΗΘΙΚΛΜΝΞΠΡΣΤΥΦΧΨΩ∑∫∂∇×·⊗≈≤≥≠∞")
 
@@ -104,12 +103,3 @@ def parse_pdf(pdf_path: str) -> dict:
     reference = reference_raw  # 引用部分可以不过滤，保留原始条目
 
     return {"body": body, "reference": reference}
-
-
-res = parse_pdf(
-    str(
-        PDF_DIR
-        / "Zhong Dongzhou 等 - 2022 - 基于光学储备池计算的高速混沌保密通信的研究.pdf"
-    )
-)
-print(res["reference"][0:100])
