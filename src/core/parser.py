@@ -82,8 +82,19 @@ def split_reference(full_text: str) -> tuple[str, str]:
     return full_text.strip(), ""
 
 
+def clean_text(text: str) -> str:
+    # 去掉全角空格
+    text = text.replace("\u3000", " ")
+    # 多个连续换行压缩成一个
+    text = re.sub(r"\n+", "\n", text)
+    # 去掉\n前后多余空格
+    text = re.sub(r" *\n *", "\n", text)
+    return text.strip()
+
+
 def parse_pdf(pdf_path: str) -> dict:
     doc = fitz.open(pdf_path)
+    page_count = doc.page_count
     all_text_blocks = []
 
     for page in doc:
@@ -95,11 +106,11 @@ def parse_pdf(pdf_path: str) -> dict:
         all_text_blocks.extend(sorted_blocks)
 
     # 先join
-    full_text = "\n".join(b[4] for b in all_text_blocks)
+    full_text = "\n".join(clean_text(b[4]) for b in all_text_blocks)
     # 先切引用
     body_raw, reference_raw = split_reference(full_text)
     # 再分别过滤噪声
     body = "\n".join(line for line in body_raw.split("\n") if not is_noise_block(line))
     reference = reference_raw  # 引用部分可以不过滤，保留原始条目
 
-    return {"body": body, "reference": reference}
+    return {"body": body, "reference": reference, "page_count": page_count}

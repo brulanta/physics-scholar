@@ -47,12 +47,14 @@ class PaperMeta(BaseModel):
     author: str = Field(default="")  # 预留
     year: str = Field(default="")  # 预留
     file_name: str
-    page_count: int
-    chunk_count: int = Field(default=-1)
     upload_time: str
-    status: Literal["indexed", "unindexed"] = Field(default="unindexed")
     source_type: Literal["seed", "user"] = Field(default="user")
     user_id: str = Field(default="")
+    status: Literal["pending", "processing", "indexed", "failed"] = Field(
+        default="pending"
+    )
+    page_count: int = Field(default=-1)
+    chunk_count: int = Field(default=-1)
 
 
 def register_paper(paper_meta: PaperMeta, user_id: str = "seed"):
@@ -67,10 +69,17 @@ def register_paper(paper_meta: PaperMeta, user_id: str = "seed"):
         return {"success": False, "detail": str(e)}
 
 
-def update_after_index(doc_id: str, chunk_count: int, user_id: str = "seed"):
-    if is_duplicate(doc_id, user_id) and chunk_count is not None:
+def update_after_index(
+    doc_id: str, chunk_count: int, page_count: int, user_id: str = "seed"
+):
+    if (
+        is_duplicate(doc_id, user_id)
+        and chunk_count is not None
+        and page_count is not None
+    ):
         raw_registry = load_registry(user_id)
         raw_registry[doc_id]["chunk_count"] = chunk_count
+        raw_registry[doc_id]["page_count"] = page_count
         raw_registry[doc_id]["status"] = "indexed"
         save_registry(raw_registry, user_id)
         return {"success": True}
@@ -81,23 +90,30 @@ def update_after_index(doc_id: str, chunk_count: int, user_id: str = "seed"):
         }
 
 
-def smart_match(keyword, title):
-    # 之后考虑扩展到涵盖作者名字、年份的搜索
-    # title 扩展到 title + author + year 拼接后的字符串
+def remove_paper(doc_id: str, user_id: str = "seed"):
+    """入库失败时清除注册表记录"""
+    raw_registry = load_registry(user_id)
+    if doc_id in raw_registry:
+        del raw_registry[doc_id]
+        save_registry(raw_registry, user_id)
+    return {"success": True}
+
+
+def smart_match(keyword, sentence):
     # 1. 归一化
     keyword = keyword.strip().lower()
-    title = title.lower()
+    sentence = sentence.lower()
 
     # 2. 判断是否包含中文字符 (使用 Unicode 范围检测)
     has_chinese = re.search(r"[\u4e00-\u9fff]", keyword)
 
     if has_chinese:
-        # 中文逻辑：直接判断子串，因为中文不需要靠空格切词
-        return keyword in title
+        # 中文逻辑：直接判断子串，因为中文不需要靠空格分词
+        return keyword in sentence
     else:
         # 英文/数字逻辑：使用 \b 保护，防止 AI 匹配到 Mountain
         pattern = rf"\b{re.escape(keyword)}\b"
-        return bool(re.search(pattern, title))
+        return bool(re.search(pattern, sentence))
 
 
 def search_by_keyword(query_segments: list[str], user_id: str = "") -> list[dict]:
@@ -120,7 +136,9 @@ def search_by_keyword(query_segments: list[str], user_id: str = "") -> list[dict
     for reg in all_papers:
         score = 0
         for q in query_segments:
-            if smart_match(q, reg["title"]):
+            if smart_match(
+                q, reg["title"] + reg.get("author", "") + reg.get("year", "")
+            ):
                 score += 1
         if score:
             hit_result.append(
