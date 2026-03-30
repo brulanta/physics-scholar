@@ -1,6 +1,6 @@
 from src.config import DATA_DIR
 import json
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 import re
 from pathlib import Path
@@ -55,6 +55,11 @@ class PaperMeta(BaseModel):
     )
     page_count: int = Field(default=-1)
     chunk_count: int = Field(default=-1)
+
+    @field_validator("year", mode="before")
+    @classmethod
+    def coerce_year(cls, v):
+        return str(v) if v is not None else ""
 
 
 def register_paper(paper_meta: PaperMeta, user_id: str = "seed"):
@@ -136,9 +141,10 @@ def search_by_keyword(query_segments: list[str], user_id: str = "") -> list[dict
     for reg in all_papers:
         score = 0
         for q in query_segments:
-            if smart_match(
-                q, reg["title"] + reg.get("author", "") + reg.get("year", "")
-            ):
+            search_text = " ".join(
+                [reg.get("title", ""), reg.get("author", ""), reg.get("year", "")]
+            )
+            if smart_match(q, search_text):
                 score += 1
         if score:
             hit_result.append(

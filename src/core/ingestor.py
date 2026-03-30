@@ -1,10 +1,76 @@
 from src.core import registry, hash_file, extractor, parser, chunker
 from pathlib import Path
 from datetime import datetime
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from src.config import CHROMA_DIR
+from langchain_core.documents import Document
+
+_embeddings = None
+_vectorstore = None
 
 
-def write_to_chroma():
-    pass
+def get_vectorstore():
+    global _vectorstore, _embeddings
+
+    if _vectorstore is None:
+        # 1️⃣ 初始化 embeddings（只做一次）
+        if _embeddings is None:
+            _embeddings = HuggingFaceEmbeddings(
+                model_name="paraphrase-multilingual-MiniLM-L12-v2"
+            )
+
+        # 2️⃣ 初始化 vectorstore
+        _vectorstore = Chroma(
+            embedding_function=_embeddings,
+            persist_directory=str(CHROMA_DIR),
+            collection_name="rag_langchain",
+            collection_metadata={"hnsw:space": "cosine"},
+        )
+
+    return _vectorstore
+
+
+def write_to_chroma(chunks, ref_chunks, paper_meta, user_id):
+
+    base_metadata = {
+        "doc_id": paper_meta.doc_id,
+        "source_type": paper_meta.source_type,
+        "user_id": user_id,
+        "title": paper_meta.title,
+        "author": paper_meta.author,
+        "year": paper_meta.year,
+    }
+
+    docs_body = [
+        Document(
+            page_content=chunk,
+            metadata={**base_metadata, "section": "body", "chunk_index": i},
+        )
+        for i, chunk in enumerate(chunks)
+    ]
+    offset = len(chunks)
+    docs_reference = [
+        Document(
+            page_content=ref_chunk,
+            metadata={
+                **base_metadata,
+                "section": "reference",
+                "chunk_index": offset + i,
+            },
+        )
+        for i, ref_chunk in enumerate(ref_chunks)
+    ]
+    all_docs = docs_body + docs_reference
+    all_ids = [f"{paper_meta.doc_id}_{i}" for i in range(len(docs_body))] + [
+        f"{paper_meta.doc_id}_ref_{i}" for i in range(len(docs_reference))
+    ]
+
+    vs = get_vectorstore()
+
+    vs.add_documents(documents=all_docs, ids=all_ids)
+
+    return len(all_ids)  # 返回chunk总数，用于回填
 
 
 def ingest_pdf(

@@ -133,6 +133,70 @@
     "chunk_count": 88,
     "upload_time": "2024-01-11T09:00:00",
     "status": "indexed"
+  },
+  "cb6928cf59960a1767367cd410a44e1d": {
+    "doc_id": "cb6928cf59960a1767367cd410a44e1d",
+    "title": "Real-time identification of frequency-hopping millimeter-wave signals using photonic time stretch and reservoir computing",
+    "author": "Yuanli Yue Shuo Li Yue Feng Ailing Zhang Chao Wang",
+    "year": "2021",
+    "file_name": "2021_SPIE_Real-time identification of frequency-hopping millimeter-wave signals using photonic time stretch and reservoir computing.pdf",
+    "upload_time": "2026-03-30 11:35:36",
+    "source_type": "seed",
+    "user_id": "seed",
+    "status": "indexed",
+    "page_count": 6,
+    "chunk_count": 52
+  },
+  "7fb76c6d03492abe5e2148b2996150ba": {
+    "doc_id": "7fb76c6d03492abe5e2148b2996150ba",
+    "title": "Parallel Reservoir Computing Using Optical Amplifiers",
+    "author": "K. Vandoorne J. Dambre D. Verstraeten B. Schrauwen P. Bienstman",
+    "year": "2011",
+    "file_name": "Parallel-Reservoir-Computing-Using-Optical-Amplifiers.pdf",
+    "upload_time": "2026-03-30 11:36:07",
+    "source_type": "seed",
+    "user_id": "seed",
+    "status": "indexed",
+    "page_count": 13,
+    "chunk_count": 258
+  },
+  "73c56b24291a29434d42563153bb1568": {
+    "doc_id": "73c56b24291a29434d42563153bb1568",
+    "title": "Asynchronous photonic time-delay reservoir computing",
+    "author": "",
+    "year": "",
+    "file_name": "Tang 等 - 2023 - Asynchronous photonic time-delay reservoir computi.pdf",
+    "upload_time": "2026-03-30 11:36:25",
+    "source_type": "seed",
+    "user_id": "seed",
+    "status": "indexed",
+    "page_count": 11,
+    "chunk_count": 125
+  },
+  "75499afd27c1330139acd01c777be9c9": {
+    "doc_id": "75499afd27c1330139acd01c777be9c9",
+    "title": "基于光学储备池计算的高速混沌保密通信的研究",
+    "author": "钟东洲 ZHONG Dongzhou 徐喆 XU Zhe 赵可可 ZHAO Keke 胡亚兰 HU Yalan 邓万安 DENG Wanan 侯鹏 HOU Peng 张金波 ZHANG Jinbo",
+    "year": "2022",
+    "file_name": "Zhong Dongzhou 等 - 2022 - 基于光学储备池计算的高速混沌保密通信的研究.pdf",
+    "upload_time": "2026-03-30 11:36:43",
+    "source_type": "seed",
+    "user_id": "seed",
+    "status": "indexed",
+    "page_count": 16,
+    "chunk_count": 114
+  },
+  "6ca7f1e09602390452eb59964fb02ccd": {
+    "doc_id": "6ca7f1e09602390452eb59964fb02ccd",
+    "title": "Roles of different types of collagen in skin aging and their research progress",
+    "author": "LI Yaru1, SUN Chang2, LIU Zibin2, LUO Yongkang1, JIANG Yanfei2, ZHAO Chunyue2*",
+    "year": "",
+    "file_name": "不同类型胶原蛋白在皮肤衰老中的作用及其研究进展.pdf",
+    "upload_time": "2026-03-30 11:36:57",
+    "source_type": "seed",
+    "user_id": "seed",
+    "status": "indexed",
+    "page_count": 14,
+    "chunk_count": 123
   }
-  
 }
