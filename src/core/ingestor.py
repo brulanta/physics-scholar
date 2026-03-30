@@ -92,7 +92,7 @@ def ingest_pdf(
     paper_meta = registry.PaperMeta(
         doc_id=doc_id,
         file_name=Path(pdf_path).name,
-        upload_time=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        upload_time=datetime.now().isoformat(),
         source_type=source_type,
         user_id=user_id,
         status="pending",
