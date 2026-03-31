@@ -2,10 +2,10 @@ from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
 import os
 from src.rag.retriever import restriever
-from src.rag.prompt import prompt
+from src.rag.prompt import prompt, CITATION_DEFAULT, CITATION_TRANSLATION
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from src.rag.memory import ConversationMemory
+from src.rag.memory import get_or_create_session, WARN_THRESHOLD
 from operator import itemgetter
 
 load_dotenv()
@@ -48,19 +48,14 @@ rag_chain = (
 )
 
 
-# 调用层维护（现在用dict，后期换SQLite）
-sessions = {}  # {conversation_id: ConversationMemory}
+def strip_thinking(answer: str) -> str:
+    # 去掉<thinking>...</thinking>部分
+    import re
 
-WARN_THRESHOLD = 3000
-
-
-def get_or_create_session(conversation_id: str) -> ConversationMemory:
-    if conversation_id not in sessions:
-        sessions[conversation_id] = ConversationMemory()
-    return sessions[conversation_id]
+    return re.sub(r"<thinking>.*?</thinking>", "", answer, flags=re.DOTALL).strip()
 
 
-def ask(question: str, conversation_id: str) -> dict:
+def ask(question: str, conversation_id: str, translation: bool = False) -> dict:
     memory = get_or_create_session(conversation_id)
     history = memory.get()
 
@@ -68,11 +63,14 @@ def ask(question: str, conversation_id: str) -> dict:
         {
             "question": question,
             "history": format_history(history),
+            "citation_plugin": CITATION_TRANSLATION
+            if translation
+            else CITATION_DEFAULT,
         }
     )
 
     memory.add("user", question)
-    memory.add("assistant", answer)
+    memory.add("assistant", strip_thinking(answer))  # 只存正式回答
 
     # 检查是否接近上限
     char_count = memory._count_chars()

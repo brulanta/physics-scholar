@@ -3,7 +3,7 @@ from datetime import datetime
 
 
 class ConversationMemory:
-    def __init__(self, max_tokens: int = 4000):
+    def __init__(self, max_tokens: int = 20000):
         self.max_tokens = max_tokens  # 字数上限放这里
         self.history = []
 
@@ -17,8 +17,7 @@ class ConversationMemory:
         return self.history
 
     def _trim(self):
-        # 超出上限时从最早的消息开始删
-        while self._count_chars() > self.max_tokens and len(self.history) > 2:
+        while self._count_chars() > self.max_tokens and self.history:
             self.history.pop(0)
 
     def _count_chars(self) -> int:
@@ -26,3 +25,15 @@ class ConversationMemory:
 
     def clear(self):
         self.history = []
+
+
+# 调用层维护（现在用dict，后期换SQLite）
+sessions = {}  # {conversation_id: ConversationMemory}
+
+WARN_THRESHOLD = 3000
+
+
+def get_or_create_session(conversation_id: str) -> ConversationMemory:
+    if conversation_id not in sessions:
+        sessions[conversation_id] = ConversationMemory()
+    return sessions[conversation_id]
