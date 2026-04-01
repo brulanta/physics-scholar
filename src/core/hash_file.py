@@ -1,5 +1,8 @@
-import hashlib
+# hash_file.py
+def get_pdf_hash(source) -> str:
+    import hashlib
 
-def get_pdf_hash(pdf_path):
-    with open(pdf_path, "rb") as f:
+    if isinstance(source, bytes):
+        return hashlib.md5(source).hexdigest()
+    with open(source, "rb") as f:
         return hashlib.md5(f.read()).hexdigest()

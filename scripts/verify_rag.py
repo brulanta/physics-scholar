@@ -35,7 +35,14 @@ def ingest_all():
         pdf_path = str(PDF_DIR / filename)
         print(f"▶ 处理: {filename}")
 
-        result = ingest_pdf(pdf_path, source_type="seed", user_id=TEST_USER)
+        with open(pdf_path, "rb") as f:
+            file_bytes = f.read()
+        result = ingest_pdf(
+            file_bytes=file_bytes,
+            file_name=Path(pdf_path).name,
+            source_type="seed",
+            user_id=TEST_USER,
+        )
 
         if not result["success"]:
             print(f"  ⚠ 跳过: {result['detail']}\n")

@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
-from src.config import CHROMA_DIR
+from src.config import CHROMA_DIR, PDF_DIR
 from langchain_core.documents import Document
 
 _embeddings = None
@@ -74,33 +74,49 @@ def write_to_chroma(chunks, ref_chunks, paper_meta, user_id):
 
 
 def ingest_pdf(
-    pdf_path: str, source_type: str = "user", user_id: str = "", strict: bool = False
+    file_bytes: bytes,
+    file_name: str,
+    source_type: str = "user",
+    user_id: str = "default",
+    strict: bool = False,
 ) -> dict:
     """
-    第一阶段：哈希去重 + 提取元数据
-    返回待确认的元数据给上层，不写注册表
+    第一阶段：保存文件 + 哈希去重 + 提取元数据 + 写注册表(pending)
+    返回待确认的元数据给上层
     """
-    # 1. 哈希去重
-    doc_id = hash_file.get_pdf_hash(pdf_path)
+    # 0. 哈希去重
+    doc_id = hash_file.get_pdf_hash(file_bytes)
     if registry.is_duplicate(doc_id, user_id):
         return {"success": False, "detail": "文件已存在"}
 
-    # 2. 提取元数据
-    metadata = extractor.extract_metadata(pdf_path, strict)
+    # 1. 确认不重复，再写文件
+    save_path = PDF_DIR / file_name
+    save_path.write_bytes(file_bytes)
 
-    # 3. 组装PaperMeta，但先不写注册表
-    paper_meta = registry.PaperMeta(
-        doc_id=doc_id,
-        file_name=Path(pdf_path).name,
-        upload_time=datetime.now().isoformat(),
-        source_type=source_type,
-        user_id=user_id,
-        status="pending",
-        **metadata,  # title, author, year
-    )
+    try:
+        # 2. 提取元数据
+        metadata = extractor.extract_metadata(str(save_path), strict)
 
-    # 4. 返回给上层等待用户确认，不注册
-    return {"success": True, "paper_meta": paper_meta}
+        # 3. 组装PaperMeta
+        paper_meta = registry.PaperMeta(
+            doc_id=doc_id,
+            file_name=file_name,
+            upload_time=datetime.now().isoformat(),
+            source_type=source_type,
+            user_id=user_id,
+            status="pending",
+            **metadata,
+        )
+
+        # 4. 写注册表
+        registry.register_paper(paper_meta, user_id)
+
+        return {"success": True, "paper_meta": paper_meta}
+
+    except Exception as e:
+        save_path.unlink(missing_ok=True)
+        registry.remove_paper(doc_id, user_id)  # 写没写都调，反正是安全的
+        return {"success": False, "detail": str(e)}
 
 
 def confirm_and_index(
@@ -134,6 +150,8 @@ def confirm_and_index(
         return {"success": True}
 
     except Exception as e:
-        # 任一环节失败，清除注册表记录
-        registry.remove_paper(paper_meta.doc_id, user_id)
-        return {"success": False, "detail": str(e)}
+        registry.remove_paper(paper_meta.doc_id, user_id)  # 清注册表
+        pdf_path = PDF_DIR / paper_meta.file_name
+        if pdf_path.exists():
+            pdf_path.unlink()  # 清本地pdf
+            return {"success": False, "detail": str(e)}

@@ -37,3 +37,9 @@ def get_or_create_session(conversation_id: str) -> ConversationMemory:
     if conversation_id not in sessions:
         sessions[conversation_id] = ConversationMemory()
     return sessions[conversation_id]
+
+
+def clear_user_sessions(user_id: str):
+    keys_to_delete = [k for k in sessions if k.startswith(f"{user_id}_")]
+    for k in keys_to_delete:
+        del sessions[k]

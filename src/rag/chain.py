@@ -55,7 +55,13 @@ def strip_thinking(answer: str) -> str:
     return re.sub(r"<thinking>.*?</thinking>", "", answer, flags=re.DOTALL).strip()
 
 
-def ask(question: str, conversation_id: str, translation: bool = False) -> dict:
+def ask(
+    question: str,
+    conv_id: str,
+    translation: bool = False,
+    user_id: str = "default",
+) -> dict:
+    conversation_id = f"{user_id}_{conv_id}"
     memory = get_or_create_session(conversation_id)
     history = memory.get()
 

@@ -3,6 +3,7 @@ from datetime import datetime
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index
 from src.core.hash_file import get_pdf_hash
+from pathlib import Path
 
 TEST_USER = "test_user"
 
@@ -23,12 +24,26 @@ def cleanup(english_pdf, chinese_pdf):
 
 
 def test_returns_success(english_pdf):
-    result = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     assert result["success"] is True
 
 
 def test_returns_paper_meta(english_pdf):
-    result = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     assert "paper_meta" in result
     meta = result["paper_meta"]
     assert meta.doc_id != ""
@@ -36,7 +51,14 @@ def test_returns_paper_meta(english_pdf):
 
 
 def test_title_extracted(english_pdf):
-    result = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     meta = result["paper_meta"]
     assert len(meta.title.strip()) > 0
 
@@ -44,19 +66,40 @@ def test_title_extracted(english_pdf):
 def test_duplicate_rejected(english_pdf):
     # 第一次上传成功，但不写注册表（pending状态还没confirm）
     # 模拟已经confirm过的情况：手动注册一次
-    first = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    first = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     meta = first["paper_meta"]
     meta.status = "indexed"
     registry.register_paper(meta, TEST_USER)
 
     # 第二次上传同一个文件，应该被拒绝
-    second = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    second = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     assert second["success"] is False
     assert "已存在" in second["detail"] or "already exists" in second["detail"]
 
 
 def test_chinese_pdf(chinese_pdf):
-    result = ingest_pdf(chinese_pdf, source_type="user", user_id=TEST_USER)
+    with open(chinese_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(chinese_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     assert result["success"] is True
     assert len(result["paper_meta"].title.strip()) > 0
 
@@ -66,7 +109,14 @@ def test_chinese_pdf(chinese_pdf):
 
 def test_full_pipeline_english(english_pdf):
     # 第一阶段
-    result = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     assert result["success"] is True
     meta = result["paper_meta"]
 
@@ -81,7 +131,14 @@ def test_full_pipeline_english(english_pdf):
 
 
 def test_registry_status_after_index(english_pdf):
-    result = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     meta = result["paper_meta"]
 
     confirm_and_index(
@@ -101,7 +158,14 @@ def test_registry_status_after_index(english_pdf):
 
 
 def test_user_can_modify_title(english_pdf):
-    result = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     meta = result["paper_meta"]
     custom_title = "我自己改的标题"
 
@@ -118,7 +182,14 @@ def test_user_can_modify_title(english_pdf):
 
 
 def test_full_pipeline_chinese(chinese_pdf):
-    result = ingest_pdf(chinese_pdf, source_type="user", user_id=TEST_USER)
+    with open(chinese_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(chinese_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     assert result["success"] is True
     meta = result["paper_meta"]
 
@@ -134,7 +205,14 @@ def test_full_pipeline_chinese(chinese_pdf):
 def test_chroma_has_chunks_after_index(english_pdf):
     from src.core.ingestor import get_vectorstore
 
-    result = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     meta = result["paper_meta"]
 
     confirm_and_index(
@@ -151,7 +229,14 @@ def test_chroma_has_chunks_after_index(english_pdf):
 
 def test_chroma_similarity_search(english_pdf):
     # 先入库
-    result = ingest_pdf(english_pdf, source_type="user", user_id=TEST_USER)
+    with open(english_pdf, "rb") as f:
+        file_bytes = f.read()
+    result = ingest_pdf(
+        file_bytes=file_bytes,
+        file_name=Path(english_pdf).name,
+        source_type="user",
+        user_id=TEST_USER,
+    )
     meta = result["paper_meta"]
     confirm_and_index(
         paper_meta=meta,
