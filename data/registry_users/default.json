@@ -11,5 +11,31 @@
     "status": "indexed",
     "page_count": 22,
     "chunk_count": 447
+  },
+  "b9678577717076d1a15ce58bc48f6b32": {
+    "doc_id": "b9678577717076d1a15ce58bc48f6b32",
+    "title": "Integrated microwave photonics",
+    "author": "David Marpaung",
+    "year": "",
+    "file_name": "NP-IMWP-Feb2019.pdf",
+    "upload_time": "2026-04-02T15:10:36.636463",
+    "source_type": "user",
+    "user_id": "default",
+    "status": "indexed",
+    "page_count": 11,
+    "chunk_count": 247
+  },
+  "645c1d3f5eb3285181813278b7aed2f0": {
+    "doc_id": "645c1d3f5eb3285181813278b7aed2f0",
+    "title": "Microwave photonics combines two worlds",
+    "author": "José Capmany, Dalma Novak",
+    "year": "2007",
+    "file_name": "Microwave_photonics_combines_two_worlds.pdf",
+    "upload_time": "2026-04-03T15:35:54.930062",
+    "source_type": "user",
+    "user_id": "default",
+    "status": "indexed",
+    "page_count": 12,
+    "chunk_count": 273
   }
 }

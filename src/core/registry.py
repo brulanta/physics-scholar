@@ -121,11 +121,10 @@ def smart_match(keyword, sentence):
         return bool(re.search(pattern, sentence))
 
 
-def search_by_keyword(query_segments: list[str], user_id: str = "") -> list[dict]:
-    """
-    输入: query_segments一组关键词或短语。短语优于单个单词。
-    Prompt 策略： 让 LLM 提取用户话语中最像论文标题的片段。输入长标题，要切分成短语再调用函数。输入错拼，LLM可自行理解后修正。
-    """
+def search_by_keyword(
+    query_segments: list[str], user_id: str = "", top_k=3
+) -> list[dict]:
+
     # 永远加载种子库
     seed_registry = load_registry("seed")
     all_papers = list(seed_registry.values())
@@ -156,5 +155,5 @@ def search_by_keyword(query_segments: list[str], user_id: str = "") -> list[dict
                 }
             )
     # 返回结构
-    return sorted(hit_result, key=lambda x: x["score"], reverse=True)
+    return sorted(hit_result, key=lambda x: x["score"], reverse=True)[:top_k]
     # 按score降序排列，score=0的不返回
