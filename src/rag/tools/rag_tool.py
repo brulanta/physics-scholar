@@ -46,11 +46,15 @@ def build_filter(section: str, doc_id: str | None):
 @tool
 def rag_tool(request: RagToolRequest) -> str:
     """
-    向量检索本地知识库，返回语义最相关的文段。
-    知识库包含微波光子学领域的学术论文和教材，可用于回答该领域的
-    学科概念、技术原理、研究进展、历史脉络等各类问题。
-    当问题需要事实依据时优先调用此工具。
-    若用户明确指定某篇论文，可先调用search_paper_tool获取doc_id后传入以精确召回。
+    从本地向量知识库中检索与问题语义相关的文段，作为回答依据。
+
+    适用于以下情况：
+    - 需要引用论文或教材内容支撑回答
+    - 用户询问具体研究工作、方法或结论
+    - 用户希望讨论某一篇论文（可配合 search_paper_tool 使用 doc_id）
+
+    注意：
+    - 返回内容为检索到的相关文段，应基于其进行回答，而非凭空补充未提及的信息
     """
 
     restriever = vs.as_retriever(
@@ -60,4 +64,5 @@ def rag_tool(request: RagToolRequest) -> str:
         }
     )
     docs = restriever.invoke(request.query)
+    print(f"检索了RAG库，关键词为{request.query},限定id为{request.doc_id}")
     return format_context(docs)

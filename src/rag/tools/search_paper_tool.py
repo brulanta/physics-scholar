@@ -7,7 +7,7 @@ from src.core.registry import search_by_keyword
 class SearchPaperRequest(BaseModel):
     keywords: list[str] = Field(
         ...,
-        description="关键词列表，提取自用户提到的论文名称、作者、年份。短语优于单词，如['reservoir computing', 'optical amplifier']",
+        description="用于匹配论文的关键词或短语列表，应尽量来自论文标题、作者或年份等可检索字段。避免使用宽泛主题词，应选择更具体、可能出现在标题中的片段。",
     )
 
 
@@ -15,15 +15,17 @@ def make_search_tool(user_id: str):
     @tool
     def search_paper_tool(keywords: list[str]) -> list[dict]:
         """
-        在本地论文注册表中检索论文，返回匹配的标题和doc_id。
-        根据用户描述或你自己的知识推断可能的论文标题、作者、年份，
-        提取成关键词列表传入。
-        短语优于单词，例如：['Jianping Yao', 'microwave photonics']
-        如果用户描述模糊（如"开山论文"、"最经典的那篇"），
-        可以结合你的学科知识推断可能的作者或标题关键词进行尝试。
-        返回结果按匹配度排序，score越高越相关。
+        在本地论文注册表中按关键词检索论文，返回匹配的标题和 doc_id。
+
+        当用户提及或隐含指向某篇具体论文时调用（包括不完整、模糊或有误的描述）。
+
+        输入应为推断出的、可能出现在论文标题、作者或年份中的关键词或短语，
+        而不是宽泛主题词。
+
+        返回结果按匹配度排序。
         """
         results = search_by_keyword(keywords, user_id)
+        print(f"查询了论文id，输入参数为{keywords}")
         if not results:
             return [{"message": "未找到匹配论文，请尝试其他关键词"}]
         return results
