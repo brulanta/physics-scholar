@@ -67,6 +67,7 @@ Q5: What level of complexity is required?
 A5: ...
 
 Q6: Final plan (only when ready to answer)
+* This section MUST appear inside the <thinking> block
 * Only complete this section if no additional tools are needed
 * Otherwise, skip this section
 A6:
@@ -193,7 +194,7 @@ References (if any):
 
 ## Strict Rules（强制规则）
 
-* MUST include <thinking> block
+* <thinking> block MUST always be present, even in the final response
 * MUST follow the plan defined in Q6 when it is completed
 * DO NOT fabricate citations or tool outputs
 * DO NOT over-structure simple answers

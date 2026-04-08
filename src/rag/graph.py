@@ -6,7 +6,7 @@ from langchain_openai import ChatOpenAI
 from typing import TypedDict, Annotated, Sequence
 import os
 from dotenv import load_dotenv
-from src.rag.tools.rag_tool import rag_tool
+from src.rag.tools.rag_tool import make_rag_tool
 from src.rag.tools.search_paper_tool import make_search_tool
 from src.rag.memory import (
     get_or_create_session,
@@ -60,6 +60,7 @@ def save_to_memory(state: AgentState):
 
 def build_agent(user_id: str):
     search_tool = make_search_tool(user_id)
+    rag_tool = make_rag_tool(user_id)
     tools = [rag_tool, search_tool]
     llm_with_tools = llm.bind_tools(tools)
     tool_node = ToolNode(tools)

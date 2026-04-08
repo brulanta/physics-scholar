@@ -12,7 +12,7 @@ class SearchPaperRequest(BaseModel):
 
 
 def make_search_tool(user_id: str):
-    @tool
+    @tool(args_schema=SearchPaperRequest)
     def search_paper_tool(keywords: list[str]) -> list[dict]:
         """
         在本地论文注册表中按关键词检索论文，返回匹配的标题和 doc_id。

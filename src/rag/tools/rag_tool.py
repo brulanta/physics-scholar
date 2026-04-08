@@ -34,35 +34,59 @@ def format_context(docs) -> str:
     return "\n\n---\n\n".join(chunks)
 
 
-def build_filter(section: str, doc_id: str | None):
-    filters = [{"section": section}]  # 用传入的section
+def build_filter(user_id: str, section: str, doc_id: str = ""):
+    """
+    构造向量数据库的过滤条件。
+    保证所有的查询都必须锁定在当前 user_id 下。
+    """
+    # 基础过滤：必须是当前用户的，且匹配对应的正文/参考文献区域
+    filters = [{"user_id": user_id}, {"section": section}]
+
+    # 增强过滤：如果有特定的 doc_id，则加入
     if doc_id:
         filters.append({"doc_id": doc_id})
+
+    # 如果只有一个条件（虽然这里至少有两个），直接返回字典；否则返回 $and 组合
     if len(filters) == 1:
         return filters[0]
     return {"$and": filters}
 
 
-@tool
-def rag_tool(request: RagToolRequest) -> str:
+def make_rag_tool(user_id: str):
     """
-    从本地向量知识库中检索与问题语义相关的文段，作为回答依据。
-
-    适用于以下情况：
-    - 需要引用论文或教材内容支撑回答
-    - 用户询问具体研究工作、方法或结论
-    - 用户希望讨论某一篇论文（可配合 search_paper_tool 使用 doc_id）
-
-    注意：
-    - 返回内容为检索到的相关文段，应基于其进行回答，而非凭空补充未提及的信息
+    闭包工厂：为特定用户生成具有数据隔离能力的 RAG 工具。
     """
 
-    restriever = vs.as_retriever(
-        search_kwargs={
-            "k": request.k,
-            "filter": build_filter(request.section, request.doc_id),
-        }
-    )
-    docs = restriever.invoke(request.query)
-    print(f"检索了RAG库，关键词为{request.query},限定id为{request.doc_id}")
-    return format_context(docs)
+    @tool(args_schema=RagToolRequest)
+    def rag_tool(
+        query: str,
+        k: int = 5,
+        section: Literal["body", "reference"] = "body",
+        doc_id: str = "",
+    ) -> str:
+        """
+        从本地向量知识库中检索与问题语义相关的文段，作为回答依据。
+
+        适用于以下情况：
+        - 需要引用论文或教材内容支撑回答
+        - 用户询问具体研究工作、方法或结论
+        - 用户希望讨论某一篇论文（可配合 search_paper_tool 使用 doc_id）
+
+        注意：
+        - 返回内容为检索到的相关文段，应基于其进行回答，而非凭空补充未提及的信息
+        """
+
+        # 1. 调用外部的 build_filter，逻辑清晰且可复用
+        search_filter = build_filter(user_id=user_id, section=section, doc_id=doc_id)
+        # 2. 配置检索器
+        retriever = vs.as_retriever(
+            search_kwargs={
+                "k": k,
+                "filter": search_filter,
+            }
+        )
+        docs = retriever.invoke(query)
+        print(f"[RAG] User: {user_id} | Query: {query} | Doc_ID: {doc_id or 'All'}")
+        return format_context(docs)
+
+    return rag_tool
