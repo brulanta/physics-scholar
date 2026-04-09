@@ -2,6 +2,7 @@
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 from src.core.registry import search_by_keyword
+import json
 
 
 class SearchPaperRequest(BaseModel):
@@ -13,7 +14,7 @@ class SearchPaperRequest(BaseModel):
 
 def make_search_tool(user_id: str):
     @tool(args_schema=SearchPaperRequest)
-    def search_paper_tool(keywords: list[str]) -> list[dict]:
+    def search_paper_tool(keywords: list[str]) -> str:
         """
         在本地论文注册表中按关键词检索论文，返回匹配的标题和 doc_id。
 
@@ -27,7 +28,7 @@ def make_search_tool(user_id: str):
         results = search_by_keyword(keywords, user_id)
         print(f"查询了论文id，输入参数为{keywords}")
         if not results:
-            return [{"message": "未找到匹配论文，请尝试其他关键词"}]
-        return results
+            results = [{"message": "未找到匹配论文，请尝试其他关键词"}]
+        return json.dumps(results, ensure_ascii=False, indent=2)
 
     return search_paper_tool

@@ -10,6 +10,5 @@ if __name__ == "__main__":
 
     if isinstance(result, list):
         for p in result:
-            print(p["title"])
-            print(p["published"])
+            print(p)
             print("-" * 50)

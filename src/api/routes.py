@@ -8,6 +8,7 @@ from src.config import PDF_DIR
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index
 from src.rag.chain import ask
+import requests
 
 router = APIRouter()
 
@@ -93,6 +94,19 @@ def list_papers(user_id: str = "default"):
             for v in reg.values()
         ],
     }
+
+
+@router.post("/ingest_from_arxiv")
+async def ingest_from_arxiv(arxiv_ids: list[str], user_id: str = "default"):
+    results = []
+    for arxiv_id in arxiv_ids:
+        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+        response = requests.get(pdf_url)
+        file_bytes = response.content
+        file_name = f"{arxiv_id}.pdf"
+        result = ingest_pdf(file_bytes, file_name, source_type="user", user_id=user_id)
+        results.append({"arxiv_id": arxiv_id, **result})
+    return results
 
 
 # ── 问答 ─────────────────────────────────────────────────

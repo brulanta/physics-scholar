@@ -4,6 +4,7 @@ import requests
 from datetime import datetime, timedelta, timezone
 import time
 from langchain.tools import tool
+import json
 
 
 class ArxivRequest(BaseModel):
@@ -110,7 +111,7 @@ def arxiv_tool(
     category: str = "",
     recent_days: int = 0,
     max_results: int = 5,
-) -> dict | list[dict]:
+) -> str:
     """
     在 arXiv 上检索学术论文。
 
@@ -128,6 +129,7 @@ def arxiv_tool(
     - 若检索失败，将返回 {"success": False, "error": "...", "papers": []}
     """
     params = build_arxiv_params(keywords, author, category, recent_days, max_results)
+    print(params)
     url = "http://export.arxiv.org/api/query"
 
     for _ in range(2):
@@ -138,7 +140,10 @@ def arxiv_tool(
         except requests.RequestException:
             time.sleep(1)
     else:
-        return {"success": False, "error": "request failed", "papers": []}
+        return json.dumps(
+            {"success": False, "error": "request failed", "papers": []},
+            ensure_ascii=False,
+        )
 
     feed = feedparser.parse(response.text)
     papers = []
@@ -166,4 +171,5 @@ def arxiv_tool(
             }
         )
     filtered = filter_by_recent_days(papers, recent_days)
-    return filtered[:max_results]
+    result = filtered[:max_results]
+    return json.dumps(result, ensure_ascii=False, indent=2)
