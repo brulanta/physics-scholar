@@ -3,12 +3,13 @@ import uuid
 import shutil
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from src.config import PDF_DIR
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index
 from src.rag.chain import ask
 import requests
+from typing import Literal
 
 router = APIRouter()
 
@@ -117,6 +118,7 @@ class AskRequest(BaseModel):
     conv_id: str
     user_id: str = "default"
     translation: bool = False
+    mode: Literal["normal", "discuss"] = "normal"
 
 
 @router.post("/ask")
@@ -126,6 +128,7 @@ def ask_question(req: AskRequest):
         conv_id=req.conv_id,
         user_id=req.user_id,
         translation=req.translation,
+        mode=req.mode,
     )
     return {
         "answer": result["answer"],

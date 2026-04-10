@@ -15,7 +15,12 @@ from src.rag.memory import (
     strip_thinking,
     WARN_THRESHOLD,
 )
-from src.rag.prompt import SYSTEM_PROMPT, CITATION_DEFAULT, CITATION_TRANSLATION
+from src.rag.prompt import (
+    SYSTEM_PROMPT_NORMAL,
+    CITATION_DEFAULT,
+    CITATION_TRANSLATION,
+    SYSTEM_PROMPT_DISCUSS,
+)
 
 load_dotenv()
 
@@ -88,7 +93,11 @@ def build_agent(user_id: str):
 
 
 def chat(
-    user_message: str, conv_id: str, user_id: str = "default", translation: bool = False
+    user_message: str,
+    conv_id: str,
+    user_id: str = "default",
+    translation: bool = False,
+    mode: str = "normal",
 ) -> dict:
     # 在invoke之前先构建SystemMessage，这时候有所有需要的参数
     conversation_id = f"{user_id}_{conv_id}"
@@ -96,9 +105,18 @@ def chat(
     history = format_history(memory.get())
     citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
 
-    system_msg = SystemMessage(
-        content=SYSTEM_PROMPT.format(history=history, citation_plugin=citation_plugin)
-    )
+    if mode == "discuss":
+        system_msg = SystemMessage(
+            content=SYSTEM_PROMPT_DISCUSS.format(
+                history=history, citation_plugin=citation_plugin
+            )
+        )
+    else:
+        system_msg = SystemMessage(
+            content=SYSTEM_PROMPT_NORMAL.format(
+                history=history, citation_plugin=citation_plugin
+            )
+        )
 
     agent = build_agent(user_id)
 

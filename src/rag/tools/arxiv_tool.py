@@ -50,7 +50,7 @@ class ArxivRequest(BaseModel):
         ),
     )
     max_results: int = Field(
-        default=5, description="返回论文数量，默认5，最多50", le=50
+        default=5, description="返回论文数量，默认5，最多20", le=20
     )
 
 
