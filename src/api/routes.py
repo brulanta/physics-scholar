@@ -26,13 +26,16 @@ def new_conversation():
 
 
 @router.post("/upload")
-async def upload_paper(file: UploadFile = File(...), user_id: str = "default"):
+async def upload_paper(
+    file: UploadFile = File(...), user_id: str = "default", strict: bool = False
+):
     file_bytes = await file.read()
     result = ingest_pdf(
         file_bytes=file_bytes,
         file_name=file.filename,
         source_type="user",
         user_id=user_id,
+        strict=strict,
     )
     if not result["success"]:
         raise HTTPException(status_code=409, detail=result["detail"])
