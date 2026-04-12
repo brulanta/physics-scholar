@@ -1,0 +1,639 @@
+<template>
+  <div class="drawer-inner">
+    <div class="drawer-header">
+      <span class="drawer-title">设置 &amp; 论文库</span>
+      <button class="icon-btn" @click="$emit('close')">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+        </svg>
+      </button>
+    </div>
+
+    <section class="section">
+      <div class="section-title">外观</div>
+      <div class="setting-row">
+        <span class="setting-label">主题</span>
+        <div class="btn-group">
+          <button v-for="t in themes" :key="t.value" class="seg-btn" :class="{ active: settings.theme === t.value }"
+            @click="setTheme(t.value)">{{ t.label }}</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <span class="setting-label">字体</span>
+        <div class="btn-group">
+          <button v-for="(f, key) in FONTS" :key="key" class="seg-btn" :class="{ active: settings.fontFamily === key }"
+            @click="setFont(key)">{{ f.label }}</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-title">功能</div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">严格模式</div>
+          <div class="setting-desc">上传时提取 title / author / year 后才返回</div>
+        </div>
+        <!-- 严格模式切换时立即触发刷新 -->
+        <Toggle :model-value="settings.strict" @update:model-value="onStrictChange" />
+      </div>
+      <div class="setting-row">
+        <div>
+          <div class="setting-label">双语对照</div>
+          <div class="setting-desc">回答时翻译英文参考文献</div>
+        </div>
+        <Toggle v-model="settings.translation" />
+      </div>
+    </section>
+
+    <section class="section paper-section">
+      <div class="section-title">论文库</div>
+
+      <!-- UploadPanel直接用settings.strict，每次上传时读当前值 -->
+      <!-- 把 UploadPanel 换成 MultiUploadPanel -->
+      <MultiUploadPanel :strict="settings.strict" @paper-added="onPaperAdded" @paper-cancelled="fetchPapers" />
+
+      <div class="list-toolbar">
+        <input v-model="search" class="search-input" placeholder="搜索论文…" />
+        <select v-model="sortBy" class="sort-select">
+          <option value="default">默认顺序</option>
+          <option value="az">标题 A→Z</option>
+          <option value="za">标题 Z→A</option>
+          <option value="year-asc">年份从早</option>
+          <option value="year-desc">年份从晚</option>
+        </select>
+      </div>
+
+      <!-- papers数据在这里管理，不依赖子组件的mount -->
+      <div class="paper-list">
+        <div v-if="papersLoading" class="hint">加载中…</div>
+        <div v-else-if="filteredPapers.length === 0" class="hint">{{ search ? '无匹配结果' : '暂无论文' }}</div>
+        <div v-else v-for="p in filteredPapers" :key="p.doc_id" class="paper-item">
+          <div class="paper-main">
+            <div class="paper-title" :title="p.title">{{ p.title || '(未命名)' }}</div>
+            <div class="paper-meta">
+              <span v-if="p.author" class="meta-text">{{ truncate(p.author, 20) }}</span>
+              <span v-if="p.year" class="meta-text">{{ p.year }}</span>
+              <span class="status-badge" :class="p.status">{{ statusLabel(p.status) }}</span>
+            </div>
+          </div>
+          <div class="paper-actions">
+            <button v-if="p.status === 'pending'" class="resume-btn" @click="startResume(p)">入库</button>
+            <!-- 悬浮删除按钮，hover paper-item时出现 -->
+            <button class="delete-btn" @click="toastDelete" title="删除">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M2 3h8M4.5 3V2h3v1M5 5v3M7 5v3M2.5 3l.5 7h6l.5-7" stroke="currentColor" stroke-width="1.1"
+                  stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 继续入库弹窗 -->
+    <Teleport to="body">
+      <div v-if="resumePaper" class="confirm-overlay">
+        <div class="confirm-modal">
+          <div class="confirm-header">
+            <span class="confirm-title">完成入库</span>
+            <button class="close-btn" @click="resumePaper = null">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+          <div class="confirm-fields">
+            <div class="field-group">
+              <label>标题 *</label>
+              <input v-model="resumeForm.title" class="field-input" placeholder="论文标题" />
+            </div>
+            <!-- 根据当前strict实时读取，不是入库时的strict -->
+            <template v-if="settings.strict">
+              <div class="field-group">
+                <label>作者</label>
+                <input v-model="resumeForm.author" class="field-input" placeholder="作者" />
+              </div>
+              <div class="field-group">
+                <label>年份</label>
+                <input v-model="resumeForm.year" class="field-input" placeholder="如 2024" style="width:120px" />
+              </div>
+            </template>
+          </div>
+          <div class="confirm-actions">
+            <button class="btn-cancel" :disabled="resuming" @click="resumePaper = null">取消</button>
+            <button class="btn-confirm" :disabled="resuming || !resumeForm.title.trim()" @click="doResume">
+              {{ resuming ? '入库中…' : '确认入库' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, reactive, onMounted, inject } from 'vue'
+import { settings, applyTheme, applyFont, FONTS } from '../../store/app.js'
+import { listPapers, confirmPaper } from '../../api/paper.js'
+import MultiUploadPanel from '../Paper/MultiUploadPanel.vue'
+import Toggle from './Toggle.vue'
+
+defineEmits(['close'])
+
+const themes = [{ value: 'dark', label: '深色' }, { value: 'light', label: '浅色' }]
+const search = ref('')
+const sortBy = ref('default')
+
+// papers状态提升到这里，不依赖PaperList的mount
+const papers = ref([])
+const papersLoading = ref(false)
+const resumePaper = ref(null)
+const resumeForm = reactive({ title: '', author: '', year: '' })
+const resuming = ref(false)
+
+const filteredPapers = computed(() => {
+  let list = [...papers.value]
+  if (search.value.trim()) {
+    const q = search.value.toLowerCase()
+    list = list.filter(p =>
+      (p.title || '').toLowerCase().includes(q) ||
+      (p.author || '').toLowerCase().includes(q)
+    )
+  }
+  switch (sortBy.value) {
+    case 'az': list.sort((a, b) => (a.title || '').localeCompare(b.title || '')); break
+    case 'za': list.sort((a, b) => (b.title || '').localeCompare(a.title || '')); break
+    case 'year-asc': list.sort((a, b) => (a.year || 9999) - (b.year || 9999)); break
+    case 'year-desc': list.sort((a, b) => (b.year || 0) - (a.year || 0)); break
+  }
+  return list
+})
+
+async function fetchPapers() {
+  papersLoading.value = true
+  try {
+    const res = await listPapers()
+    papers.value = res.data.papers || []
+  } catch (e) {
+    console.error(e)
+  } finally {
+    papersLoading.value = false
+  }
+}
+
+onMounted(fetchPapers)
+
+// 严格模式切换时立即更新settings，不需要刷新列表
+function onStrictChange(val) {
+  settings.strict = val
+}
+
+function setTheme(t) { settings.theme = t; applyTheme(t) }
+function setFont(f) { settings.fontFamily = f; applyFont(f) }
+
+// 上传成功后立即刷新
+function onPaperAdded() {
+  fetchPapers()
+}
+
+function startResume(p) {
+  resumePaper.value = p
+  resumeForm.title = p.title || ''
+  resumeForm.author = p.author || ''
+  resumeForm.year = p.year ? String(p.year) : ''
+}
+
+async function doResume() {
+  if (!resumeForm.title.trim() || resuming.value) return
+  resuming.value = true
+  try {
+    await confirmPaper(resumePaper.value.doc_id, resumeForm.title.trim())
+    resumePaper.value = null
+    await fetchPapers()
+  } catch (e) {
+    console.error(e)
+  } finally {
+    resuming.value = false
+  }
+}
+function cancelConfirm() {
+  // upload完成但用户取消confirm，paper已经在注册表里了，刷新列表
+  if (pendingPaper.value) {
+    fetchPapers()
+  }
+  pendingPaper.value = null  // 这里是UploadPanel的pendingPaper，实际是emit过来的
+}
+
+const showToast = inject('showToast', null)
+function toastDelete() {
+  showToast?.('删除功能暂未实装')
+}
+
+function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : s }
+function statusLabel(s) { return { indexed: '已入库', pending: '待确认', error: '失败' }[s] || s }
+</script>
+
+<style scoped>
+.drawer-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.drawer-title {
+  font-weight: 600;
+  font-size: 1em;
+}
+
+.icon-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.section {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.paper-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+
+.section-title {
+  font-size: 0.72em;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin-bottom: 14px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.setting-label {
+  font-size: 0.9em;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.setting-desc {
+  font-size: 0.78em;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.btn-group {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.seg-btn {
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.8em;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.seg-btn.active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.list-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-shrink: 0;
+}
+
+.search-input {
+  flex: 1;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.83em;
+  padding: 6px 10px;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+.search-input::placeholder {
+  color: var(--text-3);
+}
+
+.sort-select {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.8em;
+  padding: 6px 8px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* 论文列表可滚动 */
+.paper-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 16px;
+}
+
+.hint {
+  font-size: 0.8em;
+  color: var(--text-3);
+  text-align: center;
+  padding: 20px 0;
+}
+
+.paper-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 2px;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.12s;
+}
+
+.paper-item:last-child {
+  border-bottom: none;
+}
+
+.paper-item:hover {
+  background: var(--bg-hover);
+}
+
+.paper-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.paper-title {
+  font-size: 0.85em;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.paper-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+
+.meta-text {
+  font-size: 0.75em;
+  color: var(--text-3);
+}
+
+.status-badge {
+  font-size: 0.7em;
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+.status-badge.indexed {
+  background: rgba(74, 222, 128, 0.12);
+  color: var(--green);
+}
+
+.status-badge.pending {
+  background: rgba(251, 191, 36, 0.12);
+  color: var(--yellow);
+}
+
+.status-badge.error {
+  background: rgba(248, 113, 113, 0.12);
+  color: var(--red);
+}
+
+.resume-btn {
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 0.75em;
+  font-weight: 500;
+  background: var(--accent-glow);
+  border: 1px solid var(--accent-dim);
+  color: var(--accent);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.resume-btn:hover {
+  background: rgba(108, 140, 255, 0.25);
+}
+
+/* 弹窗 */
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 600;
+  backdrop-filter: blur(3px);
+}
+
+.confirm-modal {
+  background: var(--bg-2);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  width: 420px;
+  max-width: 92vw;
+  box-shadow: var(--shadow);
+}
+
+.confirm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.confirm-title {
+  font-weight: 600;
+  font-size: 0.95em;
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 0.15s;
+}
+
+.close-btn:hover {
+  color: var(--text);
+}
+
+.confirm-fields {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field-group label {
+  font-size: 0.75em;
+  font-weight: 600;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.field-input {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 0.9em;
+  padding: 8px 12px;
+  font-family: inherit;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+
+.field-input:focus {
+  outline: none;
+  border-color: var(--accent-dim);
+}
+
+.confirm-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding: 14px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.btn-cancel,
+.btn-confirm {
+  padding: 7px 18px;
+  border-radius: var(--radius-sm);
+  font-size: 0.88em;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid transparent;
+}
+
+.btn-cancel {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--text-2);
+}
+
+.btn-cancel:hover {
+  border-color: var(--border-light);
+  color: var(--text);
+}
+
+.btn-confirm {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-confirm:hover:not(:disabled) {
+  background: #5a7fff;
+}
+
+.btn-confirm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.paper-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.delete-btn {
+  opacity: 0;
+  padding: 4px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.paper-item:hover .delete-btn {
+  opacity: 1;
+}
+
+.delete-btn:hover {
+  color: var(--red);
+}
+</style>
