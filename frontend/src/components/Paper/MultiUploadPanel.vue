@@ -159,10 +159,14 @@ async function confirmAll() {
 }
 
 function closePanel() {
-  // 有未完成的paper，触发cancelled让父组件刷新列表
-  const hasPending = files.value.some(f => f.phase === 'ready' || f.phase === 'error')
+  const hasPending = files.value.some(f =>
+    f.phase === 'ready' || f.phase === 'error'
+    // confirming状态不算，让它跑完
+  )
   if (hasPending) emit('paper-cancelled')
-  files.value = []
+  // 只移除已完成和失败的，confirming的等它跑完
+  files.value = files.value.filter(f => f.phase === 'confirming')
+  if (files.value.length === 0) files.value = []
 }
 </script>
 

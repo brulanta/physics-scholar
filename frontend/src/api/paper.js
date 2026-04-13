@@ -6,7 +6,7 @@ export function uploadPaper(file, userId = 'default', strict = false) {
   const form = new FormData()
   form.append('file', file)
   form.append('user_id', userId)
-  form.append('strict', strict)
+  form.append('strict', strict ? 'true' : 'false')  // 显式字符串
   return axios.post(`${BASE}/upload`, form, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })

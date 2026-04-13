@@ -2,7 +2,7 @@
 import uuid
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from pydantic import BaseModel, Field
 from src.config import PDF_DIR
 from src.core import registry
@@ -10,6 +10,7 @@ from src.core.ingestor import ingest_pdf, confirm_and_index
 from src.rag.chain import ask
 import requests
 from typing import Literal
+import re
 
 router = APIRouter()
 
@@ -27,16 +28,20 @@ def new_conversation():
 
 @router.post("/upload")
 async def upload_paper(
-    file: UploadFile = File(...), user_id: str = "default", strict: bool = False
+    file: UploadFile = File(...),
+    user_id: str = Form("default"),
+    strict: str = Form("false"),  # 改成str接收
 ):
+    strict_bool = strict.lower() == "true"
     file_bytes = await file.read()
     result = ingest_pdf(
         file_bytes=file_bytes,
         file_name=file.filename,
         source_type="user",
         user_id=user_id,
-        strict=strict,
+        strict=strict_bool,
     )
+    print(f"DEBUG strict={strict!r} -> {strict_bool!r}")
     if not result["success"]:
         raise HTTPException(status_code=409, detail=result["detail"])
 
@@ -124,8 +129,29 @@ class AskRequest(BaseModel):
     mode: Literal["normal", "discuss"] = "normal"
 
 
+def extract_thinking(text: str) -> str:
+    """提取</thinking>及其之前的所有内容用于log"""
+    match = re.search(r"^[\s\S]*?</thinking>", text)
+    if match:
+        return match.group(0).strip()
+    # 没有</thinking>，说明被截断了，返回全部
+    return text.strip() + "  [no closing tag]"
+
+
+def strip_thinking(text: str) -> str:
+    """以</thinking>为准，去除它及之前的所有内容"""
+    match = re.search(r"</thinking>", text)
+    if match:
+        return text[match.end() :].strip()
+    # 没有</thinking>，说明thinking未结束，全部去掉（异常情况）
+    if "<thinking>" in text:
+        return ""
+    return text.strip()
+
+
 @router.post("/ask")
 def ask_question(req: AskRequest):
+    print(f"DEBUG translation={req.translation!r} mode={req.mode!r}")
     result = ask(
         question=req.question,
         conv_id=req.conv_id,
@@ -133,7 +159,11 @@ def ask_question(req: AskRequest):
         translation=req.translation,
         mode=req.mode,
     )
+    thinking = extract_thinking(result.get("answer", ""))
+    if thinking:
+        print(thinking)
+
     return {
-        "answer": result["answer"],
+        "answer": strip_thinking(result["answer"]),
         "warning": result.get("warning"),
     }

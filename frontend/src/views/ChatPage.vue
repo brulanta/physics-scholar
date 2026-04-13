@@ -12,7 +12,8 @@
       </div>
 
       <div class="session-list">
-        <div class="session-item new-item" :class="{ active: sessions.currentId === '' }" @click="goWelcome" title="新对话">
+        <div class="session-item new-item" :class="{ active: sessions.currentId === '' }" @click="goWelcome"
+          title="新对话">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="flex-shrink:0">
             <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
           </svg>
@@ -98,10 +99,21 @@ function toggleMode() {
 }
 
 
-// currentMessages不再slice，streaming消息单独追加渲染
-// 只有当前session且正在streaming时，才在末尾追加streamingMsg
 const currentMessages = computed(() => {
-  return getSession(sessions.currentId)?.messages ?? []
+  const session = getSession(sessions.currentId)
+  if (!session) return []
+  const msgs = session.messages
+  // streaming时，最后一条是空的assistant占位，不渲染它
+  // 让ChatWindow里的streaming MessageItem接管显示
+  if (
+    streamingSessionId.value === sessions.currentId &&
+    msgs.length > 0 &&
+    msgs[msgs.length - 1].role === 'assistant' &&
+    msgs[msgs.length - 1].content === ''
+  ) {
+    return msgs.slice(0, -1)
+  }
+  return msgs
 })
 
 // 切换session时滚到底
@@ -129,8 +141,12 @@ function switchSession(id) {
   sessions.currentId = id
 }
 
+const welcomeSending = ref(false)  // 防重入
+
 async function handleWelcomeSend({ text, discuss }) {
-  if (!text.trim()) return
+  if (!text.trim() || welcomeSending.value) return
+  welcomeSending.value = true  // 立即锁住，后续重复调用直接return
+
   let convId
   try {
     const res = await axios.post(`${BASE}/conv_id/new`)
@@ -138,12 +154,18 @@ async function handleWelcomeSend({ text, discuss }) {
   } catch {
     convId = 'local-' + Date.now()
   }
+
   const session = createSession(convId, text)
   if (discuss) sessionModes.value[convId] = 'discuss'
-  // 等两帧，让ChatPage完成从欢迎页→对话页的DOM切换
+
   await nextTick()
   await nextTick()
-  await _doSend(session, text)
+
+  try {
+    await _doSend(session, text)
+  } finally {
+    welcomeSending.value = false  // 确保无论如何都解锁
+  }
 }
 
 async function sendMessage(text) {
@@ -186,6 +208,8 @@ async function _doSend(session, text) {
       assistantMsg.content = fullText
       streamingSessionId.value = null
       streamingContent.value = ''
+      // 手动强制保存，确保最新消息持久化
+      localStorage.setItem('ps-sessions', JSON.stringify(sessions.list))
     }
   } catch {
     assistantMsg.content = '❌ 请求失败，请检查后端是否运行。'
@@ -195,6 +219,18 @@ async function _doSend(session, text) {
     loading.value = false
   }
 }
+
+// 监听当前session变化，更新浏览器标题
+watch(() => sessions.currentId, (id) => {
+  if (!id) {
+    document.title = 'PhysicsScholar'
+    return
+  }
+  const session = getSession(id)
+  document.title = session?.title
+    ? `${session.title} · PhysicsScholar`
+    : 'PhysicsScholar'
+}, { immediate: true })
 </script>
 
 <style scoped>
@@ -405,7 +441,7 @@ async function _doSend(session, text) {
 }
 
 .drawer {
-  width: 480px;
+  width: 600px;
   max-width: 92vw;
   height: 100%;
   background: var(--bg-2);

@@ -196,7 +196,7 @@ or
 
 ---
 
-## Output Constraints
+## Tool Output Constraints
 
 <!-- 若某些工具需要特殊输出格式，在此补充 -->
 
