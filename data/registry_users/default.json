@@ -167,5 +167,57 @@
     "status": "indexed",
     "page_count": 10,
     "chunk_count": 125
+  },
+  "57990d21e5f49e15ace2143e4a478a99": {
+    "doc_id": "57990d21e5f49e15ace2143e4a478a99",
+    "title": "Kerr-enhanced amplification of three-wave mixing and emergent masing regimes",
+    "author": "Ragheed Alhyder, Rishabh Sahu, Johannes M. Fink, Mikhail Lemeshko, Georgios M. Koutentakis",
+    "year": "2026",
+    "file_name": "2601.14726v1.pdf",
+    "upload_time": "2026-04-14T15:54:47.097897",
+    "source_type": "user",
+    "user_id": "default",
+    "status": "indexed",
+    "page_count": 15,
+    "chunk_count": 172
+  },
+  "b364ad6738201bbd078571ada4403e08": {
+    "doc_id": "b364ad6738201bbd078571ada4403e08",
+    "title": "Rapid high-temperature initialisation and readout of spins in silicon with 10 THz photons",
+    "author": "Aidan G. McConnell, Nils Dessmann, Wojciech Adamczyk, Benedict N. Murdin, Lorenzo Amato, Nikolay V. Abrosimov, Sergey G. Pavlov, Gabriel Aeppli, Guy Matmon",
+    "year": "2026",
+    "file_name": "2601.21880v1.pdf",
+    "upload_time": "2026-04-14T16:01:53.718573",
+    "source_type": "user",
+    "user_id": "default",
+    "status": "indexed",
+    "page_count": 46,
+    "chunk_count": 285
+  },
+  "1992ed8b3a19240766532aa388757537": {
+    "doc_id": "1992ed8b3a19240766532aa388757537",
+    "title": "Thermoelastic surface acoustic waves in low-loss silicon nitride integrated circuits",
+    "author": "Zheng Zheng, Ahmet Tarık I¸sık, Akshay Keloth, Kaixuan Ye, Peter van der Slot, David Marpaung",
+    "year": "2026",
+    "file_name": "2602.06732v1.pdf",
+    "upload_time": "2026-04-14T16:23:54.826421",
+    "source_type": "user",
+    "user_id": "default",
+    "status": "indexed",
+    "page_count": 5,
+    "chunk_count": 81
+  },
+  "d6fca26bd343459723766e3052d30e10": {
+    "doc_id": "d6fca26bd343459723766e3052d30e10",
+    "title": "Optically locked low-noise photonic microwave oscillator",
+    "author": "Zexing Zhao, Bin Li, Kunpeng Jia, Chenye Qin, Xiaofan Zhang, Jingru Ji, Hua-Ying Liu, Xiao-Hui Tian, Zhong Yan, Xiaoshun Jiang, Xinlun Cai, Biaobing Jin, Zhenlin Wang, Wei Liang, Shi-ning Zhu, Zhenda Xie",
+    "year": "",
+    "file_name": "2602.09408v1.pdf",
+    "upload_time": "2026-04-14T16:42:26.125988",
+    "source_type": "user",
+    "user_id": "default",
+    "status": "indexed",
+    "page_count": 20,
+    "chunk_count": 135
   }
 }

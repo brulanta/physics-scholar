@@ -26,6 +26,7 @@ export function listPapers(userId = 'default') {
 
 export function ingestFromArxiv(arxivIds, userId = 'default') {
   return axios.post(`${BASE}/ingest_from_arxiv`, arxivIds, {
-    params: { user_id: userId }
+    params: { user_id: userId },
+    headers: { 'Content-Type': 'application/json' }
   })
 }

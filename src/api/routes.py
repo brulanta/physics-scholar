@@ -99,22 +99,69 @@ def list_papers(user_id: str = "default"):
                 "year": v.get("year", ""),
                 "status": v["status"],
                 "chunk_count": v.get("chunk_count", -1),
+                "file_name": v.get("file_name", ""),
             }
             for v in reg.values()
         ],
     }
 
 
+# 只下载，不写注册表，不入库
+# 废弃
+# @router.post("/download_from_arxiv")
+# async def download_from_arxiv(arxiv_ids: list[str], user_id: str = "default"):
+#     results = []
+#     for arxiv_id in arxiv_ids:
+#         pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+#         response = requests.get(pdf_url)
+#         file_bytes = response.content
+#         file_name = f"{arxiv_id}.pdf"
+#         # 落盘但不写注册表
+#         pdf_path = PDF_DIR / file_name
+#         pdf_path.write_bytes(file_bytes)
+#         results.append({"arxiv_id": arxiv_id, "file_name": file_name, "success": True})
+#     return results
+
+
+# 入库：复用ingest_pdf（文件已在盘上）
 @router.post("/ingest_from_arxiv")
 async def ingest_from_arxiv(arxiv_ids: list[str], user_id: str = "default"):
     results = []
     for arxiv_id in arxiv_ids:
-        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
-        response = requests.get(pdf_url)
-        file_bytes = response.content
         file_name = f"{arxiv_id}.pdf"
-        result = ingest_pdf(file_bytes, file_name, source_type="user", user_id=user_id)
-        results.append({"arxiv_id": arxiv_id, **result})
+        pdf_path = PDF_DIR / file_name
+        if not pdf_path.exists():
+            # 还没下载过，先下载
+            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
+            response = requests.get(pdf_url)
+            pdf_path.write_bytes(response.content)
+
+        file_bytes = pdf_path.read_bytes()
+        # strict=True，arxiv论文元数据完整
+        result = ingest_pdf(
+            file_bytes, file_name, source_type="user", user_id=user_id, strict=True
+        )
+        if not result["success"]:
+            results.append(
+                {"arxiv_id": arxiv_id, "success": False, "detail": result["detail"]}
+            )
+            continue
+
+        # 自动confirm，arxiv标题可信
+        meta = result["paper_meta"]
+        confirm_result = confirm_and_index(
+            paper_meta=meta,
+            pdf_path=str(pdf_path),
+            confirmed_title=meta.title,
+            user_id=user_id,
+        )
+        results.append(
+            {
+                "arxiv_id": arxiv_id,
+                "success": confirm_result["success"],
+                "title": meta.title,
+            }
+        )
     return results
 
 

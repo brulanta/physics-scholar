@@ -9,12 +9,18 @@
     </div>
 
     <div class="bubble-wrap">
-      <div class="bubble">
+      <div class="bubble" @contextmenu="onContextMenu">
         <div v-if="!content" class="typing-indicator">
           <span /><span /><span />
         </div>
         <div v-else class="md-body" v-html="rendered" />
       </div>
+      <div v-if="content" class="action-bar" :class="[role, { visible: hovered }]">
+        <!-- ...原有内容不变... -->
+      </div>
+
+      <!-- arxiv右键菜单 -->
+      <ArxivContextMenu ref="ctxMenu" />
 
       <!-- ④ 操作栏：always in DOM，透明度控制显隐，不撑开布局 -->
       <div v-if="content" class="action-bar" :class="[role, { visible: hovered }]">
@@ -96,6 +102,16 @@ function copyContent() {
     copied.value = true
     setTimeout(() => { copied.value = false }, 1500)
   })
+}
+
+import ArxivContextMenu from './ArxivContextMenu.vue'
+
+const ctxMenu = ref(null)
+
+function onContextMenu(event) {
+  if (props.role !== 'assistant' || !props.content) return
+  event.preventDefault()
+  ctxMenu.value?.open(event, props.content)
 }
 </script>
 
