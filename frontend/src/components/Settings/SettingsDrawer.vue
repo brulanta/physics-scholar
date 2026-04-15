@@ -82,8 +82,10 @@
           </div>
           <div class="paper-actions">
             <button v-if="p.status === 'pending'" class="resume-btn" @click="startResume(p)">入库</button>
-            <button class="delete-btn" @click="toastDelete" title="删除">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <button class="delete-btn" :class="{ loading: deleting === p.doc_id }" :disabled="deleting === p.doc_id"
+              @click="doDelete(p)" title="删除">
+              <span v-if="deleting === p.doc_id" class="spin">⟳</span>
+              <svg v-else width="12" height="12" viewBox="0 0 12 12" fill="none">
                 <path d="M2 3h8M4.5 3V2h3v1M5 5v3M7 5v3M2.5 3l.5 7h6l.5-7" stroke="currentColor" stroke-width="1.1"
                   stroke-linecap="round" stroke-linejoin="round" />
               </svg>
@@ -137,7 +139,7 @@
 <script setup>
 import { ref, computed, reactive, onMounted, inject } from 'vue'
 import { settings, applyTheme, applyFont, FONTS } from '../../store/app.js'
-import { listPapers, confirmPaper } from '../../api/paper.js'
+import { listPapers, confirmPaper, deletePaper } from '../../api/paper.js'
 import MultiUploadPanel from '../Paper/MultiUploadPanel.vue'
 import Toggle from './Toggle.vue'
 
@@ -227,13 +229,25 @@ function cancelConfirm() {
   pendingPaper.value = null  // 这里是UploadPanel的pendingPaper，实际是emit过来的
 }
 
-const showToast = inject('showToast', null)
-function toastDelete() {
-  showToast?.('删除功能暂未实装')
-}
 
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : s }
 function statusLabel(s) { return { indexed: '已入库', pending: '待确认', error: '失败' }[s] || s }
+
+
+const deleting = ref(null)  // 正在删除的doc_id
+
+async function doDelete(p) {
+  if (deleting.value) return
+  deleting.value = p.doc_id
+  try {
+    await deletePaper(p.doc_id)
+    await fetchPapers()  // 删完刷新列表
+  } catch (e) {
+    console.error('删除失败', e)
+  } finally {
+    deleting.value = null
+  }
+}
 </script>
 
 <style scoped>
@@ -644,6 +658,11 @@ function statusLabel(s) { return { indexed: '已入库', pending: '待确认', e
   display: flex;
   align-items: center;
   transition: opacity 0.15s, color 0.15s;
+}
+
+.delete-btn.loading {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .paper-item:hover .delete-btn {

@@ -30,3 +30,9 @@ export function ingestFromArxiv(arxivIds, userId = 'default') {
     headers: { 'Content-Type': 'application/json' }
   })
 }
+
+export function deletePaper(docId, userId = 'default') {
+  return axios.delete(`${BASE}/papers/${docId}`, {
+    params: { user_id: userId }
+  })
+}

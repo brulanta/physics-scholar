@@ -102,10 +102,12 @@ def remove_paper(doc_id: str, user_id: str = "seed") -> dict:
         try:
             del raw_registry[doc_id]
             save_registry(raw_registry, user_id)
-            return {"success": True}
+            # 底层业务函数，增加是否存在字段
+            # 存在与否与操作成败分开
+            return {"success": True, "existed": True}
         except Exception as e:
             return {"success": False, "detail": str(e)}
-    return {"success": False, "detail": "论文记录不存在"}
+    return {"success": True, "existed": False}
 
 
 def smart_match(keyword, sentence):

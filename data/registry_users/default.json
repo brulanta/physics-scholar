@@ -193,18 +193,5 @@
     "status": "indexed",
     "page_count": 46,
     "chunk_count": 285
-  },
-  "1992ed8b3a19240766532aa388757537": {
-    "doc_id": "1992ed8b3a19240766532aa388757537",
-    "title": "Thermoelastic surface acoustic waves in low-loss silicon nitride integrated circuits",
-    "author": "Zheng Zheng, Ahmet Tarık I¸sık, Akshay Keloth, Kaixuan Ye, Peter van der Slot, David Marpaung",
-    "year": "2026",
-    "file_name": "2602.06732v1.pdf",
-    "upload_time": "2026-04-14T16:23:54.826421",
-    "source_type": "user",
-    "user_id": "default",
-    "status": "indexed",
-    "page_count": 5,
-    "chunk_count": 81
   }
 }

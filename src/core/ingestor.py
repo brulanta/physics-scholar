@@ -83,10 +83,10 @@ def delete_from_chroma(doc_id: str, user_id: str = "default") -> dict:
     )
     exists = bool(result["ids"])
     if not exists:
-        return {"success": True, "detail": "无chunks，跳过"}
+        return {"success": True, "existed": False}
     try:
         vs.delete(where={"$and": [{"doc_id": doc_id}, {"user_id": user_id}]})
-        return {"success": True}
+        return {"success": True, "existed": True}
     except Exception as e:
         return {"success": False, "detail": str(e)}
 
@@ -98,9 +98,12 @@ def delete_from_disk(doc_id: str, user_id: str = "default") -> dict:
         file_name = file_metadata.get("file_name", "")
         pdf_path = PDF_DIR / file_name
         if pdf_path.exists():
-            pdf_path.unlink()  # 清本地pdf
-            return {"success": True}
-    return {"success": False, "detail": "目标论文不存在"}
+            try:
+                pdf_path.unlink()  # 清本地pdf
+                return {"success": True, "existed": True}
+            except Exception as e:
+                return {"success": False, "detail": str(e)}
+    return {"success": True, "existed": False}
 
 
 def delete_paper(doc_id: str, user_id: str = "default"):
@@ -109,39 +112,24 @@ def delete_paper(doc_id: str, user_id: str = "default"):
         res2 = delete_from_chroma(doc_id, user_id)
         res3 = remove_paper(doc_id, user_id)
 
-        success_all = res1["success"] and res2["success"] and res3["success"]
+        if not (res1["success"] and res2["success"] and res3["success"]):
+            return {
+                "success": False,
+                "status": "failed",
+                "detail": f"{res1}\n{res2}\n{res3}",
+            }
 
-        # ✅ 情况1：完全标准流程
-        if success_all and not res2.get("detail"):
+        # 判断是否空删
+        existed_any = res1.get("existed") or res2.get("existed") or res3.get("existed")
+
+        if existed_any:
+            return {"success": True, "status": "deleted", "detail": "资源已清理"}
+        else:
             return {
                 "success": True,
-                "status": "complete",
-                "detail": "磁盘、向量库、注册表均已清除",
+                "status": "not_found",
+                "detail": "资源不存在（幂等删除）",
             }
-
-        # ✅ 情况2：未入库（合法）
-        if success_all and res2.get("detail"):
-            return {
-                "success": True,
-                "status": "no_chunks",
-                "detail": "未入库，磁盘、注册表已清除",
-            }
-
-        # ⚠️ 情况3：非理想但已清理
-        if res3["success"]:  # 注册表已删 = 系统已“不可见”
-            return {
-                "success": True,  # ✅
-                "status": "inconsistent_but_cleaned",
-                "detail": f"存在异常状态但已清理\n"
-                f"磁盘：{res1}\n向量库：{res2}\n注册表：{res3}",
-            }
-
-        # ❌ 情况4：真的失败
-        return {
-            "success": False,
-            "status": "failed",
-            "detail": f"{res1}\n{res2}\n{res3}",
-        }
 
     except Exception as e:
         return {"success": False, "status": "exception", "detail": str(e)}
