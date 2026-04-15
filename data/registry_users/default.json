@@ -206,18 +206,5 @@
     "status": "indexed",
     "page_count": 5,
     "chunk_count": 81
-  },
-  "d6fca26bd343459723766e3052d30e10": {
-    "doc_id": "d6fca26bd343459723766e3052d30e10",
-    "title": "Optically locked low-noise photonic microwave oscillator",
-    "author": "Zexing Zhao, Bin Li, Kunpeng Jia, Chenye Qin, Xiaofan Zhang, Jingru Ji, Hua-Ying Liu, Xiao-Hui Tian, Zhong Yan, Xiaoshun Jiang, Xinlun Cai, Biaobing Jin, Zhenlin Wang, Wei Liang, Shi-ning Zhu, Zhenda Xie",
-    "year": "",
-    "file_name": "2602.09408v1.pdf",
-    "upload_time": "2026-04-14T16:42:26.125988",
-    "source_type": "user",
-    "user_id": "default",
-    "status": "indexed",
-    "page_count": 20,
-    "chunk_count": 135
   }
 }

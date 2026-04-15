@@ -6,7 +6,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from pydantic import BaseModel, Field
 from src.config import PDF_DIR
 from src.core import registry
-from src.core.ingestor import ingest_pdf, confirm_and_index
+from src.core.ingestor import ingest_pdf, confirm_and_index, delete_paper
 from src.rag.chain import ask
 import requests
 from typing import Literal
@@ -163,6 +163,14 @@ async def ingest_from_arxiv(arxiv_ids: list[str], user_id: str = "default"):
             }
         )
     return results
+
+
+@router.delete("/papers/{doc_id}")
+def delete_paper_route(doc_id: str, user_id: str = "default"):
+    result = delete_paper(doc_id, user_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["detail"])
+    return {"success": True}
 
 
 # ── 问答 ─────────────────────────────────────────────────

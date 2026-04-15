@@ -95,13 +95,17 @@ def update_after_index(
         }
 
 
-def remove_paper(doc_id: str, user_id: str = "seed"):
-    """入库失败时清除注册表记录"""
+def remove_paper(doc_id: str, user_id: str = "seed") -> dict:
+    """清除注册表记录"""
     raw_registry = load_registry(user_id)
     if doc_id in raw_registry:
-        del raw_registry[doc_id]
-        save_registry(raw_registry, user_id)
-    return {"success": True}
+        try:
+            del raw_registry[doc_id]
+            save_registry(raw_registry, user_id)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "detail": str(e)}
+    return {"success": False, "detail": "论文记录不存在"}
 
 
 def smart_match(keyword, sentence):
