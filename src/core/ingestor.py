@@ -171,7 +171,7 @@ def ingest_pdf(
         )
 
         # 4. 写注册表
-        registry.register_paper(paper_meta, user_id)
+        registry.register_paper(paper_meta)
 
         return {"success": True, "paper_meta": paper_meta}
 
@@ -193,7 +193,7 @@ def confirm_and_index(
     # 1. 覆盖title，写入注册表，status=processing
     paper_meta.title = confirmed_title
     paper_meta.status = "processing"
-    registry.register_paper(paper_meta, user_id)
+    registry.register_paper(paper_meta)
 
     try:
         # 2. 解析

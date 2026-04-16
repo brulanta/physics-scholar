@@ -10,7 +10,7 @@ from src.rag.tools.rag_tool import make_rag_tool
 from src.rag.tools.search_paper_tool import make_search_tool
 from src.rag.tools.arxiv_tool import arxiv_tool
 from src.rag.memory import (
-    get_or_create_session,
+    ConversationMemory,
     format_history,
     strip_thinking,
     WARN_THRESHOLD,
@@ -48,20 +48,25 @@ def should_call_tool(state: AgentState) -> dict:
 
 def save_to_memory(state: AgentState):
     conversation_id = f"{state['user_id']}_{state['conv_id']}"
-    memory = get_or_create_session(conversation_id)
-    messages = state["messages"]
+    memory = ConversationMemory(conversation_id)
+    try:
+        messages = state["messages"]
 
-    # 跳过第一条（system+history拼好的prompt）
-    # 只存HumanMessage和最后的AIMessage
-    for msg in messages:
-        if isinstance(msg, HumanMessage):
-            memory.add(msg)
+        # 跳过第一条（system+history拼好的prompt）
+        # 只存HumanMessage和最后的AIMessage
+        for msg in messages:
+            if isinstance(msg, HumanMessage):
+                memory.add(msg)
 
-    # 最后一条AIMessage是本轮最终回答
-    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
-    if last_ai:
-        clean_content = strip_thinking(last_ai.content)
-        memory.add(AIMessage(content=clean_content))
+        # 最后一条AIMessage是本轮最终回答
+        last_ai = next(
+            (m for m in reversed(messages) if isinstance(m, AIMessage)), None
+        )
+        if last_ai:
+            clean_content = strip_thinking(last_ai.content)
+            memory.add(AIMessage(content=clean_content))
+    finally:
+        memory.close()
 
 
 def build_agent(user_id: str):
@@ -101,37 +106,42 @@ def chat(
 ) -> dict:
     # 在invoke之前先构建SystemMessage，这时候有所有需要的参数
     conversation_id = f"{user_id}_{conv_id}"
-    memory = get_or_create_session(conversation_id)
-    history = format_history(memory.get())
-    citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
+    memory = ConversationMemory(conversation_id)
+    try:
+        history = format_history(memory.get())
+        citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
 
-    if mode == "discuss":
-        system_msg = SystemMessage(
-            content=SYSTEM_PROMPT_DISCUSS.format(
-                history=history, citation_plugin=citation_plugin
+        if mode == "discuss":
+            system_msg = SystemMessage(
+                content=SYSTEM_PROMPT_DISCUSS.format(
+                    history=history, citation_plugin=citation_plugin
+                )
             )
-        )
-    else:
-        system_msg = SystemMessage(
-            content=SYSTEM_PROMPT_NORMAL.format(
-                history=history, citation_plugin=citation_plugin
+        else:
+            system_msg = SystemMessage(
+                content=SYSTEM_PROMPT_NORMAL.format(
+                    history=history, citation_plugin=citation_plugin
+                )
             )
+
+        agent = build_agent(user_id)
+
+        result = agent.invoke(
+            {
+                "messages": [system_msg, HumanMessage(content=user_message)],
+                "conv_id": conv_id,
+                "user_id": user_id,
+                "translation": translation,
+            }
         )
 
-    agent = build_agent(user_id)
+        warning_flag = memory.warning().get("warning")
+        warning = None
+        if warning_flag:
+            warning = (
+                f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
+            )
 
-    result = agent.invoke(
-        {
-            "messages": [system_msg, HumanMessage(content=user_message)],
-            "conv_id": conv_id,
-            "user_id": user_id,
-            "translation": translation,
-        }
-    )
-
-    char_count = memory._count_chars()
-    warning = None
-    if char_count > WARN_THRESHOLD:
-        warning = f"当前对话已累积{char_count}字，建议开启新对话以保证回答质量。"
-
-    return {"answer": result["messages"][-1].content, "warning": warning}
+        return {"answer": result["messages"][-1].content, "warning": warning}
+    finally:
+        memory.close()
