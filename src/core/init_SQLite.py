@@ -23,7 +23,6 @@ def init_db():
 
         -- ⭐ 新增
         parent_id INTEGER,        -- 分支用（上一条）
-        root_id INTEGER,          -- 整个对话树根
 
         status TEXT DEFAULT 'normal',  -- normal / regenerated / deleted
 

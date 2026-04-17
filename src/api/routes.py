@@ -11,6 +11,7 @@ from src.rag.chain import ask
 import requests
 from typing import Literal
 import re
+from src.rag.memory import ConversationMemory
 
 router = APIRouter()
 
@@ -21,6 +22,15 @@ router = APIRouter()
 @router.post("/conv_id/new")
 def new_conversation():
     return {"conv_id": str(uuid.uuid4())}
+
+
+@router.get("/conversation/{conversation_id}/tree")
+def get_conversation(conversation_id: str):
+    memory = ConversationMemory(conversation_id)
+    try:
+        return {"messages": memory.get_tree()}
+    finally:
+        memory.close()
 
 
 # ── 论文管理 ──────────────────────────────────────────────
@@ -182,10 +192,11 @@ class AskRequest(BaseModel):
     user_id: str = "default"
     translation: bool = False
     mode: Literal["normal", "discuss"] = "normal"
+    parent_id: str = None
 
 
 def extract_thinking(text: str) -> str:
-    """提取</thinking>及其之前的所有内容用于log"""
+    """提取/</thinking/>及其之前的所有内容用于log"""
     match = re.search(r"^[\s\S]*?</thinking>", text)
     if match:
         return match.group(0).strip()
@@ -194,7 +205,7 @@ def extract_thinking(text: str) -> str:
 
 
 def strip_thinking(text: str) -> str:
-    """以</thinking>为准，去除它及之前的所有内容"""
+    """以/</thinking/>为准，去除它及之前的所有内容"""
     match = re.search(r"</thinking>", text)
     if match:
         return text[match.end() :].strip()
@@ -213,12 +224,10 @@ def ask_question(req: AskRequest):
         user_id=req.user_id,
         translation=req.translation,
         mode=req.mode,
+        parent_id=req.parent_id,
     )
     thinking = extract_thinking(result.get("answer", ""))
     if thinking:
         print(thinking)
-
-    return {
-        "answer": strip_thinking(result["answer"]),
-        "warning": result.get("warning"),
-    }
+    result["answer"] = strip_thinking(result["answer"])
+    return result

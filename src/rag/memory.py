@@ -5,17 +5,29 @@ import sqlite3
 
 INSERT_MESSAGES_SQL = """
 INSERT INTO messages (
-        conversation_id,
-        role,
-        content
+    conversation_id,
+    role,
+    content,
+    parent_id,
+    status,
+    version
 )
-VALUES (?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?)
 """
-SELECT_MESSAGES_SQL = """SELECT id,
-        conversation_id,
-        role,
-        content,
-        created_at FROM messages"""
+
+SELECT_MESSAGES_PARTIAL_SQL = """SELECT id, role, content FROM messages WHERE status='normal' AND conversation_id = ? ORDER BY id ASC"""
+
+SELECT_MESSAGES_FULL_SQL = (
+    """SELECT * FROM messages WHERE conversation_id = ? ORDER BY id ASC"""
+)
+
+
+SELECT_LAST_MESSAGES_ID_SQL = """
+SELECT id FROM messages
+WHERE conversation_id = ?
+ORDER BY id DESC
+LIMIT 1
+"""
 
 DELETE_MESSAGES_SQL = "DELETE FROM messages WHERE conversation_id = ?"
 
@@ -26,26 +38,42 @@ class MessageRepo:
         self.conn.row_factory = sqlite3.Row
         self.cur = self.conn.cursor()
 
-    def insert(self, conversation_id: str, message: BaseMessage):
+    def insert(
+        self, conversation_id, role, content, parent_id=None, status="normal", version=1
+    ):
         try:
+            if not parent_id:
+                res = self.get_last_message_id()
+                last_id = res.get("last_id")
+                parent_id = last_id if last_id else None
             self.cur.execute(
                 INSERT_MESSAGES_SQL,
-                (
-                    conversation_id,
-                    "user" if isinstance(message, HumanMessage) else "assistant",
-                    message.content,
-                ),
+                (conversation_id, role, content, parent_id, status, version),
             )
             self.conn.commit()
 
-            return {"success": True}
+            return {"success": True, "message_id": self.cur.lastrowid}
         except Exception as e:
             return {"success": False, "detail": str(e)}
 
-    def get_history(self, conversation_id: str):
+    def get_last_message_id(self, conversation_id):
         try:
+            self.cur.execute(SELECT_LAST_MESSAGES_ID_SQL, (conversation_id,))
+
+            id = self.cur.fetchone()
+
+            return {"success": True, "last_id": id}
+        except Exception as e:
+            return {"success": False, "detail": str(e)}
+
+    def get_messages(self, conversation_id: str, fields: str = "partial"):
+        try:
+            if fields == "partial":
+                SELECT_SQL = SELECT_MESSAGES_PARTIAL_SQL
+            else:
+                SELECT_SQL = SELECT_MESSAGES_FULL_SQL
             self.cur.execute(
-                SELECT_MESSAGES_SQL + " WHERE conversation_id=? ORDER BY id ASC",
+                SELECT_SQL,
                 (conversation_id,),
             )
             rows = self.cur.fetchall()
@@ -76,15 +104,16 @@ class ConversationMemory:
         self.conversation_id = conversation_id
         self._repo = MessageRepo()
 
-    def add(self, message: BaseMessage):
+    def add(self, message: BaseMessage, parent_id=None):
         """单条插入，总量超限报预警"""
-        res = self._repo.insert(self.conversation_id, message)
+        role = "user" if isinstance(message, HumanMessage) else "assistant"
+        res = self._repo.insert(self.conversation_id, role, message.content, parent_id)
         warning = self.warning()
         return res | warning
 
     def get(self) -> list:
-        """返回本对话tokens上限内的历史记录,list(BaseMessage)"""
-        rows = self._repo.get_history(self.conversation_id)
+        """返回本对话tokens上限内的合法历史记录,list(BaseMessage)"""
+        rows = self._repo.get_messages(self.conversation_id)
         # 窗口取最后 max_tokens 囊括的条
         total = 0
         selected = []
@@ -108,6 +137,11 @@ class ConversationMemory:
 
         return history
 
+    def get_tree(self) -> list:
+        """返回本对话id下的所有记录（含废弃），返回list[dict]"""
+        rows = self._repo.get_messages(self.conversation_id, fields="full")
+        return [dict(row) for row in rows]
+
     def warning(self):
         """对话达到tokens上限则触发预警"""
         return (
@@ -118,7 +152,7 @@ class ConversationMemory:
 
     def _count_chars(self) -> int:
         """计算本对话目前的token数"""
-        rows = self._repo.get_history()
+        rows = self._repo.get_messages(self.conversation_id)
         return sum(len(m.content) for m in rows)
 
     def clear(self):
