@@ -1,6 +1,6 @@
 <template>
-  <div class="welcome">
-    <!-- 固定不动的上半部分 -->
+  <div class="welcome" ref="rootRef">
+    <!-- 上半区：icon + 提问，绝对定位，垂直居中偏上 -->
     <div class="welcome-top">
       <div class="welcome-icon">⚛</div>
       <h1 class="welcome-title">PhysicsScholar</h1>
@@ -14,16 +14,26 @@
       </div>
     </div>
 
-    <!-- 输入框：固定在下方，向上生长 -->
-    <div class="welcome-bottom">
+    <!-- 输入框区：绝对定位在底部，向上生长 -->
+    <div class="welcome-input-outer">
       <div class="input-wrap" :class="{ focused }">
         <textarea ref="textareaRef" v-model="input" placeholder="输入问题开始对话…" @keydown.enter.exact.prevent="submit"
           @input="autoResize" @focus="focused = true" @blur="focused = false" />
-        <button class="send-btn" :disabled="!input.trim()" @click="submit">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M12 7L2 2l2.5 5L2 12 12 7z" fill="currentColor" />
-          </svg>
-        </button>
+        <div class="input-bottom-row">
+          <!-- ④ 讨论模式按钮 -->
+          <button class="discuss-btn" :class="{ active: discussMode }" @click="discussMode = !discussMode">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M1 2A1 1 0 012 1h8a1 1 0 011 1v5a1 1 0 01-1 1H7.5L6 9.5 4.5 8H2a1 1 0 01-1-1V2z"
+                stroke="currentColor" stroke-width="1.2" fill="none" />
+            </svg>
+            {{ discussMode ? '讨论中' : '讨论' }}
+          </button>
+          <button class="send-btn" :disabled="!input.trim()" @click="submit">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M12 7L2 2l2.5 5L2 12 12 7z" fill="currentColor" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -35,6 +45,7 @@ import { ref, nextTick } from 'vue'
 const emit = defineEmits(['send'])
 const input = ref('')
 const focused = ref(false)
+const discussMode = ref(false)
 const textareaRef = ref(null)
 
 const suggestions = [
@@ -47,12 +58,17 @@ function send(text, discuss = false) {
   emit('send', { text, discuss })
 }
 
+const submitting = ref(false)
+
 function submit() {
-  if (!input.value.trim()) return
-  emit('send', { text: input.value.trim(), discuss: false })
+  if (!input.value.trim() || submitting.value) return
+  submitting.value = true
+  emit('send', { text: input.value.trim(), discuss: discussMode.value })
   input.value = ''
+  discussMode.value = false
   nextTick(() => {
     if (textareaRef.value) textareaRef.value.style.height = 'auto'
+    submitting.value = false
   })
 }
 
@@ -60,6 +76,7 @@ function autoResize() {
   const el = textareaRef.value
   if (!el) return
   el.style.height = 'auto'
+  // 向下生长：max-height限制，超出滚动
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
 </script>
@@ -67,31 +84,35 @@ function autoResize() {
 <style scoped>
 .welcome {
   flex: 1;
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  /* 绝对定位的基准 */
   overflow: hidden;
-  padding: 0 24px;
-}
-
-.welcome-top {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  /* 改这里：flex-end → center */
-  padding-bottom: 20px;
   min-height: 0;
 }
 
+/* 上半区：绝对居中，底边对齐视觉中线略偏上（55%处） */
+.welcome-top {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  /* 底边在容器55%位置，让提问行底部正好在视觉中线 */
+  bottom: 45%;
+  width: 100%;
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 24px 24px;
+}
+
 .welcome-icon {
-  font-size: 2.6em;
+  font-size: 2.4em;
   line-height: 1;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .welcome-title {
-  font-size: 1.75em;
+  font-size: 1.7em;
   font-weight: 700;
   color: var(--text);
   letter-spacing: -0.02em;
@@ -99,17 +120,16 @@ function autoResize() {
 }
 
 .welcome-sub {
-  font-size: 0.9em;
+  font-size: 0.88em;
   color: var(--text-3);
-  margin-bottom: 28px;
+  margin-bottom: 24px;
 }
 
 .suggestions {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
-  max-width: 620px;
 }
 
 .sug-btn {
@@ -117,12 +137,12 @@ function autoResize() {
   align-items: center;
   justify-content: space-between;
   text-align: left;
-  padding: 11px 16px;
+  padding: 10px 14px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--text-2);
-  font-size: 0.88em;
+  font-size: 0.86em;
   cursor: pointer;
   transition: all 0.15s;
   font-family: inherit;
@@ -151,28 +171,27 @@ function autoResize() {
   flex-shrink: 0;
 }
 
-/* 下半部分：输入框，固定高度区域，输入框向上生长 */
-.welcome-bottom {
-  flex-shrink: 0;
-  padding-bottom: 32px;
-  padding-top: 16px;
+/* 输入框区：绝对定位在底部，内容向上生长 */
+.welcome-input-outer {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 620px;
+  padding: 0 24px;
+  /* 关键：display flex column-reverse，内容从底部向上撑 */
   display: flex;
   flex-direction: column;
-  align-items: center;
-  max-width: 620px;
-  width: 100%;
-  align-self: center;
+  justify-content: flex-end;
 }
 
 .input-wrap {
-  width: 100%;
   background: var(--bg-2);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  padding: 12px 12px 12px 16px;
+  flex-direction: column;
   transition: border-color 0.18s,
     transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1),
     box-shadow 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -185,31 +204,60 @@ function autoResize() {
 }
 
 textarea {
-  flex: 1;
   background: transparent;
   border: none;
   outline: none;
   color: var(--text);
-  font-size: 0.95em;
+  font-size: 0.93em;
   font-family: inherit;
   line-height: 1.65;
   resize: none;
-  min-height: 52px;
-  /* 比之前高 */
+  min-height: 56px;
   max-height: 200px;
   overflow-y: auto;
+  padding: 14px 16px 8px;
 }
 
 textarea::placeholder {
   color: var(--text-3);
 }
 
-/* send按钮固定在底部，align-self: flex-end 保证不随textarea变高上移 */
+.input-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 8px;
+}
+
+.discuss-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.78em;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.discuss-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.discuss-btn.active {
+  background: var(--accent-glow);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .send-btn {
-  width: 36px;
-  height: 36px;
+  width: 34px;
+  height: 34px;
   flex-shrink: 0;
-  align-self: flex-end;
   background: var(--accent);
   border: none;
   border-radius: var(--radius-sm);

@@ -39,12 +39,12 @@ def sample_meta():
 
 
 def test_register_success(sample_meta):
-    result = register_paper(sample_meta, TEST_USER)
+    result = register_paper(sample_meta)
     assert result["success"] is True
 
 
 def test_is_duplicate_after_register(sample_meta):
-    register_paper(sample_meta, TEST_USER)
+    register_paper(sample_meta)
     assert is_duplicate(TEST_DOC_ID, TEST_USER) is True
 
 
@@ -56,7 +56,7 @@ def test_is_not_duplicate_before_register():
 
 
 def test_update_after_index(sample_meta):
-    register_paper(sample_meta, TEST_USER)
+    register_paper(sample_meta)
     result = update_after_index(
         TEST_DOC_ID, chunk_count=42, page_count=8, user_id=TEST_USER
     )
@@ -75,7 +75,7 @@ def test_update_nonexistent_doc():
 
 
 def test_remove_paper(sample_meta):
-    register_paper(sample_meta, TEST_USER)
+    register_paper(sample_meta)
     remove_paper(TEST_DOC_ID, TEST_USER)
     assert is_duplicate(TEST_DOC_ID, TEST_USER) is False
 
@@ -90,7 +90,7 @@ def test_remove_nonexistent_is_safe():
 
 
 def test_search_hit(sample_meta):
-    register_paper(sample_meta, TEST_USER)
+    register_paper(sample_meta)
     results = search_by_keyword(["胶原蛋白"], TEST_USER)
     assert len(results) > 0
     doc_ids = [r["doc_id"] for r in results]
@@ -104,7 +104,7 @@ def test_search_miss():
 
 def test_search_score_order(sample_meta):
     # 命中更多关键词的排在前面
-    register_paper(sample_meta, TEST_USER)
+    register_paper(sample_meta)
     results = search_by_keyword(["胶原蛋白", "测试论文"], TEST_USER)
     assert len(results) > 0
     assert results[0]["score"] >= 1

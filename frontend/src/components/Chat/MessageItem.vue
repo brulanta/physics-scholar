@@ -9,12 +9,18 @@
     </div>
 
     <div class="bubble-wrap">
-      <div class="bubble">
+      <div class="bubble" @contextmenu="onContextMenu">
         <div v-if="!content" class="typing-indicator">
           <span /><span /><span />
         </div>
         <div v-else class="md-body" v-html="rendered" />
       </div>
+      <div v-if="content" class="action-bar" :class="[role, { visible: hovered }]">
+        <!-- ...原有内容不变... -->
+      </div>
+
+      <!-- arxiv右键菜单 -->
+      <ArxivContextMenu ref="ctxMenu" />
 
       <!-- ④ 操作栏：always in DOM，透明度控制显隐，不撑开布局 -->
       <div v-if="content" class="action-bar" :class="[role, { visible: hovered }]">
@@ -34,8 +40,8 @@
           </button>
           <button class="act" @click="toast('点踩功能暂未实装')">
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M11 6.5H9.5v-5H11v5zM8.5 6.5l-2 4a.9.9 0 01-.9-.9V8H3l-.5-.9L3.5 3H8.5v3.5z" stroke="currentColor"
-                stroke-width="1" stroke-linejoin="round" />
+              <path d="M11 6.5H9.5v-5H11v5zM8.5 6.5l-2 4a.9.9 0 01-.9-.9V8H3l-.5-.9L3.5 3H8.5v3.5z"
+                stroke="currentColor" stroke-width="1" stroke-linejoin="round" />
             </svg>
           </button>
           <button class="act" @click="toast('重新生成功能暂未实装')">
@@ -97,6 +103,16 @@ function copyContent() {
     setTimeout(() => { copied.value = false }, 1500)
   })
 }
+
+import ArxivContextMenu from './ArxivContextMenu.vue'
+
+const ctxMenu = ref(null)
+
+function onContextMenu(event) {
+  if (props.role !== 'assistant' || !props.content) return
+  event.preventDefault()
+  ctxMenu.value?.open(event, props.content)
+}
 </script>
 
 <style scoped>
@@ -134,10 +150,15 @@ function copyContent() {
   border: 1px solid var(--border);
 }
 
+/* MessageItem.vue */
+
 .bubble-wrap {
+  /* 不要flex:1，用min-width:0防止溢出 */
+  min-width: 0;
+  max-width: calc(100% - 80px);
+  /* 40px = avatar宽度28px + gap12px */
   display: flex;
   flex-direction: column;
-  max-width: 82%;
 }
 
 .message-row.user .bubble-wrap {
@@ -145,6 +166,9 @@ function copyContent() {
 }
 
 .bubble {
+  /* 关键：inline-block让气泡包裹内容，但不超过父容器 */
+  display: inline-block;
+  max-width: 100%;
   padding: 11px 16px;
   border-radius: var(--radius);
   font-size: 0.92em;

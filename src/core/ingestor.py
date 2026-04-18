@@ -5,6 +5,7 @@ from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from src.config import CHROMA_DIR, PDF_DIR
 from langchain_core.documents import Document
+from src.core.registry import load_registry, remove_paper
 
 _embeddings = None
 _vectorstore = None
@@ -73,6 +74,67 @@ def write_to_chroma(chunks, ref_chunks, paper_meta, user_id):
     return len(all_ids)  # 返回chunk总数，用于回填
 
 
+def delete_from_chroma(doc_id: str, user_id: str = "default") -> dict:
+    vs = get_vectorstore()
+    result = vs._collection.get(
+        where={"$and": [{"doc_id": doc_id}, {"user_id": user_id}]},
+        limit=1,
+        include=[],  # 只要 id
+    )
+    exists = bool(result["ids"])
+    if not exists:
+        return {"success": True, "existed": False}
+    try:
+        vs.delete(where={"$and": [{"doc_id": doc_id}, {"user_id": user_id}]})
+        return {"success": True, "existed": True}
+    except Exception as e:
+        return {"success": False, "detail": str(e)}
+
+
+def delete_from_disk(doc_id: str, user_id: str = "default") -> dict:
+    reg = load_registry(user_id)
+    file_metadata = reg.get(doc_id, "")
+    if file_metadata:
+        file_name = file_metadata.get("file_name", "")
+        pdf_path = PDF_DIR / file_name
+        if pdf_path.exists():
+            try:
+                pdf_path.unlink()  # 清本地pdf
+                return {"success": True, "existed": True}
+            except Exception as e:
+                return {"success": False, "detail": str(e)}
+    return {"success": True, "existed": False}
+
+
+def delete_paper(doc_id: str, user_id: str = "default"):
+    try:
+        res1 = delete_from_disk(doc_id, user_id)
+        res2 = delete_from_chroma(doc_id, user_id)
+        res3 = remove_paper(doc_id, user_id)
+
+        if not (res1["success"] and res2["success"] and res3["success"]):
+            return {
+                "success": False,
+                "status": "failed",
+                "detail": f"{res1}\n{res2}\n{res3}",
+            }
+
+        # 判断是否空删
+        existed_any = res1.get("existed") or res2.get("existed") or res3.get("existed")
+
+        if existed_any:
+            return {"success": True, "status": "deleted", "detail": "资源已清理"}
+        else:
+            return {
+                "success": True,
+                "status": "not_found",
+                "detail": "资源不存在（幂等删除）",
+            }
+
+    except Exception as e:
+        return {"success": False, "status": "exception", "detail": str(e)}
+
+
 def ingest_pdf(
     file_bytes: bytes,
     file_name: str,
@@ -109,7 +171,7 @@ def ingest_pdf(
         )
 
         # 4. 写注册表
-        registry.register_paper(paper_meta, user_id)
+        registry.register_paper(paper_meta)
 
         return {"success": True, "paper_meta": paper_meta}
 
@@ -131,7 +193,7 @@ def confirm_and_index(
     # 1. 覆盖title，写入注册表，status=processing
     paper_meta.title = confirmed_title
     paper_meta.status = "processing"
-    registry.register_paper(paper_meta, user_id)
+    registry.register_paper(paper_meta)
 
     try:
         # 2. 解析
@@ -154,4 +216,4 @@ def confirm_and_index(
         pdf_path = PDF_DIR / paper_meta.file_name
         if pdf_path.exists():
             pdf_path.unlink()  # 清本地pdf
-            return {"success": False, "detail": str(e)}
+        return {"success": False, "detail": str(e)}

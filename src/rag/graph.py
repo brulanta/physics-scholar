@@ -10,7 +10,7 @@ from src.rag.tools.rag_tool import make_rag_tool
 from src.rag.tools.search_paper_tool import make_search_tool
 from src.rag.tools.arxiv_tool import arxiv_tool
 from src.rag.memory import (
-    get_or_create_session,
+    ConversationMemory,
     format_history,
     strip_thinking,
     WARN_THRESHOLD,
@@ -46,22 +46,27 @@ def should_call_tool(state: AgentState) -> dict:
     return END
 
 
-def save_to_memory(state: AgentState):
-    conversation_id = f"{state['user_id']}_{state['conv_id']}"
-    memory = get_or_create_session(conversation_id)
-    messages = state["messages"]
+# def save_to_memory(state: AgentState):
+#     conversation_id = f"{state['user_id']}_{state['conv_id']}"
+#     memory = ConversationMemory(conversation_id)
+#     try:
+#         messages = state["messages"]
 
-    # 跳过第一条（system+history拼好的prompt）
-    # 只存HumanMessage和最后的AIMessage
-    for msg in messages:
-        if isinstance(msg, HumanMessage):
-            memory.add(msg)
+#         # 跳过第一条（system+history拼好的prompt）
+#         # 只存HumanMessage和最后的AIMessage
+#         for msg in messages:
+#             if isinstance(msg, HumanMessage):
+#                 res1 = memory.add(msg)
 
-    # 最后一条AIMessage是本轮最终回答
-    last_ai = next((m for m in reversed(messages) if isinstance(m, AIMessage)), None)
-    if last_ai:
-        clean_content = strip_thinking(last_ai.content)
-        memory.add(AIMessage(content=clean_content))
+#         # 最后一条AIMessage是本轮最终回答
+#         last_ai = next(
+#             (m for m in reversed(messages) if isinstance(m, AIMessage)), None
+#         )
+#         if last_ai:
+#             clean_content = strip_thinking(last_ai.content)
+#             res2 = memory.add(AIMessage(content=clean_content))
+#     finally:
+#         memory.close()
 
 
 def build_agent(user_id: str):
@@ -79,15 +84,15 @@ def build_agent(user_id: str):
     graph = StateGraph(AgentState)
     graph.add_node("call_llm", call_llm)
     graph.add_node("tool_node", tool_node)
-    graph.add_node("save_to_memory", save_to_memory)
+    # graph.add_node("save_to_memory", save_to_memory)
     graph.set_entry_point("call_llm")
     graph.add_conditional_edges(
         "call_llm",
         should_call_tool,
-        {"execute_tools": "tool_node", END: "save_to_memory"},
+        {"execute_tools": "tool_node", END: END},
     )
     graph.add_edge("tool_node", "call_llm")
-    graph.add_edge("save_to_memory", END)
+    # graph.add_edge("save_to_memory", END)
 
     return graph.compile()
 
@@ -98,40 +103,56 @@ def chat(
     user_id: str = "default",
     translation: bool = False,
     mode: str = "normal",
+    parent_id: str = None,
 ) -> dict:
     # 在invoke之前先构建SystemMessage，这时候有所有需要的参数
     conversation_id = f"{user_id}_{conv_id}"
-    memory = get_or_create_session(conversation_id)
-    history = format_history(memory.get())
-    citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
+    memory = ConversationMemory(conversation_id)
+    try:
+        history = format_history(memory.get())
+        citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
 
-    if mode == "discuss":
-        system_msg = SystemMessage(
-            content=SYSTEM_PROMPT_DISCUSS.format(
-                history=history, citation_plugin=citation_plugin
+        if mode == "discuss":
+            system_msg = SystemMessage(
+                content=SYSTEM_PROMPT_DISCUSS.format(
+                    history=history, citation_plugin=citation_plugin
+                )
             )
-        )
-    else:
-        system_msg = SystemMessage(
-            content=SYSTEM_PROMPT_NORMAL.format(
-                history=history, citation_plugin=citation_plugin
+        else:
+            system_msg = SystemMessage(
+                content=SYSTEM_PROMPT_NORMAL.format(
+                    history=history, citation_plugin=citation_plugin
+                )
             )
+
+        agent = build_agent(user_id)
+
+        result = agent.invoke(
+            {
+                "messages": [system_msg, HumanMessage(content=user_message)],
+                "conv_id": conv_id,
+                "user_id": user_id,
+                "translation": translation,
+            }
         )
 
-    agent = build_agent(user_id)
+        agent_msg = result["messages"][-1]
 
-    result = agent.invoke(
-        {
-            "messages": [system_msg, HumanMessage(content=user_message)],
-            "conv_id": conv_id,
-            "user_id": user_id,
-            "translation": translation,
+        user_res = memory.add(HumanMessage(content=user_message), parent_id=parent_id)
+        agent_res = memory.add(agent_msg, parent_id=user_res["message_id"])
+
+        warning_flag = agent_res.get("warning")
+        warning = None
+        if warning_flag:
+            warning = (
+                f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
+            )
+
+        return {
+            "answer": agent_msg.content,
+            "user_msg_id": user_res["message_id"],
+            "agent_msg_id": agent_res["message_id"],
+            "warning": warning,
         }
-    )
-
-    char_count = memory._count_chars()
-    warning = None
-    if char_count > WARN_THRESHOLD:
-        warning = f"当前对话已累积{char_count}字，建议开启新对话以保证回答质量。"
-
-    return {"answer": result["messages"][-1].content, "warning": warning}
+    finally:
+        memory.close()

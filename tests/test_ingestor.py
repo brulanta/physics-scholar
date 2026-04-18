@@ -76,7 +76,7 @@ def test_duplicate_rejected(english_pdf):
     )
     meta = first["paper_meta"]
     meta.status = "indexed"
-    registry.register_paper(meta, TEST_USER)
+    registry.register_paper(meta)
 
     # 第二次上传同一个文件，应该被拒绝
     with open(english_pdf, "rb") as f:

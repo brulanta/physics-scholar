@@ -1,9 +1,9 @@
-from src.config import DATA_DIR
-import json
+from src.config import DATA_DIR, DB_PATH
 from pydantic import BaseModel, Field, field_validator
 from typing import Literal
 import re
 from pathlib import Path
+import sqlite3
 
 
 def seed_or_user(user_id: str = "seed") -> Path:
@@ -14,38 +14,60 @@ def seed_or_user(user_id: str = "seed") -> Path:
     return path
 
 
-def load_registry(user_id: str = "seed") -> dict:
-    path = seed_or_user(user_id)
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        data = {}
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-            return {}
+PAPER_FIELDS = [
+    "doc_id",
+    "title",
+    "author",
+    "year",
+    "file_name",
+    "upload_time",
+    "source_type",
+    "user_id",
+    "status",
+    "page_count",
+    "chunk_count",
+]
+
+INSERT_PAPER_SQL = """
+INSERT OR REPLACE INTO papers (
+    doc_id, title, author, year, file_name,
+    upload_time, source_type, user_id,
+    status, page_count, chunk_count
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+UPDATE_PAPER_SQL = """
+UPDATE papers SET status = ? , page_count = ?, chunk_count = ? WHERE doc_id = ? AND user_id = ?
+"""
+SELECT_PAPER_SQL = """SELECT doc_id, title, author, year, file_name, upload_time, source_type, user_id, status, page_count, chunk_count FROM papers """
+
+DELETE_PAPER_SQL = "DELETE FROM papers WHERE doc_id = ? AND user_id = ?"
 
 
-def save_registry(registry: dict, user_id: str = "seed"):
-    path = seed_or_user(user_id)
-    try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(registry, f, ensure_ascii=False, indent=2)
-            return {"success": True}
-    except Exception as e:
-        return {"success": False, "detail": str(e)}
+def dict_to_tuple(meta: dict, fields: list[str]):
+    return tuple(meta.get(f) for f in fields)
 
 
-def is_duplicate(doc_id: str, user_id: str = "seed") -> bool:
-    registry = load_registry(user_id)
-    return bool(registry.get(doc_id))
+def load_registry(user_id: str = "default") -> dict:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        cur.execute(
+            SELECT_PAPER_SQL + """WHERE user_id = ?""",
+            (user_id,),
+        )
+
+        rows = cur.fetchall()
+
+        return {row["doc_id"]: dict(row) for row in rows}
 
 
 class PaperMeta(BaseModel):
     doc_id: str
     title: str
-    author: str = Field(default="")  # 预留
-    year: str = Field(default="")  # 预留
+    author: str = Field(default="")
+    year: str = Field(default="")
     file_name: str
     upload_time: str
     source_type: Literal["seed", "user"] = Field(default="user")
@@ -62,46 +84,61 @@ class PaperMeta(BaseModel):
         return str(v) if v is not None else ""
 
 
-def register_paper(paper_meta: PaperMeta, user_id: str = "seed"):
+def is_duplicate(doc_id: str, user_id: str = "default") -> bool:
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT 1 FROM papers WHERE doc_id=? AND user_id=? LIMIT 1",
+            (doc_id, user_id),
+        )
+        res = cur.fetchone()
+        return res is not None
+
+
+def register_paper(paper_meta: PaperMeta) -> dict:
     try:
-        meta_data = paper_meta.model_dump()
-        doc_id = meta_data["doc_id"]
-        raw_registry = load_registry(user_id)
-        raw_registry[doc_id] = meta_data
-        save_registry(raw_registry, user_id)
-        return {"success": True}
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+
+            row = dict_to_tuple(paper_meta.model_dump(), PAPER_FIELDS)
+
+            cur.execute(
+                INSERT_PAPER_SQL,
+                row,
+            )
+            return {"success": True}
     except Exception as e:
         return {"success": False, "detail": str(e)}
 
 
 def update_after_index(
-    doc_id: str, chunk_count: int, page_count: int, user_id: str = "seed"
+    doc_id: str, chunk_count: int, page_count: int, user_id: str = "default"
 ):
-    if (
-        is_duplicate(doc_id, user_id)
-        and chunk_count is not None
-        and page_count is not None
-    ):
-        raw_registry = load_registry(user_id)
-        raw_registry[doc_id]["chunk_count"] = chunk_count
-        raw_registry[doc_id]["page_count"] = page_count
-        raw_registry[doc_id]["status"] = "indexed"
-        save_registry(raw_registry, user_id)
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+
+        cur.execute(
+            UPDATE_PAPER_SQL, ("indexed", page_count, chunk_count, doc_id, user_id)
+        )
+        if cur.rowcount == 0:
+            return {
+                "success": False,
+                "detail": f'id "{doc_id}" does not exist',
+            }
         return {"success": True}
-    else:
-        return {
-            "success": False,
-            "detail": f'id "{doc_id}" does not exist or chunk_count is illegal',
-        }
 
 
-def remove_paper(doc_id: str, user_id: str = "seed"):
-    """入库失败时清除注册表记录"""
-    raw_registry = load_registry(user_id)
-    if doc_id in raw_registry:
-        del raw_registry[doc_id]
-        save_registry(raw_registry, user_id)
-    return {"success": True}
+def remove_paper(doc_id: str, user_id: str = "default") -> dict:
+    """清除注册表记录"""
+    with sqlite3.connect(DB_PATH) as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(DELETE_PAPER_SQL, (doc_id, user_id))
+            if cur.rowcount == 0:
+                return {"success": True, "existed": False}
+            return {"success": True, "existed": True}
+        except Exception as e:
+            return {"success": False, "detail": str(e)}
 
 
 def smart_match(keyword, sentence):

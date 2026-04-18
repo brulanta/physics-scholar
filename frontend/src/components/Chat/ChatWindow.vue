@@ -33,6 +33,8 @@ const props = defineProps({
 const windowRef = ref(null)
 const showScrollBtn = ref(false)
 const isNearBottom = ref(true)
+let lastMessageCount = 0
+let lastUserMsgEl = null
 
 function onScroll() {
   const el = windowRef.value
@@ -48,18 +50,44 @@ function scrollToBottom(smooth = false) {
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' })
 }
 
+function scrollToTop(smooth = false) {
+  const el = windowRef.value
+  if (!el) return
+  el.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'instant' })
+}
+
 defineExpose({ scrollToBottom })
 
-// 是否正在streaming且是当前session
-const isStreaming = () =>
-  props.streamingSessionId !== null &&
-  props.streamingSessionId === props.currentSessionId
-
-watch(() => props.messages?.length, async () => {
+watch(() => props.messages?.length, async (newLen, oldLen) => {
+  if (!newLen) return
   await nextTick()
-  if (isNearBottom.value) scrollToBottom()
+  const el = windowRef.value
+  if (!el) return
+
+  const added = newLen - (oldLen ?? 0)
+  if (added <= 0) return
+
+  const lastMsg = props.messages[newLen - 1]
+
+  if (lastMsg.role === 'user') {
+    // 用户消息：滚动让该消息置顶
+    // 找到最后一个message-row元素
+    const rows = el.querySelectorAll('.message-row')
+    const lastRow = rows[rows.length - 1]
+    if (lastRow) {
+      const offsetTop = lastRow.offsetTop
+      el.scrollTo({
+        top: offsetTop - 20,   // 距顶部留20px呼吸感
+        behavior: 'smooth'
+      })
+    }
+  } else if (lastMsg.role === 'assistant') {
+    // assistant占位出现时，如果接近底部就追底
+    if (isNearBottom.value) scrollToBottom()
+  }
 })
 
+// streaming过程追底
 watch(() => props.streamingContent, async () => {
   await nextTick()
   if (isNearBottom.value) scrollToBottom()

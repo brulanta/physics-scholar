@@ -14,6 +14,7 @@ env/
 # ========= Data =========
 data/pdfs/
 data/chroma_db/
+data/registry_users/
 data/pdfs/*
 !data/pdfs/.gitkeep
 data/chroma_db/*

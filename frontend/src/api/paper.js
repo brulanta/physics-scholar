@@ -6,7 +6,7 @@ export function uploadPaper(file, userId = 'default', strict = false) {
   const form = new FormData()
   form.append('file', file)
   form.append('user_id', userId)
-  form.append('strict', strict)
+  form.append('strict', strict ? 'true' : 'false')  // 显式字符串
   return axios.post(`${BASE}/upload`, form, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
@@ -26,6 +26,13 @@ export function listPapers(userId = 'default') {
 
 export function ingestFromArxiv(arxivIds, userId = 'default') {
   return axios.post(`${BASE}/ingest_from_arxiv`, arxivIds, {
+    params: { user_id: userId },
+    headers: { 'Content-Type': 'application/json' }
+  })
+}
+
+export function deletePaper(docId, userId = 'default') {
+  return axios.delete(`${BASE}/papers/${docId}`, {
     params: { user_id: userId }
   })
 }

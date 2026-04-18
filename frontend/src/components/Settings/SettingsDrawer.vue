@@ -1,5 +1,6 @@
 <template>
   <div class="drawer-inner">
+    <!-- header固定不动 -->
     <div class="drawer-header">
       <span class="drawer-title">设置 &amp; 论文库</span>
       <button class="icon-btn" @click="$emit('close')">
@@ -9,87 +10,91 @@
       </button>
     </div>
 
-    <section class="section">
-      <div class="section-title">外观</div>
-      <div class="setting-row">
-        <span class="setting-label">主题</span>
-        <div class="btn-group">
-          <button v-for="t in themes" :key="t.value" class="seg-btn" :class="{ active: settings.theme === t.value }"
-            @click="setTheme(t.value)">{{ t.label }}</button>
+    <!-- 可整体滚动的内容区 -->
+    <div class="drawer-scroll">
+
+      <!-- 外观section -->
+      <section class="section">
+        <div class="section-title">外观</div>
+        <div class="setting-row">
+          <span class="setting-label">主题</span>
+          <div class="btn-group">
+            <button v-for="t in themes" :key="t.value" class="seg-btn" :class="{ active: settings.theme === t.value }"
+              @click="setTheme(t.value)">{{ t.label }}</button>
+          </div>
         </div>
-      </div>
-      <div class="setting-row">
-        <span class="setting-label">字体</span>
-        <div class="btn-group">
-          <button v-for="(f, key) in FONTS" :key="key" class="seg-btn" :class="{ active: settings.fontFamily === key }"
-            @click="setFont(key)">{{ f.label }}</button>
+        <div class="setting-row">
+          <span class="setting-label">字体</span>
+          <div class="btn-group">
+            <button v-for="(f, key) in FONTS" :key="key" class="seg-btn"
+              :class="{ active: settings.fontFamily === key }" @click="setFont(key)">{{ f.label }}</button>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="section">
-      <div class="section-title">功能</div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">严格模式</div>
-          <div class="setting-desc">上传时提取 title / author / year 后才返回</div>
+      <!-- 功能section -->
+      <section class="section">
+        <div class="section-title">功能</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">严格模式</div>
+            <div class="setting-desc">上传时提取 title / author / year 后才返回</div>
+          </div>
+          <Toggle :model-value="settings.strict" @update:model-value="onStrictChange" />
         </div>
-        <!-- 严格模式切换时立即触发刷新 -->
-        <Toggle :model-value="settings.strict" @update:model-value="onStrictChange" />
-      </div>
-      <div class="setting-row">
-        <div>
-          <div class="setting-label">双语对照</div>
-          <div class="setting-desc">回答时翻译英文参考文献</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">双语对照</div>
+            <div class="setting-desc">回答时翻译英文参考文献</div>
+          </div>
+          <Toggle v-model="settings.translation" />
         </div>
-        <Toggle v-model="settings.translation" />
-      </div>
-    </section>
+      </section>
 
-    <section class="section paper-section">
-      <div class="section-title">论文库</div>
+      <!-- 论文库section：section-title用sticky卡住 -->
+      <section class="section paper-section">
+        <!-- ⑦ 这个title会在滚动到顶时sticky -->
+        <div class="sticky-block">
+          <div class="section-title">论文库</div>
+          <MultiUploadPanel :strict="settings.strict" @paper-added="onPaperAdded" @paper-cancelled="fetchPapers" />
+          <div class="list-toolbar">
+            <input v-model="search" class="search-input" placeholder="搜索论文…" />
+            <select v-model="sortBy" class="sort-select">
+              <option value="default">默认顺序</option>
+              <option value="az">标题 A→Z</option>
+              <option value="za">标题 Z→A</option>
+              <option value="year-asc">年份从晚</option>
+              <option value="year-desc">年份从早</option>
+            </select>
+          </div>
+        </div>
 
-      <!-- UploadPanel直接用settings.strict，每次上传时读当前值 -->
-      <!-- 把 UploadPanel 换成 MultiUploadPanel -->
-      <MultiUploadPanel :strict="settings.strict" @paper-added="onPaperAdded" @paper-cancelled="fetchPapers" />
-
-      <div class="list-toolbar">
-        <input v-model="search" class="search-input" placeholder="搜索论文…" />
-        <select v-model="sortBy" class="sort-select">
-          <option value="default">默认顺序</option>
-          <option value="az">标题 A→Z</option>
-          <option value="za">标题 Z→A</option>
-          <option value="year-asc">年份从早</option>
-          <option value="year-desc">年份从晚</option>
-        </select>
-      </div>
-
-      <!-- papers数据在这里管理，不依赖子组件的mount -->
-      <div class="paper-list">
         <div v-if="papersLoading" class="hint">加载中…</div>
         <div v-else-if="filteredPapers.length === 0" class="hint">{{ search ? '无匹配结果' : '暂无论文' }}</div>
         <div v-else v-for="p in filteredPapers" :key="p.doc_id" class="paper-item">
           <div class="paper-main">
             <div class="paper-title" :title="p.title">{{ p.title || '(未命名)' }}</div>
             <div class="paper-meta">
-              <span v-if="p.author" class="meta-text">{{ truncate(p.author, 20) }}</span>
+              <span v-if="p.author" class="meta-text">{{ truncate(p.author, 24) }}</span>
               <span v-if="p.year" class="meta-text">{{ p.year }}</span>
               <span class="status-badge" :class="p.status">{{ statusLabel(p.status) }}</span>
             </div>
           </div>
           <div class="paper-actions">
             <button v-if="p.status === 'pending'" class="resume-btn" @click="startResume(p)">入库</button>
-            <!-- 悬浮删除按钮，hover paper-item时出现 -->
-            <button class="delete-btn" @click="toastDelete" title="删除">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <button class="delete-btn" :class="{ loading: deleting === p.doc_id }" :disabled="deleting === p.doc_id"
+              @click="doDelete(p)" title="删除">
+              <span v-if="deleting === p.doc_id" class="spin">⟳</span>
+              <svg v-else width="12" height="12" viewBox="0 0 12 12" fill="none">
                 <path d="M2 3h8M4.5 3V2h3v1M5 5v3M7 5v3M2.5 3l.5 7h6l.5-7" stroke="currentColor" stroke-width="1.1"
                   stroke-linecap="round" stroke-linejoin="round" />
               </svg>
             </button>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+    </div><!-- end drawer-scroll -->
 
     <!-- 继续入库弹窗 -->
     <Teleport to="body">
@@ -108,7 +113,6 @@
               <label>标题 *</label>
               <input v-model="resumeForm.title" class="field-input" placeholder="论文标题" />
             </div>
-            <!-- 根据当前strict实时读取，不是入库时的strict -->
             <template v-if="settings.strict">
               <div class="field-group">
                 <label>作者</label>
@@ -135,7 +139,7 @@
 <script setup>
 import { ref, computed, reactive, onMounted, inject } from 'vue'
 import { settings, applyTheme, applyFont, FONTS } from '../../store/app.js'
-import { listPapers, confirmPaper } from '../../api/paper.js'
+import { listPapers, confirmPaper, deletePaper } from '../../api/paper.js'
 import MultiUploadPanel from '../Paper/MultiUploadPanel.vue'
 import Toggle from './Toggle.vue'
 
@@ -225,13 +229,25 @@ function cancelConfirm() {
   pendingPaper.value = null  // 这里是UploadPanel的pendingPaper，实际是emit过来的
 }
 
-const showToast = inject('showToast', null)
-function toastDelete() {
-  showToast?.('删除功能暂未实装')
-}
 
 function truncate(s, n) { return s && s.length > n ? s.slice(0, n) + '…' : s }
 function statusLabel(s) { return { indexed: '已入库', pending: '待确认', error: '失败' }[s] || s }
+
+
+const deleting = ref(null)  // 正在删除的doc_id
+
+async function doDelete(p) {
+  if (deleting.value) return
+  deleting.value = p.doc_id
+  try {
+    await deletePaper(p.doc_id)
+    await fetchPapers()  // 删完刷新列表
+  } catch (e) {
+    console.error('删除失败', e)
+  } finally {
+    deleting.value = null
+  }
+}
 </script>
 
 <style scoped>
@@ -239,6 +255,8 @@ function statusLabel(s) { return { indexed: '已入库', pending: '待确认', e
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
+  /* header不滚动 */
 }
 
 .drawer-header {
@@ -253,6 +271,13 @@ function statusLabel(s) { return { indexed: '已入库', pending: '待确认', e
 .drawer-title {
   font-weight: 600;
   font-size: 1em;
+}
+
+/* ⑦ 整体可滚动区 */
+.drawer-scroll {
+  flex: 1;
+  overflow-y: auto;
+  /* 为sticky提供滚动容器 */
 }
 
 .icon-btn {
@@ -275,15 +300,21 @@ function statusLabel(s) { return { indexed: '已入库', pending: '待确认', e
 .section {
   padding: 16px 20px;
   border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
 }
 
 .paper-section {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding-bottom: 0;
+  padding-bottom: 32px;
+}
+
+.sticky-block {
+  position: sticky;
+  top: 0;
+  background: var(--bg-2);
+  z-index: 1;
+  /* 抵消section的padding，让背景撑满宽度 */
+  margin: -16px -20px 0;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
 }
 
 .section-title {
@@ -627,6 +658,11 @@ function statusLabel(s) { return { indexed: '已入库', pending: '待确认', e
   display: flex;
   align-items: center;
   transition: opacity 0.15s, color 0.15s;
+}
+
+.delete-btn.loading {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 .paper-item:hover .delete-btn {

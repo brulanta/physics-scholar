@@ -20,8 +20,9 @@ watch(settings, (v) => {
   applyFont(v.fontFamily)
 }, { deep: true })
 
-watch(() => sessions.list, (v) => {
-  localStorage.setItem('ps-sessions', JSON.stringify(v))
+// 不只watch list，直接watch整个sessions
+watch(sessions, (v) => {
+  localStorage.setItem('ps-sessions', JSON.stringify(v.list))
 }, { deep: true })
 
 export function applyTheme(theme) {
