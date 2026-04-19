@@ -29,6 +29,8 @@ def get_conversation(conversation_id: str):
     memory = ConversationMemory(conversation_id)
     try:
         return {"messages": memory.get_tree()}
+    except Exception as e:
+        return {"success": False, "detail": str(e)}
     finally:
         memory.close()
 

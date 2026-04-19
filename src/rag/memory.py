@@ -82,6 +82,9 @@ class MessageRepo:
         except Exception as e:
             return {"success": False, "detail": str(e)}
 
+    def get_max_version(self, parent_id: int):
+        pass
+
     def delete(self, conversation_id: str):
         try:
             self.cur.execute(DELETE_MESSAGES_SQL, (conversation_id,))
