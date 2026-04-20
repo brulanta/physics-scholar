@@ -103,7 +103,7 @@ def chat(
     user_id: str = "default",
     translation: bool = False,
     mode: str = "normal",
-    parent_id: str = None,
+    parent_id: int = None,
 ) -> dict:
     # 在invoke之前先构建SystemMessage，这时候有所有需要的参数
     conversation_id = f"{user_id}_{conv_id}"
@@ -141,16 +141,89 @@ def chat(
         user_res = memory.add(HumanMessage(content=user_message), parent_id=parent_id)
         agent_res = memory.add(agent_msg, parent_id=user_res["message_id"])
 
-        warning_flag = agent_res.get("warning")
-        warning = None
-        if warning_flag:
-            warning = (
-                f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
-            )
+        warning = (
+            f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
+            if agent_res.get("warning")
+            else None
+        )
 
         return {
             "answer": agent_msg.content,
             "user_msg_id": user_res["message_id"],
+            "agent_msg_id": agent_res["message_id"],
+            "warning": warning,
+        }
+    finally:
+        memory.close()
+
+
+def regenerate(
+    user_message: str,
+    conv_id: str,
+    user_id: str = "default",
+    translation: bool = False,
+    mode: str = "normal",
+    parent_id: int = None,
+    old_agent_msg_id: int = None,
+) -> dict:
+    # 在invoke之前先构建SystemMessage，这时候有所有需要的参数
+    conversation_id = f"{user_id}_{conv_id}"
+    memory = ConversationMemory(conversation_id)
+    try:
+        # 流程：
+        #   1. memory.regenerate(old_agent_msg_id, parent_id) → 拿到 version
+        #   2. graph.invoke() 重新推理
+        #   3. memory.add(new_agent_msg, parent_id=parent_id, version=version)
+        #   4. 返回新 answer 和 agent_msg_id
+
+        # 1
+        regen_res = memory.regenerate(old_agent_msg_id, parent_id)
+        if not regen_res.get("success"):
+            raise Exception(f"标记旧消息失败: {regen_res.get('detail')}")
+        version = regen_res.get("version")
+
+        # 2
+        history = format_history(memory.get())
+        citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
+
+        if mode == "discuss":
+            system_msg = SystemMessage(
+                content=SYSTEM_PROMPT_DISCUSS.format(
+                    history=history, citation_plugin=citation_plugin
+                )
+            )
+        else:
+            system_msg = SystemMessage(
+                content=SYSTEM_PROMPT_NORMAL.format(
+                    history=history, citation_plugin=citation_plugin
+                )
+            )
+
+        agent = build_agent(user_id)
+
+        result = agent.invoke(
+            {
+                "messages": [system_msg, HumanMessage(content=user_message)],
+                "conv_id": conv_id,
+                "user_id": user_id,
+                "translation": translation,
+            }
+        )
+
+        new_agent_msg = result["messages"][-1]
+
+        # 3
+        agent_res = memory.add(new_agent_msg, parent_id=parent_id, version=version)
+
+        warning = (
+            f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
+            if agent_res.get("warning")
+            else None
+        )
+
+        return {
+            "answer": new_agent_msg.content,
+            "user_msg_id": parent_id,
             "agent_msg_id": agent_res["message_id"],
             "warning": warning,
         }

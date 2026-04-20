@@ -2,6 +2,7 @@
 from langchain_core.messages import HumanMessage, BaseMessage, AIMessage
 from src.core.init_SQLite import get_conn
 import sqlite3
+from typing import Literal
 
 INSERT_MESSAGES_SQL = """
 INSERT INTO messages (
@@ -17,16 +18,42 @@ VALUES (?, ?, ?, ?, ?, ?)
 
 SELECT_MESSAGES_PARTIAL_SQL = """SELECT id, role, content FROM messages WHERE status='normal' AND conversation_id = ? ORDER BY id ASC"""
 
-SELECT_MESSAGES_FULL_SQL = (
-    """SELECT * FROM messages WHERE conversation_id = ? ORDER BY id ASC"""
-)
-
+SELECT_MESSAGES_FULL_SQL = """
+SELECT * FROM messages WHERE conversation_id = ? ORDER BY id ASC
+"""
 
 SELECT_LAST_MESSAGES_ID_SQL = """
 SELECT id FROM messages
 WHERE conversation_id = ?
 ORDER BY id DESC
 LIMIT 1
+"""
+
+SELECT_MAX_VERSION_SQL = """
+SELECT version FROM messages
+WHERE parent_id = ?
+ORDER BY id DESC
+LIMIT 1
+"""
+
+SELECT_CHILDREN_SQL = """
+SELECT * FROM messages WHERE parent_id = ? ORDER BY id ASC
+"""
+
+SELECT_ONE_MESSAGES_SQL = """
+SELECT * FROM messages WHERE id = ?
+"""
+
+UPDATE_STATUS_SQL = """
+UPDATE messages
+SET status = ?
+WHERE id = ?
+"""
+
+UPDATE_LIKED_SQL = """
+UPDATE messages
+SET liked = ?
+WHERE id = ?
 """
 
 DELETE_MESSAGES_SQL = "DELETE FROM messages WHERE conversation_id = ?"
@@ -39,11 +66,17 @@ class MessageRepo:
         self.cur = self.conn.cursor()
 
     def insert(
-        self, conversation_id, role, content, parent_id=None, status="normal", version=1
+        self,
+        conversation_id,
+        role,
+        content,
+        parent_id: int = None,
+        status="normal",
+        version=1,
     ):
         try:
             if not parent_id:
-                res = self.get_last_message_id()
+                res = self.get_last_message_id(conversation_id)
                 last_id = res.get("last_id")
                 parent_id = last_id if last_id else None
             self.cur.execute(
@@ -51,7 +84,6 @@ class MessageRepo:
                 (conversation_id, role, content, parent_id, status, version),
             )
             self.conn.commit()
-
             return {"success": True, "message_id": self.cur.lastrowid}
         except Exception as e:
             return {"success": False, "detail": str(e)}
@@ -60,9 +92,9 @@ class MessageRepo:
         try:
             self.cur.execute(SELECT_LAST_MESSAGES_ID_SQL, (conversation_id,))
 
-            id = self.cur.fetchone()
-
-            return {"success": True, "last_id": id}
+            row = self.cur.fetchone()
+            last_id = row["id"] if row else None
+            return {"success": True, "last_id": last_id}
         except Exception as e:
             return {"success": False, "detail": str(e)}
 
@@ -83,9 +115,53 @@ class MessageRepo:
             return {"success": False, "detail": str(e)}
 
     def get_max_version(self, parent_id: int):
-        pass
+        """重新生成时，查同一 parent 下最大 version，用来计算新 version"""
+        try:
+            self.cur.execute(SELECT_MAX_VERSION_SQL, (parent_id,))
+            row = self.cur.fetchone()
+            last_version = row["version"] if row else 0
+            return {"success": True, "last_version": last_version}
+        except Exception as e:
+            return {"success": False, "detail": str(e)}
+
+    def update_status(self, message_id: int, status: str = "regenerated"):
+        """更新某条消息的 status"""
+        try:
+            self.cur.execute(UPDATE_STATUS_SQL, (status, message_id))
+            self.conn.commit()
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "detail": str(e)}
+
+    def get_children(self, message_id: int):
+        """查某条消息下的直接子节点"""
+        try:
+            self.cur.execute(SELECT_CHILDREN_SQL, (message_id,))
+            rows = self.cur.fetchall()
+            return rows
+        except Exception as e:
+            return {"success": False, "detail": str(e)}
+
+    def get_message_by_id(self, message_id: int):
+        """按 id 查单条"""
+        try:
+            self.cur.execute(SELECT_ONE_MESSAGES_SQL, (message_id,))
+            row = self.cur.fetchone()
+            return row
+        except Exception as e:
+            return {"success": False, "detail": str(e)}
+
+    def update_like(self, message_id: int, liked: Literal[1, -1, 0]):
+        """点赞/踩"""
+        try:
+            self.cur.execute(UPDATE_LIKED_SQL, (liked, message_id))
+            self.conn.commit()
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "detail": str(e)}
 
     def delete(self, conversation_id: str):
+        """删除某个对话下所有信息"""
         try:
             self.cur.execute(DELETE_MESSAGES_SQL, (conversation_id,))
             self.conn.commit()
@@ -107,12 +183,29 @@ class ConversationMemory:
         self.conversation_id = conversation_id
         self._repo = MessageRepo()
 
-    def add(self, message: BaseMessage, parent_id=None):
+    def add(self, message: BaseMessage, parent_id=None, version: int = 1):
         """单条插入，总量超限报预警"""
         role = "user" if isinstance(message, HumanMessage) else "assistant"
-        res = self._repo.insert(self.conversation_id, role, message.content, parent_id)
+        res = self._repo.insert(
+            self.conversation_id,
+            role,
+            message.content,
+            parent_id,
+            status="normal",
+            version=version,
+        )
         warning = self.warning()
         return res | warning
+
+    def regenerate(self, old_agent_msg_id: int, parent_id: int) -> dict:
+        res = self._repo.update_status(old_agent_msg_id, "regenerated")
+
+        if not res.get("success"):
+            return {"success": False, "detail": res.get("detail")}
+
+        res = self._repo.get_max_version(parent_id)
+        version = res.get("last_version") + 1
+        return {"success": True, "new_parent_id": parent_id, "version": version}
 
     def get(self) -> list:
         """返回本对话tokens上限内的合法历史记录,list(BaseMessage)"""

@@ -8,10 +8,11 @@ from src.config import PDF_DIR
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index, delete_paper
 from src.rag.chain import ask
+from src.rag.graph import regenerate
 import requests
 from typing import Literal
-import re
-from src.rag.memory import ConversationMemory
+from src.core.trim_thinking import extract_thinking, strip_thinking
+from src.rag.memory import ConversationMemory, MessageRepo
 
 router = APIRouter()
 
@@ -31,6 +32,15 @@ def get_conversation(conversation_id: str):
         return {"messages": memory.get_tree()}
     except Exception as e:
         return {"success": False, "detail": str(e)}
+    finally:
+        memory.close()
+
+
+@router.delete("/conversation/{conversation_id}")
+def delete_conversation(conversation_id: str):
+    memory = ConversationMemory(conversation_id)
+    try:
+        return memory.clear()
     finally:
         memory.close()
 
@@ -194,27 +204,7 @@ class AskRequest(BaseModel):
     user_id: str = "default"
     translation: bool = False
     mode: Literal["normal", "discuss"] = "normal"
-    parent_id: str = None
-
-
-def extract_thinking(text: str) -> str:
-    """提取/</thinking/>及其之前的所有内容用于log"""
-    match = re.search(r"^[\s\S]*?</thinking>", text)
-    if match:
-        return match.group(0).strip()
-    # 没有</thinking>，说明被截断了，返回全部
-    return text.strip() + "  [no closing tag]"
-
-
-def strip_thinking(text: str) -> str:
-    """以/</thinking/>为准，去除它及之前的所有内容"""
-    match = re.search(r"</thinking>", text)
-    if match:
-        return text[match.end() :].strip()
-    # 没有</thinking>，说明thinking未结束，全部去掉（异常情况）
-    if "<thinking>" in text:
-        return ""
-    return text.strip()
+    parent_id: int | None = None
 
 
 @router.post("/ask")
@@ -233,3 +223,42 @@ def ask_question(req: AskRequest):
         print(thinking)
     result["answer"] = strip_thinking(result["answer"])
     return result
+
+
+class RegenerateRequest(BaseModel):
+    question: str
+    conv_id: str
+    user_id: str = "default"
+    translation: bool = False
+    mode: Literal["normal", "discuss"] = "normal"
+    parent_id: int
+    old_agent_msg_id: int
+
+
+@router.post("/regenerate")
+def ask_question_regenerate(req: RegenerateRequest):
+    print(f"DEBUG translation={req.translation!r} mode={req.mode!r}")
+    result = regenerate(
+        user_message=req.question,
+        conv_id=req.conv_id,
+        user_id=req.user_id,
+        translation=req.translation,
+        mode=req.mode,
+        parent_id=req.parent_id,
+        old_agent_msg_id=req.old_agent_msg_id,
+    )
+    thinking = extract_thinking(result.get("answer", ""))
+    if thinking:
+        print(thinking)
+    result["answer"] = strip_thinking(result["answer"])
+    return result
+
+
+# ── 赞踩 ─────────────────────────────────────────────────
+@router.patch("/message/{id}/like")
+def message_like(id: int, liked: Literal[1, -1, 0]):
+    repo = MessageRepo()
+    try:
+        return repo.update_like(message_id=id, liked=liked)
+    finally:
+        repo.close()
