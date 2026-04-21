@@ -256,7 +256,9 @@ def ask_question_regenerate(req: RegenerateRequest):
 
 # ── 赞踩 ─────────────────────────────────────────────────
 @router.patch("/message/{id}/like")
-def message_like(id: int, liked: Literal[1, -1, 0]):
+def message_like(id: int, liked: int):
+    if liked not in (1, -1, 0):
+        raise HTTPException(status_code=422, detail="liked 只能是 1, -1, 0")
     repo = MessageRepo()
     try:
         return repo.update_like(message_id=id, liked=liked)

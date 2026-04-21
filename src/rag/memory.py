@@ -109,10 +109,10 @@ class MessageRepo:
                 (conversation_id,),
             )
             rows = self.cur.fetchall()
-            # 只负责数据库操作
-            return rows
+            return [dict(row) for row in rows]
         except Exception as e:
-            return {"success": False, "detail": str(e)}
+            print(f"get_messages error: {e}")  # 保留日志
+            return []  # 不返回 dict，返回空列表
 
     def get_max_version(self, parent_id: int):
         """重新生成时，查同一 parent 下最大 version，用来计算新 version"""
@@ -138,18 +138,20 @@ class MessageRepo:
         try:
             self.cur.execute(SELECT_CHILDREN_SQL, (message_id,))
             rows = self.cur.fetchall()
-            return rows
+            return [dict(row) for row in rows]
         except Exception as e:
-            return {"success": False, "detail": str(e)}
+            print(f"get_children error: {e}")
+            return []
 
     def get_message_by_id(self, message_id: int):
         """按 id 查单条"""
         try:
             self.cur.execute(SELECT_ONE_MESSAGES_SQL, (message_id,))
             row = self.cur.fetchone()
-            return row
+            return dict(row) if row else None
         except Exception as e:
-            return {"success": False, "detail": str(e)}
+            print(f"get_message_by_id error: {e}")
+            return None
 
     def update_like(self, message_id: int, liked: Literal[1, -1, 0]):
         """点赞/踩"""
@@ -210,6 +212,8 @@ class ConversationMemory:
     def get(self) -> list:
         """返回本对话tokens上限内的合法历史记录,list(BaseMessage)"""
         rows = self._repo.get_messages(self.conversation_id)
+        if not rows:
+            return []
         # 窗口取最后 max_tokens 囊括的条
         total = 0
         selected = []
@@ -249,7 +253,7 @@ class ConversationMemory:
     def _count_chars(self) -> int:
         """计算本对话目前的token数"""
         rows = self._repo.get_messages(self.conversation_id)
-        return sum(len(m.content) for m in rows)
+        return sum(len(m.get("content")) for m in rows)
 
     def clear(self):
         """删除本对话对应的所有记录"""

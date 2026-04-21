@@ -12,8 +12,10 @@ PDF_DIR = DATA_DIR / "pdfs"
 CHROMA_DIR = DATA_DIR / "chroma_db"
 DB_PATH = DATA_DIR / "SQLite" / "app.db"
 
+# 启动时确保目录都存在
 PDF_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
