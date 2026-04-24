@@ -59,6 +59,47 @@ WHERE id = ?
 DELETE_MESSAGES_SQL = "DELETE FROM messages WHERE conversation_id = ?"
 
 
+class ConversationRepo:
+    def __init__(self):
+        self.conn = get_conn()
+        self.conn.row_factory = sqlite3.Row
+        self.cur = self.conn.cursor()
+
+    def ensure_exists(self, conversation_id: str, user_id: str, first_message: str):
+        """每次 ask 都调，第一次插入，后续 IGNORE"""
+        title = first_message[:22]
+        self.cur.execute(
+            "INSERT OR IGNORE INTO conversations (conversation_id, user_id, title) VALUES (?, ?, ?)",
+            (conversation_id, user_id, title),
+        )
+        self.conn.commit()
+
+    def list_by_user(self, user_id: str) -> list[dict]:
+        self.cur.execute(
+            "SELECT * FROM conversations WHERE user_id = ? ORDER BY created_at DESC",
+            (user_id,),
+        )
+        return [dict(row) for row in self.cur.fetchall()]
+
+    def update_title(self, conversation_id: str, title: str):
+        self.cur.execute(
+            "UPDATE conversations SET title = ? WHERE conversation_id = ?",
+            (title, conversation_id),
+        )
+        self.conn.commit()
+        return {"success": True}
+
+    def delete(self, conversation_id: str):
+        self.cur.execute(
+            "DELETE FROM conversations WHERE conversation_id = ?",
+            (conversation_id,),
+        )
+        self.conn.commit()
+
+    def close(self):
+        self.conn.close()
+
+
 class MessageRepo:
     def __init__(self):
         self.conn = get_conn()
@@ -75,26 +116,12 @@ class MessageRepo:
         version=1,
     ):
         try:
-            if not parent_id:
-                res = self.get_last_message_id(conversation_id)
-                last_id = res.get("last_id")
-                parent_id = last_id if last_id else None
             self.cur.execute(
                 INSERT_MESSAGES_SQL,
                 (conversation_id, role, content, parent_id, status, version),
             )
             self.conn.commit()
             return {"success": True, "message_id": self.cur.lastrowid}
-        except Exception as e:
-            return {"success": False, "detail": str(e)}
-
-    def get_last_message_id(self, conversation_id):
-        try:
-            self.cur.execute(SELECT_LAST_MESSAGES_ID_SQL, (conversation_id,))
-
-            row = self.cur.fetchone()
-            last_id = row["id"] if row else None
-            return {"success": True, "last_id": last_id}
         except Exception as e:
             return {"success": False, "detail": str(e)}
 
@@ -113,6 +140,21 @@ class MessageRepo:
         except Exception as e:
             print(f"get_messages error: {e}")  # 保留日志
             return []  # 不返回 dict，返回空列表
+
+    def get_active_chain(self, leaf_message_id: int) -> list[dict]:
+        """从叶节点往上追溯，返回当前激活链路的消息"""
+        chain = []
+        current_id = leaf_message_id
+
+        while current_id is not None:
+            row = self.get_message_by_id(current_id)
+            if not row:
+                break
+            chain.append(row)
+            current_id = row["parent_id"]
+
+        chain.reverse()  # 从根到叶
+        return chain
 
     def get_max_version(self, parent_id: int):
         """重新生成时，查同一 parent 下最大 version，用来计算新 version"""
@@ -186,7 +228,7 @@ class ConversationMemory:
         self._repo = MessageRepo()
 
     def add(self, message: BaseMessage, parent_id=None, version: int = 1):
-        """单条插入，总量超限报预警"""
+        """单条插入，返回成功/消息id/总量超限预警"""
         role = "user" if isinstance(message, HumanMessage) else "assistant"
         res = self._repo.insert(
             self.conversation_id,
@@ -209,9 +251,15 @@ class ConversationMemory:
         version = res.get("last_version") + 1
         return {"success": True, "new_parent_id": parent_id, "version": version}
 
-    def get(self) -> list:
-        """返回本对话tokens上限内的合法历史记录,list(BaseMessage)"""
-        rows = self._repo.get_messages(self.conversation_id)
+    def get(self, leaf_message_id: int = None) -> list[BaseMessage]:
+        """返回本对话tokens上限内的合法历史记录,list(BaseMessage);
+        无输入激活节点，则默认从最新节点往前追溯所有消息；
+        输入激活节点，则从该节点往前追溯当前链路上的消息"""
+        if leaf_message_id:
+            rows = self._repo.get_active_chain(leaf_message_id)
+        else:
+            # 兼容旧逻辑，取最新叶节点
+            rows = self._repo.get_messages(self.conversation_id)
         if not rows:
             return []
         # 窗口取最后 max_tokens 囊括的条

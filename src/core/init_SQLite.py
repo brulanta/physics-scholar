@@ -57,5 +57,19 @@ def init_db():
         """CREATE INDEX IF NOT EXISTS idx_papers_user_doc ON papers(user_id, doc_id)"""
     )
 
+    # conversations
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS conversations (
+        conversation_id TEXT PRIMARY KEY,
+        user_id TEXT DEFAULT 'default',
+        title TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cur.execute("""
+    CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)
+    """)
+
     conn.commit()
     conn.close()

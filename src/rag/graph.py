@@ -12,8 +12,8 @@ from src.rag.tools.arxiv_tool import arxiv_tool
 from src.rag.memory import (
     ConversationMemory,
     format_history,
-    strip_thinking,
     WARN_THRESHOLD,
+    ConversationRepo,
 )
 from src.rag.prompt import (
     SYSTEM_PROMPT_NORMAL,
@@ -21,8 +21,11 @@ from src.rag.prompt import (
     CITATION_TRANSLATION,
     SYSTEM_PROMPT_DISCUSS,
 )
+from src.core.trim_thinking import process_llm_output
+from src.utils.logger import get_logger
 
 load_dotenv()
+logger = get_logger(__name__)
 
 
 class AgentState(TypedDict):
@@ -44,29 +47,6 @@ def should_call_tool(state: AgentState) -> dict:
     if state["messages"][-1].tool_calls:
         return "execute_tools"
     return END
-
-
-# def save_to_memory(state: AgentState):
-#     conversation_id = f"{state['user_id']}_{state['conv_id']}"
-#     memory = ConversationMemory(conversation_id)
-#     try:
-#         messages = state["messages"]
-
-#         # 跳过第一条（system+history拼好的prompt）
-#         # 只存HumanMessage和最后的AIMessage
-#         for msg in messages:
-#             if isinstance(msg, HumanMessage):
-#                 res1 = memory.add(msg)
-
-#         # 最后一条AIMessage是本轮最终回答
-#         last_ai = next(
-#             (m for m in reversed(messages) if isinstance(m, AIMessage)), None
-#         )
-#         if last_ai:
-#             clean_content = strip_thinking(last_ai.content)
-#             res2 = memory.add(AIMessage(content=clean_content))
-#     finally:
-#         memory.close()
 
 
 def build_agent(user_id: str):
@@ -105,11 +85,11 @@ def chat(
     mode: str = "normal",
     parent_id: int = None,
 ) -> dict:
-    # 在invoke之前先构建SystemMessage，这时候有所有需要的参数
+    # 1.在invoke之前先构建SystemMessage，这时候有所有需要的参数
     conversation_id = f"{user_id}_{conv_id}"
     memory = ConversationMemory(conversation_id)
     try:
-        history = format_history(memory.get())
+        history = format_history(memory.get(leaf_message_id=parent_id))
         citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
 
         if mode == "discuss":
@@ -125,6 +105,7 @@ def chat(
                 )
             )
 
+        # 2. call agent
         agent = build_agent(user_id)
 
         result = agent.invoke(
@@ -136,11 +117,30 @@ def chat(
             }
         )
 
-        agent_msg = result["messages"][-1]
+        # 3. 处理result，写入memory
+        agent_msg_pure = process_llm_output(
+            result["messages"][-1].content, conversation_id
+        )  # 提取纯净answer，并把thinking打印日志
+
+        if not agent_msg_pure:
+            agent_msg_pure = (
+                "⚠️ 本次回答为空，可能是模型输出异常。可以点击重新生成再试一次。"
+            )
+            logger.warning("[%s] 写入空回答占位文本", conversation_id)
+
+        # 确保 conversations 表有这条对话的记录
+        conv_repo = ConversationRepo()
+        try:
+            conv_repo.ensure_exists(conversation_id, user_id, user_message)
+        finally:
+            conv_repo.close()
 
         user_res = memory.add(HumanMessage(content=user_message), parent_id=parent_id)
-        agent_res = memory.add(agent_msg, parent_id=user_res["message_id"])
+        agent_res = memory.add(
+            AIMessage(content=agent_msg_pure), parent_id=user_res["message_id"]
+        )
 
+        # 4. 构造返回
         warning = (
             f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
             if agent_res.get("warning")
@@ -148,7 +148,7 @@ def chat(
         )
 
         return {
-            "answer": agent_msg.content,
+            "answer": agent_msg_pure,
             "user_msg_id": user_res["message_id"],
             "agent_msg_id": agent_res["message_id"],
             "warning": warning,
@@ -210,11 +210,22 @@ def regenerate(
             }
         )
 
-        new_agent_msg = result["messages"][-1]
-
         # 3
-        agent_res = memory.add(new_agent_msg, parent_id=parent_id, version=version)
+        agent_msg_pure = process_llm_output(
+            result["messages"][-1].content, conversation_id
+        )  # 提取纯净answer，并把thinking打印日志
 
+        if not agent_msg_pure:
+            agent_msg_pure = (
+                "⚠️ 本次回答为空，可能是模型输出异常。可以点击重新生成再试一次。"
+            )
+            logger.warning("[%s] 写入空回答占位文本", conversation_id)
+
+        agent_res = memory.add(
+            AIMessage(content=agent_msg_pure), parent_id=parent_id, version=version
+        )
+
+        # 4
         warning = (
             f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
             if agent_res.get("warning")
@@ -222,7 +233,7 @@ def regenerate(
         )
 
         return {
-            "answer": new_agent_msg.content,
+            "answer": agent_msg_pure,
             "user_msg_id": parent_id,
             "agent_msg_id": agent_res["message_id"],
             "warning": warning,

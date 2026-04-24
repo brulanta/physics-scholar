@@ -11,11 +11,11 @@ from src.rag.chain import ask
 from src.rag.graph import regenerate
 import requests
 from typing import Literal
-from src.core.trim_thinking import extract_thinking, strip_thinking
-from src.rag.memory import ConversationMemory, MessageRepo
+from src.rag.memory import ConversationMemory, MessageRepo, ConversationRepo
+from src.utils.logger import get_logger
 
 router = APIRouter()
-
+logger = get_logger(__name__)
 
 # ── 会话 ─────────────────────────────────────────────────
 
@@ -39,10 +39,31 @@ def get_conversation(conversation_id: str):
 @router.delete("/conversation/{conversation_id}")
 def delete_conversation(conversation_id: str):
     memory = ConversationMemory(conversation_id)
+    repo = ConversationRepo()
     try:
+        repo.delete(conversation_id)
         return memory.clear()
     finally:
         memory.close()
+        repo.close()
+
+
+@router.get("/conversations")
+def list_conversations(user_id: str = "default"):
+    repo = ConversationRepo()
+    try:
+        return {"conversations": repo.list_by_user(user_id)}
+    finally:
+        repo.close()
+
+
+@router.patch("/conversation/{conversation_id}/title")
+def update_title(conversation_id: str, title: str):
+    repo = ConversationRepo()
+    try:
+        return repo.update_title(conversation_id, title)
+    finally:
+        repo.close()
 
 
 # ── 论文管理 ──────────────────────────────────────────────
@@ -63,7 +84,7 @@ async def upload_paper(
         user_id=user_id,
         strict=strict_bool,
     )
-    print(f"DEBUG strict={strict!r} -> {strict_bool!r}")
+    logger.debug("[API] /upload get strict= %r -> %r", strict, strict_bool)
     if not result["success"]:
         raise HTTPException(status_code=409, detail=result["detail"])
 
@@ -209,7 +230,9 @@ class AskRequest(BaseModel):
 
 @router.post("/ask")
 def ask_question(req: AskRequest):
-    print(f"DEBUG translation={req.translation!r} mode={req.mode!r}")
+    logger.debug(
+        "[API] /ask get translation = %r | mode = %r", req.translation, req.mode
+    )
     result = ask(
         question=req.question,
         conv_id=req.conv_id,
@@ -218,10 +241,6 @@ def ask_question(req: AskRequest):
         mode=req.mode,
         parent_id=req.parent_id,
     )
-    thinking = extract_thinking(result.get("answer", ""))
-    if thinking:
-        print(thinking)
-    result["answer"] = strip_thinking(result["answer"])
     return result
 
 
@@ -237,7 +256,9 @@ class RegenerateRequest(BaseModel):
 
 @router.post("/regenerate")
 def ask_question_regenerate(req: RegenerateRequest):
-    print(f"DEBUG translation={req.translation!r} mode={req.mode!r}")
+    logger.debug(
+        "[API] /regenerate get translation = %r | mode = %r", req.translation, req.mode
+    )
     result = regenerate(
         user_message=req.question,
         conv_id=req.conv_id,
@@ -247,10 +268,6 @@ def ask_question_regenerate(req: RegenerateRequest):
         parent_id=req.parent_id,
         old_agent_msg_id=req.old_agent_msg_id,
     )
-    thinking = extract_thinking(result.get("answer", ""))
-    if thinking:
-        print(thinking)
-    result["answer"] = strip_thinking(result["answer"])
     return result
 
 

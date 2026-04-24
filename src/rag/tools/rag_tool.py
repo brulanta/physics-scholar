@@ -2,6 +2,9 @@ from src.core.ingestor import get_vectorstore
 from pydantic import BaseModel, Field
 from typing import Literal
 from langchain.tools import tool
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 vs = get_vectorstore()
 
@@ -86,7 +89,12 @@ def make_rag_tool(user_id: str):
             }
         )
         docs = retriever.invoke(query)
-        print(f"[RAG] User: {user_id} | Query: {query} | Doc_ID: {doc_id or 'All'}")
+        logger.info(
+            "[RAG] User: %s | Query: %s | Doc_ID: %s",
+            user_id,
+            query,
+            doc_id or "All",
+        )
         return format_context(docs)
 
     return rag_tool

@@ -1,8 +1,18 @@
 <template>
   <div class="input-wrap">
-    <div class="input-area" :class="{ focused }">
-      <textarea ref="textareaRef" v-model="input" placeholder="输入问题，Enter 发送，Shift+Enter 换行…"
-        @keydown.enter.exact.prevent="submit" @input="autoResize" @focus="focused = true" @blur="focused = false" />
+    <!-- 编辑模式提示条 -->
+    <div v-if="editMode.active" class="edit-banner">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style="flex-shrink:0">
+        <path d="M7.5 1.5l3 3L3.5 11H1V8.5L7.5 1.5z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" />
+      </svg>
+      正在编辑消息，发送后将创建新分支
+      <button class="edit-cancel" @click="$emit('cancel-edit')">取消</button>
+    </div>
+
+    <div class="input-area" :class="{ focused, 'edit-active': editMode.active }">
+      <textarea ref="textareaRef" v-model="input"
+        :placeholder="editMode.active ? '修改消息内容…' : '输入问题，Enter 发送，Shift+Enter 换行…'"
+        @keydown.enter.exact.prevent="submit" @input="onInput" @focus="focused = true" @blur="focused = false" />
       <div class="input-actions">
         <button class="mode-btn" :class="{ active: mode === 'discuss' }" @click="$emit('toggle-mode')">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -23,20 +33,73 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 
-const props = defineProps({ loading: Boolean, mode: String })
-const emit = defineEmits(['send', 'toggle-mode'])
+const props = defineProps({
+  loading: Boolean,
+  mode: String,
+  draft: { type: String, default: '' },
+  editMode: {
+    type: Object,
+    default: () => ({ active: false, content: '', parentId: null })
+  },
+})
 
-const input = ref('')
+const emit = defineEmits(['send', 'send-edit', 'cancel-edit', 'toggle-mode', 'draft-change'])
+
+const input = ref(props.draft || '')
 const focused = ref(false)
 const textareaRef = ref(null)
 
+// 切换 session 时恢复草稿
+watch(() => props.draft, (v) => {
+  // 只在非编辑模式下恢复草稿，避免覆盖编辑内容
+  if (!props.editMode.active) {
+    input.value = v || ''
+    nextTick(autoResize)
+  }
+})
+
+// 进入编辑模式时填入原消息内容并聚焦
+watch(() => props.editMode.active, async (active) => {
+  if (active) {
+    input.value = props.editMode.content || ''
+    await nextTick()
+    autoResize()
+    textareaRef.value?.focus()
+    // 光标移到末尾
+    const el = textareaRef.value
+    if (el) {
+      el.selectionStart = el.selectionEnd = el.value.length
+    }
+  } else {
+    // 退出编辑模式，恢复草稿
+    input.value = props.draft || ''
+    await nextTick()
+    autoResize()
+  }
+})
+
 function submit() {
   if (!input.value.trim() || props.loading) return
-  emit('send', input.value.trim())
+  const text = input.value.trim()
+  if (props.editMode.active) {
+    emit('send-edit', text)
+  } else {
+    emit('send', text)
+  }
   input.value = ''
-  nextTick(() => { if (textareaRef.value) textareaRef.value.style.height = 'auto' })
+  nextTick(() => {
+    if (textareaRef.value) textareaRef.value.style.height = 'auto'
+  })
+}
+
+function onInput() {
+  autoResize()
+  // 非编辑模式下同步草稿
+  if (!props.editMode.active) {
+    emit('draft-change', input.value)
+  }
 }
 
 function autoResize() {
@@ -45,6 +108,16 @@ function autoResize() {
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 180) + 'px'
 }
+
+onMounted(() => {
+  textareaRef.value?.focus()
+})
+
+defineExpose({
+  focusInput() {
+    textareaRef.value?.focus()
+  }
+})
 </script>
 
 <style scoped>
@@ -158,5 +231,41 @@ textarea::placeholder {
   to {
     transform: rotate(360deg);
   }
+}
+
+.edit-banner {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  font-size: 0.78em;
+  color: var(--text-2);
+  background: var(--bg-3);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+}
+
+.edit-cancel {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-3);
+  font-size: 0.9em;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.edit-cancel:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.input-area.edit-active {
+  border-color: var(--accent);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 </style>

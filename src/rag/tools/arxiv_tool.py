@@ -5,6 +5,9 @@ from datetime import datetime, timedelta, timezone
 import time
 from langchain.tools import tool
 import json
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class ArxivRequest(BaseModel):
@@ -129,7 +132,7 @@ def arxiv_tool(
     - 若检索失败，将返回 {"success": False, "error": "...", "papers": []}
     """
     params = build_arxiv_params(keywords, author, category, recent_days, max_results)
-    print(params)
+    logger.info("[arxiv] params: %s", params)
     url = "http://export.arxiv.org/api/query"
 
     for _ in range(2):

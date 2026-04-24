@@ -3,6 +3,9 @@ from langchain.tools import tool
 from pydantic import BaseModel, Field
 from src.core.registry import search_by_keyword
 import json
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SearchPaperRequest(BaseModel):
@@ -26,7 +29,7 @@ def make_search_tool(user_id: str):
         返回结果按匹配度排序。
         """
         results = search_by_keyword(keywords, user_id)
-        print(f"查询了论文id，输入参数为{keywords}")
+        logger.info("[paper_id_search] params: %s", keywords)
         if not results:
             results = [{"message": "未找到匹配论文，请尝试其他关键词"}]
         return json.dumps(results, ensure_ascii=False, indent=2)

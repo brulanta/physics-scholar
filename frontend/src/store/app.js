@@ -10,8 +10,8 @@ export const settings = reactive({
 })
 
 export const sessions = reactive({
-  list: JSON.parse(localStorage.getItem('ps-sessions') || '[]'),
-  currentId: ''  // 空 = 欢迎页，启动时始终从欢迎页开始
+  list: [],        // 不再从 localStorage 初始化，由 ChatPage onMounted 拉取
+  currentId: ''
 })
 
 watch(settings, (v) => {
@@ -20,10 +20,7 @@ watch(settings, (v) => {
   applyFont(v.fontFamily)
 }, { deep: true })
 
-// 不只watch list，直接watch整个sessions
-watch(sessions, (v) => {
-  localStorage.setItem('ps-sessions', JSON.stringify(v.list))
-}, { deep: true })
+// sessions.list 不再 watch 持久化，移除旧的 watch
 
 export function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme)
@@ -40,13 +37,11 @@ export function applyFont(family) {
   document.body.style.fontFamily = FONTS[family]?.css || FONTS.system.css
 }
 
-// session里不再预置欢迎消息，messages从空开始
 export function createSession(id, firstMsg) {
   const session = {
     id,
     title: firstMsg.slice(0, 22) + (firstMsg.length > 22 ? '…' : ''),
     createdAt: Date.now(),
-    messages: []   // 空，第一条是user消息
   }
   sessions.list.unshift(session)
   sessions.currentId = id
@@ -66,6 +61,5 @@ export function deleteSession(id) {
   const idx = sessions.list.findIndex(s => s.id === id)
   if (idx === -1) return
   sessions.list.splice(idx, 1)
-  // 删完始终回欢迎页
   sessions.currentId = sessions.list[0]?.id || ''
 }

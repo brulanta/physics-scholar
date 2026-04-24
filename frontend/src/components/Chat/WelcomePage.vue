@@ -40,7 +40,7 @@
 </template>
 
 <script setup>
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 
 const emit = defineEmits(['send'])
 const input = ref('')
@@ -79,6 +79,10 @@ function autoResize() {
   // 向下生长：max-height限制，超出滚动
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
+
+onMounted(() => {
+  textareaRef.value?.focus()
+})
 </script>
 
 <style scoped>

@@ -2,8 +2,12 @@
   <div class="chat-outer">
     <div class="chat-window" ref="windowRef" @scroll="onScroll">
       <div class="messages">
-        <MessageItem v-for="(msg, idx) in messages" :key="idx" :role="msg.role" :content="msg.content" />
-        <!-- streaming消息只在对应session显示 -->
+        <MessageItem v-for="msg in messages" :key="msg.id ?? msg.createdAt"
+          :siblings="msg.siblings ?? { total: 1, index: 0 }" :msg-id="msg.id" :parent-id="msg.parentId" :role="msg.role"
+          :content="msg.content" :liked="msg.liked" :created-at="msg.createdAt"
+          :prev-user-content="getPrevUserContent(msg)" @regenerate="$emit('regenerate', $event)"
+          @edit-branch="$emit('edit-branch', $event)" />
+        <!-- streaming 占位 -->
         <MessageItem v-if="streamingSessionId !== null && streamingSessionId === currentSessionId" role="assistant"
           :content="streamingContent" />
       </div>
@@ -30,11 +34,20 @@ const props = defineProps({
   currentSessionId: { type: String, default: '' }
 })
 
+const emit = defineEmits(['regenerate', 'edit-branch'])
+
+// 给 MessageItem 传入"上一条 user 消息的内容"，用于重发时带原始问题
+function getPrevUserContent(msg) {
+  if (msg.role !== 'assistant') return ''
+  const idx = props.messages.findIndex(m => m.id === msg.id)
+  if (idx <= 0) return ''
+  const prev = props.messages[idx - 1]
+  return prev?.role === 'user' ? prev.content : ''
+}
+
 const windowRef = ref(null)
 const showScrollBtn = ref(false)
 const isNearBottom = ref(true)
-let lastMessageCount = 0
-let lastUserMsgEl = null
 
 function onScroll() {
   const el = windowRef.value
@@ -50,12 +63,6 @@ function scrollToBottom(smooth = false) {
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' })
 }
 
-function scrollToTop(smooth = false) {
-  const el = windowRef.value
-  if (!el) return
-  el.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'instant' })
-}
-
 defineExpose({ scrollToBottom })
 
 watch(() => props.messages?.length, async (newLen, oldLen) => {
@@ -63,32 +70,21 @@ watch(() => props.messages?.length, async (newLen, oldLen) => {
   await nextTick()
   const el = windowRef.value
   if (!el) return
-
   const added = newLen - (oldLen ?? 0)
   if (added <= 0) return
-
   const lastMsg = props.messages[newLen - 1]
-
   if (lastMsg.role === 'user') {
-    // 用户消息：滚动让该消息置顶
-    // 找到最后一个message-row元素
     const rows = el.querySelectorAll('.message-row')
     const lastRow = rows[rows.length - 1]
-    if (lastRow) {
-      const offsetTop = lastRow.offsetTop
-      el.scrollTo({
-        top: offsetTop - 20,   // 距顶部留20px呼吸感
-        behavior: 'smooth'
-      })
-    }
+    if (lastRow) el.scrollTo({ top: lastRow.offsetTop - 20, behavior: 'smooth' })
   } else if (lastMsg.role === 'assistant') {
-    // assistant占位出现时，如果接近底部就追底
     if (isNearBottom.value) scrollToBottom()
   }
 })
 
-// streaming过程追底
 watch(() => props.streamingContent, async () => {
+  // 只有当前激活 session 的 streaming 才触发滚动
+  if (props.streamingSessionId !== props.currentSessionId) return
   await nextTick()
   if (isNearBottom.value) scrollToBottom()
 })
