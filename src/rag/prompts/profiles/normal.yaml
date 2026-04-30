@@ -1,0 +1,60 @@
+# Normal模式的模块配置
+# enabled: false 可以临时关闭某个模块（调试用）
+# order: 控制拼装顺序，数字越小越靠前
+
+modules:
+  - name: ROLE_BASE
+    enabled: true
+    order: 10
+
+  - name: ROLE_NORMAL_EXT
+    enabled: true
+    order: 15
+
+  - name: CONTEXT_BLOCK
+    enabled: true
+    order: 20
+
+  - name: TOOL_USAGE
+    enabled: true
+    order: 30
+
+  - name: THINKING_NORMAL
+    enabled: true
+    order: 40
+
+  - name: THINKING_SHARED
+    enabled: false
+    order: 45
+
+  - name: CITATION_FORMAT
+    enabled: true
+    order: 50
+
+  - name: CITATION_PLUGIN_SLOT
+    enabled: true
+    order: 60
+
+  - name: CODE_RULES
+    enabled: true
+    order: 70
+
+  - name: CONSTRAINTS_SHARED
+    enabled: true
+    order: 80
+
+  - name: CONSTRAINTS_NORMAL
+    enabled: true
+    order: 85
+
+  - name: BOUNDARY_RULES
+    enabled: true
+    order: 90
+
+  - name: LANGUAGE_POLICY
+    enabled: true
+    order: 100
+
+  - name: OUTPUT_FORMAT_SHARED
+    enabled: true
+    order: 110

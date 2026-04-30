@@ -1,6 +1,12 @@
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
-from langchain_core.messages import HumanMessage, BaseMessage, SystemMessage, AIMessage
+from langchain_core.messages import (
+    HumanMessage,
+    BaseMessage,
+    SystemMessage,
+    AIMessage,
+    ToolMessage,
+)
 from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 from typing import TypedDict, Annotated, Sequence
@@ -15,11 +21,10 @@ from src.rag.memory import (
     WARN_THRESHOLD,
     ConversationRepo,
 )
-from src.rag.prompt import (
-    SYSTEM_PROMPT_NORMAL,
+from src.rag.prompts import (
+    build_prompt,
     CITATION_DEFAULT,
     CITATION_TRANSLATION,
-    SYSTEM_PROMPT_DISCUSS,
 )
 from src.core.trim_thinking import process_llm_output
 from src.utils.logger import get_logger
@@ -33,20 +38,60 @@ class AgentState(TypedDict):
     conv_id: str
     user_id: str
     translation: bool
+    tool_call_count: int  # 新增
 
 
 llm = ChatOpenAI(
-    model="deepseek-chat",
+    model="deepseek-v4-flash",
     temperature=0.5,
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com",
+    extra_body={
+        "thinking": {"type": "disabled"},
+        "parallel_tool_calls": False,
+    },
 )
 
 
-def should_call_tool(state: AgentState) -> dict:
-    if state["messages"][-1].tool_calls:
+def should_call_tool(state: AgentState) -> str:
+    last_msg = state["messages"][-1]
+
+    if state.get("tool_call_count", 0) >= 6:
+        logger.warning("[should_call_tool] 达到最大工具调用轮次，强制进入final_answer")
+        return "final_answer"  # 新增节点
+
+    if last_msg.tool_calls:
         return "execute_tools"
     return END
+
+
+def final_answer(state: AgentState) -> dict:
+    messages = list(state["messages"])
+    last_msg = messages[-1]
+
+    # 如果最后一条消息有未响应的tool_calls，补假的ToolMessage
+    if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+        for tc in last_msg.tool_calls:
+            messages.append(
+                ToolMessage(
+                    content="[工具调用已取消，已达最大调用次数上限，请根据已有信息作答]",
+                    tool_call_id=tc["id"],
+                )
+            )
+
+    # 追加强制作答提示
+    messages.append(
+        HumanMessage(
+            content=(
+                "[系统提示] 工具调用已达上限。"
+                "请根据已获取的信息直接回答用户问题，不要再调用工具。"
+                "如果信息不足，如实说明已知部分并指出局限。"
+            )
+        )
+    )
+
+    response = llm.invoke(messages)
+    return {"messages": [response]}
 
 
 def build_agent(user_id: str):
@@ -58,19 +103,70 @@ def build_agent(user_id: str):
 
     # 把llm_with_tools和tool_node闭包进节点函数
     def call_llm(state):
-        response = llm_with_tools.invoke(state["messages"])
-        return {"messages": [response]}
+        messages = list(state["messages"])
+        last_msg = messages[-1]
+        is_after_tool = isinstance(last_msg, ToolMessage)
+
+        if is_after_tool:
+            messages[-1] = ToolMessage(
+                content=last_msg.content
+                + (
+                    "\n\n[请在 <thinking> 块中整合以上工具结果，"
+                    "判断信息是否足够，再决定下一步。]"
+                ),
+                tool_call_id=last_msg.tool_call_id,
+            )
+
+        response = llm_with_tools.invoke(messages)
+
+        # 串行裁剪
+        if hasattr(response, "tool_calls") and len(response.tool_calls) > 1:
+            logger.debug(
+                "[call_llm] 并行tool_calls裁剪: %d → 1，丢弃: %s",
+                len(response.tool_calls),
+                [tc["name"] for tc in response.tool_calls[1:]],
+            )
+            response.tool_calls = response.tool_calls[:1]
+            if "tool_calls" in response.additional_kwargs:
+                response.additional_kwargs["tool_calls"] = response.additional_kwargs[
+                    "tool_calls"
+                ][:1]
+
+        # 更新tool_call_count
+        new_count = state.get("tool_call_count", 0)
+        if response.tool_calls:
+            new_count += 1
+
+        content = response.content or ""
+        has_thinking = "<thinking>" in content
+        logger.debug(
+            "[call_llm][%s] thinking=%s | tool_calls=%s | content_len=%d | round=%d",
+            "tool_after" if is_after_tool else "first_call",
+            has_thinking,
+            [tc["name"] for tc in response.tool_calls] if response.tool_calls else [],
+            len(content),
+            new_count,
+        )
+        logger.debug(content)
+
+        return {"messages": [response], "tool_call_count": new_count}
 
     graph = StateGraph(AgentState)
     graph.add_node("call_llm", call_llm)
     graph.add_node("tool_node", tool_node)
     # graph.add_node("save_to_memory", save_to_memory)
+    graph.add_node("final_answer", final_answer)
     graph.set_entry_point("call_llm")
     graph.add_conditional_edges(
         "call_llm",
         should_call_tool,
-        {"execute_tools": "tool_node", END: END},
+        {
+            "execute_tools": "tool_node",
+            "final_answer": "final_answer",
+            END: END,
+        },
     )
+    graph.add_edge("final_answer", END)
     graph.add_edge("tool_node", "call_llm")
     # graph.add_edge("save_to_memory", END)
 
@@ -90,30 +186,27 @@ def chat(
     memory = ConversationMemory(conversation_id)
     try:
         history = format_history(memory.get(leaf_message_id=parent_id))
-        citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
 
-        if mode == "discuss":
-            system_msg = SystemMessage(
-                content=SYSTEM_PROMPT_DISCUSS.format(
-                    history=history, citation_plugin=citation_plugin
-                )
-            )
-        else:
-            system_msg = SystemMessage(
-                content=SYSTEM_PROMPT_NORMAL.format(
-                    history=history, citation_plugin=citation_plugin
-                )
-            )
+        system_prompt = build_prompt(
+            mode="normal" if mode == "normal" else "discuss",
+            history=history,
+            citation_plugin=CITATION_TRANSLATION if translation else CITATION_DEFAULT,
+            debug=False,
+        )
 
         # 2. call agent
         agent = build_agent(user_id)
 
         result = agent.invoke(
             {
-                "messages": [system_msg, HumanMessage(content=user_message)],
+                "messages": [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_message),
+                ],
                 "conv_id": conv_id,
                 "user_id": user_id,
                 "translation": translation,
+                "tool_call_count": 0,
             }
         )
 
@@ -183,30 +276,25 @@ def regenerate(
         version = regen_res.get("version")
 
         # 2
-        history = format_history(memory.get())
-        citation_plugin = CITATION_TRANSLATION if translation else CITATION_DEFAULT
-
-        if mode == "discuss":
-            system_msg = SystemMessage(
-                content=SYSTEM_PROMPT_DISCUSS.format(
-                    history=history, citation_plugin=citation_plugin
-                )
-            )
-        else:
-            system_msg = SystemMessage(
-                content=SYSTEM_PROMPT_NORMAL.format(
-                    history=history, citation_plugin=citation_plugin
-                )
-            )
+        history = format_history(memory.get(leaf_message_id=parent_id))
+        system_prompt = build_prompt(
+            mode="normal" if mode == "normal" else "discuss",
+            history=history,
+            citation_plugin=CITATION_TRANSLATION if translation else CITATION_DEFAULT,
+        )
 
         agent = build_agent(user_id)
 
         result = agent.invoke(
             {
-                "messages": [system_msg, HumanMessage(content=user_message)],
+                "messages": [
+                    SystemMessage(content=system_prompt),
+                    HumanMessage(content=user_message),
+                ],
                 "conv_id": conv_id,
                 "user_id": user_id,
                 "translation": translation,
+                "tool_call_count": 0,
             }
         )
 
