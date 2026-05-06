@@ -38,12 +38,12 @@ class AgentState(TypedDict):
     conv_id: str
     user_id: str
     translation: bool
-    tool_call_count: int  # 新增
+    remaining_calls: int  # 改名，初始值6
 
 
 llm = ChatOpenAI(
     model="deepseek-v4-flash",
-    temperature=0.5,
+    temperature=0.15,
     api_key=os.getenv("DEEPSEEK_API_KEY"),
     base_url="https://api.deepseek.com",
     extra_body={
@@ -56,7 +56,7 @@ llm = ChatOpenAI(
 def should_call_tool(state: AgentState) -> str:
     last_msg = state["messages"][-1]
 
-    if state.get("tool_call_count", 0) >= 6:
+    if state.get("remaining_calls", 6) <= 0:
         logger.warning("[should_call_tool] 达到最大工具调用轮次，强制进入final_answer")
         return "final_answer"  # 新增节点
 
@@ -69,7 +69,7 @@ def final_answer(state: AgentState) -> dict:
     messages = list(state["messages"])
     last_msg = messages[-1]
 
-    # 如果最后一条消息有未响应的tool_calls，补假的ToolMessage
+    # 补假的ToolMessage堵缺口
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
         for tc in last_msg.tool_calls:
             messages.append(
@@ -79,7 +79,6 @@ def final_answer(state: AgentState) -> dict:
                 )
             )
 
-    # 追加强制作答提示
     messages.append(
         HumanMessage(
             content=(
@@ -90,8 +89,37 @@ def final_answer(state: AgentState) -> dict:
         )
     )
 
+    # 加prefill，remaining=0触发CRITICAL提示
+    prefill = build_prefill(remaining=0, is_after_tool=True)
+    messages.append(AIMessage(content=prefill))
+
     response = llm.invoke(messages)
+
+    full_content = prefill + (response.content or "")
+    response.content = full_content
+
     return {"messages": [response]}
+
+
+def build_prefill(remaining: int, is_after_tool: bool) -> str:
+    # CRITICAL预警
+    if remaining <= 0:
+        warning = "🚫 CRITICAL: 工具调用已禁用，根据已有信息直接进入最终回答阶段。"
+    elif remaining == 1:
+        warning = "⚠️ CRITICAL: 最后一次工具调用机会，本轮必须获取最关键信息，之后直接进入最终回答阶段。"
+    else:
+        warning = ""
+
+    runtime_status = f"""[RUNTIME_STATUS]
+- Remaining_Tool_Calls: {remaining}/6{f"\n- {warning}" if warning else ""}
+[/RUNTIME_STATUS]"""
+
+    if is_after_tool:
+        lead = "已获取工具结果，继续分析。"
+    else:
+        lead = "收到。"
+
+    return f"{runtime_status}\n\n{lead}\n<thinking>\n"
 
 
 def build_agent(user_id: str):
@@ -106,18 +134,23 @@ def build_agent(user_id: str):
         messages = list(state["messages"])
         last_msg = messages[-1]
         is_after_tool = isinstance(last_msg, ToolMessage)
+        remaining = state.get("remaining_calls", 6)
 
         if is_after_tool:
             messages[-1] = ToolMessage(
-                content=last_msg.content
-                + (
-                    "\n\n[请在 <thinking> 块中整合以上工具结果，"
-                    "判断信息是否足够，再决定下一步。]"
-                ),
+                content=last_msg.content + "\n\n[请整合以上工具结果，继续thinking]",
                 tool_call_id=last_msg.tool_call_id,
             )
 
+        # 构建动态prefill
+        prefill = build_prefill(remaining, is_after_tool)
+        messages.append(AIMessage(content=prefill))
+
         response = llm_with_tools.invoke(messages)
+
+        # 拼接完整content
+        full_content = prefill + (response.content or "")
+        response.content = full_content
 
         # 串行裁剪
         if hasattr(response, "tool_calls") and len(response.tool_calls) > 1:
@@ -132,24 +165,22 @@ def build_agent(user_id: str):
                     "tool_calls"
                 ][:1]
 
-        # 更新tool_call_count
-        new_count = state.get("tool_call_count", 0)
-        if response.tool_calls:
-            new_count += 1
+        # 更新remaining_calls
+        new_remaining = remaining - 1 if response.tool_calls else remaining
 
+        # log
         content = response.content or ""
         has_thinking = "<thinking>" in content
         logger.debug(
-            "[call_llm][%s] thinking=%s | tool_calls=%s | content_len=%d | round=%d",
+            "[call_llm][%s] thinking=%s | tool_calls=%s | remaining=%d | content_len=%d",
             "tool_after" if is_after_tool else "first_call",
             has_thinking,
             [tc["name"] for tc in response.tool_calls] if response.tool_calls else [],
+            new_remaining,
             len(content),
-            new_count,
         )
-        logger.debug(content)
 
-        return {"messages": [response], "tool_call_count": new_count}
+        return {"messages": [response], "remaining_calls": new_remaining}
 
     graph = StateGraph(AgentState)
     graph.add_node("call_llm", call_llm)
@@ -206,7 +237,7 @@ def chat(
                 "conv_id": conv_id,
                 "user_id": user_id,
                 "translation": translation,
-                "tool_call_count": 0,
+                "remaining_calls": 6,
             }
         )
 
@@ -294,7 +325,7 @@ def regenerate(
                 "conv_id": conv_id,
                 "user_id": user_id,
                 "translation": translation,
-                "tool_call_count": 0,
+                "remaining_calls": 6,
             }
         )
 

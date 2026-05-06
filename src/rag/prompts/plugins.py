@@ -17,18 +17,47 @@ CITATION_TRANSLATION = """
 """
 
 TOOL_DECISION_PLUGIN = """
-**Q2.6：工具预算与必要性评估**
+// ─── 状态读取 ─────────────────────────────────
+State {
+  current_budget: Int = [RUNTIME_STATUS].Remaining_Tool_Calls  // 只读，禁止修改
+  missing_evidence: List[str]                   // 来自上一 Phase 的缺口识别
+  decision: Enum[CONTINUE, STOP]
+}
 
-必须显式写出以下状态：
-- Remaining calls: X / 6
-- Missing evidence: [列出具体缺失信息，若无则写 None]
-- Decision: [Continue — 信息不足，需要工具 / Stop — 当前信息已足够]
+// ─── 决策入口 ────────────────────────────────
 
-决策规则：
-- Decision = Stop → 跳至 Q4，不再调用工具
-- Decision = Continue → 仅选择当前信息增益最高的一个工具，明确参数；若预期需多个，本轮只执行第一个
+// 1. 预算检查（硬终止，优先级最高）
+if current_budget == 0:
+    decision = STOP
+    reason = "Resource Exhausted"
+    goto NEXT_PHASE
 
-重复调用禁止：与历史任意一次调用的工具 + 参数完全一致时，视为无效调用，强制 Stop。
+// 2. 目标检查
+if missing_evidence == []:
+    decision = STOP
+    reason = "Task Complete"
+    goto NEXT_PHASE
 
-调用后必须重新执行本问：更新 Remaining calls，重新评估 Decision，明确结论后再决定下一步。
+// 3. 重复调用检查
+if (current_tool, current_params) in call_history:
+    decision = STOP
+    reason = "Duplicate Call Detected"
+    goto NEXT_PHASE
+
+// ─── 调用前填写（decision = CONTINUE 时执行）────
+decision = CONTINUE
+填写：
+- Inventory：本轮已调用工具及参数摘要（首次写"无"）
+- Justification：为填补缺口 [X]，选择工具 [tool_name]，原因是 [Z]
+- Change Log：与历史调用的参数差异（首次写"新调用"）
+
+→ 执行工具调用，等待返回
+
+// ─── 调用后更新（工具返回后立即执行）────────────
+填写：
+- Observation：工具返回了 [X]
+- Reflection：此结果[有效填补 / 未填补]缺口 [Y]，原因是 [Z]
+- 更新 missing_evidence：移除已填补项，保留或新增未解决项
+
+重新进入 CURRENT_PHASE 入口，以更新后的 missing_evidence 重新评估 decision
 """
