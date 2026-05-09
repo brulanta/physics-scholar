@@ -15,7 +15,6 @@ from .shared.context import CONTEXT_BLOCK
 from .shared.tool_usage import TOOL_USAGE
 from .shared.thinking_shared import THINKING_SHARED
 from .shared.citation_format import CITATION_FORMAT
-from .shared.citation_plugin_slot import CITATION_PLUGIN_SLOT
 from .shared.code_rules import CODE_RULES
 from .shared.constraints_shared import CONSTRAINTS_SHARED
 from .shared.boundary import BOUNDARY_RULES
@@ -45,7 +44,6 @@ _SHARED_MODULES: list[PromptModule] = [
     wrap_module("TOOL_USAGE", TOOL_USAGE),
     wrap_module("THINKING_SHARED", THINKING_SHARED),
     wrap_module("CITATION_FORMAT", CITATION_FORMAT),
-    wrap_module("CITATION_PLUGIN_SLOT", CITATION_PLUGIN_SLOT),
     wrap_module("CODE_RULES", CODE_RULES),
     wrap_module("CONSTRAINTS_SHARED", CONSTRAINTS_SHARED),
     wrap_module("BOUNDARY_RULES", BOUNDARY_RULES),

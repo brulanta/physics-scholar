@@ -54,4 +54,4 @@ THINKING_NORMAL = f"""
 - 引用规划：哪些论点对应哪条引用（如涉及）
 - 预期长度：简短 / 中等 / 详细
 - 输出语言：跟随用户
-""".format(TOOL_DECISION_PLUGIN)
+"""

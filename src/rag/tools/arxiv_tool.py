@@ -6,8 +6,34 @@ import time
 from langchain.tools import tool
 import json
 from src.utils.logger import get_logger
+from threading import Lock
 
 logger = get_logger(__name__)
+_ARXIV_LOCK = Lock()
+_LAST_ARXIV_CALL = 0.0
+
+MIN_ARXIV_INTERVAL = 3.0
+MAX_RETRIES = 3
+
+
+def wait_for_arxiv_rate_limit():
+    global _LAST_ARXIV_CALL
+
+    with _ARXIV_LOCK:
+        now = time.time()
+        delta = now - _LAST_ARXIV_CALL
+
+        if delta < MIN_ARXIV_INTERVAL:
+            sleep_time = MIN_ARXIV_INTERVAL - delta
+
+            logger.info(
+                "[arxiv] rate limit保护：等待 %.1f 秒",
+                sleep_time,
+            )
+
+            time.sleep(sleep_time)
+
+        _LAST_ARXIV_CALL = time.time()
 
 
 class ArxivRequest(BaseModel):
@@ -118,7 +144,7 @@ def build_arxiv_params(
 
     search_query = " AND ".join(parts)
 
-    fetch_n = max_results * 3 if recent_days > 0 else max_results
+    fetch_n = min(max_results * 3, 40) if recent_days > 0 else max_results
 
     params = {
         "search_query": search_query,
@@ -176,38 +202,98 @@ def arxiv_tool(
     2. 根据 title、categories 筛选高相关论文，记录其 arxiv_id
     3. ID 精确查询（full_summary=True）→ 获取完整摘要进行深入分析
 
-    ## 返回字段说明
-    每篇论文包含以下字段：
-    - title: 论文标题
-    - summary: 摘要（full_summary=False 时截断至300字符）
-    - authors: 作者列表
-    - published / updated: 发布和更新时间
-    - arxiv_id: arXiv ID，可用于后续 ID 精确查询
-    - pdf_url: PDF 直接下载链接
-    - link: arXiv 页面链接
-    - categories: 所属分类列表
-    - primary_category: 主分类
+    ## 返回格式
+
+    ### 成功时
+    {
+        "success": true,
+        "count": 实际返回论文数量,
+        "papers": [
+            {
+                "title": 论文标题,
+                "summary": 摘要（full_summary=False 时截断至300字符）,
+                "authors": 作者列表,
+                "published": 发布时间,
+                "updated": 更新时间,
+                "arxiv_id": arXiv ID（可用于后续精确查询）,
+                "pdf_url": PDF 直接下载链接,
+                "link": arXiv 页面链接,
+                "categories": 所属分类列表,
+                "primary_category": 主分类
+            },
+            ...
+        ]
+    }
+
+    ### 失败时
+    {
+        "success": false,
+        "error_type": "rate_limited" | "timeout" | "request_failed",
+        "error": 错误详情,
+        "retryable": true | false,
+        "message": 处理建议,
+        "papers": []
+    }
+    - retryable=true：API 暂时异常，不代表相关论文不存在
+    - retryable=false：非临时性错误，重试无意义
 
     ## 注意
     - 关键词批量检索时保持 full_summary=False，避免 token 超限
-    - 若检索失败，返回 {"success": False, "error": "...", "papers": []}
+    - 检索结果按相关度排序，前10个结果通常已涵盖核心信息；超过20条后边际效用显著下降，噪音增加
+    - 若工具多次返回 rate_limited，应停止尝试，基于已有信息回答
     """
+    last_error = None
     params = build_arxiv_params(
         keywords, arxiv_ids, author, category, recent_days, max_results
     )
     logger.info("[arxiv] params: %s", params)
     url = "http://export.arxiv.org/api/query"
+    headers = {"User-Agent": "PhysicsScholar/0.1 (13159331923@163.com)"}
 
-    for _ in range(2):
+    for attempt in range(MAX_RETRIES):
         try:
-            response = requests.get(url, params=params, timeout=10)
+            wait_for_arxiv_rate_limit()
+
+            response = requests.get(url, params=params, headers=headers, timeout=30)
             response.raise_for_status()
             break
-        except requests.RequestException:
-            time.sleep(1)
+        except requests.RequestException as e:
+            last_error = str(e)
+            error_type = "request_failed"
+
+            if isinstance(e, requests.Timeout):
+                error_type = "timeout"
+
+            elif isinstance(e, requests.HTTPError):
+                if e.response is not None:
+                    if e.response.status_code == 429:
+                        error_type = "rate_limited"
+
+            backoff = 2**attempt
+
+            logger.warning(
+                "[arxiv] 请求失败: %s，%.1f秒后重试 (%d/%d)",
+                e,
+                backoff,
+                attempt + 1,
+                MAX_RETRIES,
+            )
+
+            time.sleep(backoff)
     else:
+        logger.error("[arxiv] 两次请求均失败，返回空结果")
         return json.dumps(
-            {"success": False, "error": "request failed", "papers": []},
+            {
+                "success": False,
+                "error_type": error_type,
+                "error": str(last_error),
+                "retryable": error_type in ["timeout", "rate_limited"],
+                "message": (
+                    "Arxiv API is temporarily unavailable. "
+                    "Avoid repeated retries with similar queries."
+                ),
+                "papers": [],
+            },
             ensure_ascii=False,
         )
 
@@ -242,4 +328,15 @@ def arxiv_tool(
         )
     filtered = filter_by_recent_days(papers, recent_days)
     result = filtered[:max_results]
-    return json.dumps(result, ensure_ascii=False, indent=2)
+
+    logger.info("[arxiv] 检索完成: 命中%d篇，返回%d篇", len(papers), len(result))
+
+    return json.dumps(
+        {
+            "success": True,
+            "count": len(result),
+            "papers": result,
+        },
+        ensure_ascii=False,
+        indent=2,
+    )

@@ -31,7 +31,16 @@ def make_search_tool(user_id: str):
         results = search_by_keyword(keywords, user_id)
         logger.info("[paper_id_search] params: %s", keywords)
         if not results:
-            results = [{"message": "未找到匹配论文，请尝试其他关键词"}]
-        return json.dumps(results, ensure_ascii=False, indent=2)
+            return json.dumps(
+                {
+                    "success": False,
+                    "message": "未找到匹配论文，请尝试其他关键词",
+                    "results": [],
+                },
+                ensure_ascii=False,
+            )
+        return json.dumps(
+            {"success": True, "results": results}, ensure_ascii=False, indent=2
+        )
 
     return search_paper_tool

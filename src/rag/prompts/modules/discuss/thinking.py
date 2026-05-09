@@ -52,4 +52,4 @@ Decision = Continue → 调用已确认的工具，等待结果后重新执行 Q
 - 本轮回应是否以问题结尾（通常是，除非是阶段性总结）
 - 预期回应长度（Discuss模式通常中等，不倾向于长篇输出）
 - 语言（跟随用户）
-""".format(TOOL_DECISION_PLUGIN)
+"""

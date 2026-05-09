@@ -26,7 +26,7 @@ import os
 class PromptModule:
     name: str
     content: str
-    enabled: bool = True
+    enabled: bool = False
     order: int = 0
 
 
@@ -94,12 +94,17 @@ class PromptBuilder:
 
         for item in config.get("modules", []):
             name = item["name"]
+
             if name not in self._modules:
-                continue
-            if "enabled" in item:
-                self._modules[name].enabled = item["enabled"]
+                raise KeyError(f"Unknown module in yaml: {name}")
+
+            module = self._modules[name]
+
+            # 只要出现在yaml，就自动启用
+            module.enabled = item.get("enabled", True)
+
             if "order" in item:
-                self._modules[name].order = item["order"]
+                module.order = item["order"]
 
         return self
 
@@ -182,7 +187,7 @@ def build_prompt(
 
     # 注入动态内容
     builder.inject("CONTEXT_BLOCK", history=history)
-    builder.inject("CITATION_PLUGIN_SLOT", citation_plugin=citation_plugin)
+    builder.inject("CITATION_FORMAT", citation_plugin=citation_plugin)
 
     if debug:
         print(builder.status())
