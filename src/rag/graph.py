@@ -259,6 +259,7 @@ def chat(
             citation_plugin=CITATION_TRANSLATION if translation else CITATION_DEFAULT,
             debug=False,
         )
+        print(system_prompt)
 
         # 2. call agent
         agent = build_agent(user_id)

@@ -19,18 +19,18 @@ TOOL_DECISION_PLUGIN = """
 // ─── 状态读取 ─────────────────────────────────
 State {
   current_budget: Int = SYSTEM.Remaining_Tool_Calls  // 只读，禁止修改
-  calls_made: List[str] = SYSTEM.call_history        // 本次回复已执行的工具调用记录
   missing_evidence: List[str]                        // 来自上一 Phase 的缺口识别
   decision: Enum[CONTINUE, STOP]
 }
 
-// ─── 情境评估（每次进入本 Phase 时执行）──────────
-Situation {
-  Already_Done: 根据 calls_made 概述已获取的信息
-  Still_Missing: 当前 missing_evidence 中未解决的缺口
-  Budget_Check: current_budget 是否足够覆盖剩余缺口？
-               （若缺口数 > current_budget，需在本轮决策中优先处理最关键项）
-}
+// ─── 首次进入：全局规划（仅第一次执行 <thinking> 时触发）──
+if call_history == []:
+    Global_Plan {
+        Estimated_Steps: 预估本次回复需要的工具调用总次数（不超过current_budget）
+        Call_Sequence: 按优先级排列的调用顺序和理由
+        // 示例："1. search_paper_tool定位论文→2. rag_tool检索内容，预计2次"
+        // 若无需工具：写"无需工具调用，直接回答"并 goto NEXT_PHASE
+    }
 
 // ─── 决策入口 ────────────────────────────────
 
