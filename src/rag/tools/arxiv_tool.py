@@ -10,17 +10,40 @@ from threading import Lock
 
 logger = get_logger(__name__)
 _ARXIV_LOCK = Lock()
-_LAST_ARXIV_CALL = 0.0
 
-MIN_ARXIV_INTERVAL = 3.0
-MAX_RETRIES = 3
+_LAST_ARXIV_CALL = 0.0
+_ARXIV_BLOCK_UNTIL = 0.0
+
+MIN_ARXIV_INTERVAL = 5.0
+MAX_RETRIES = 2
+
+_SESSION = requests.Session()
+
+_RECENT_FAILED_QUERY = {}
+FAILED_QUERY_TTL = 120
 
 
 def wait_for_arxiv_rate_limit():
     global _LAST_ARXIV_CALL
+    global _ARXIV_BLOCK_UNTIL
 
     with _ARXIV_LOCK:
         now = time.time()
+
+        # 429 冷却保护
+        if now < _ARXIV_BLOCK_UNTIL:
+            sleep_time = _ARXIV_BLOCK_UNTIL - now
+
+            logger.warning(
+                "[arxiv] 当前处于429冷却期，等待 %.1f 秒",
+                sleep_time,
+            )
+
+            time.sleep(sleep_time)
+
+            now = time.time()
+
+        # 普通请求间隔保护
         delta = now - _LAST_ARXIV_CALL
 
         if delta < MIN_ARXIV_INTERVAL:
@@ -120,31 +143,50 @@ def build_arxiv_params(
     recent_days: int = 0,
     max_results: int = 5,
 ):
-    # 有arxiv_ids时走id_list模式，忽略其他参数
+    # 精确 ID 查询
     if arxiv_ids:
-        return {"id_list": ",".join(arxiv_ids), "max_results": len(arxiv_ids)}
-
-    # 没有则走原来的search_query模式
+        return {
+            "id_list": ",".join(arxiv_ids),
+            "max_results": len(arxiv_ids),
+        }
 
     parts = []
 
-    def normalize_kw(kw: str):
-        return f'"{kw}"' if " " in kw else kw
+    def normalize_kw(text: str):
+        text = text.strip()
 
+        if " " in text:
+            return f'"{text}"'
+
+        return text
+
+    # keywords
     if keywords:
-        kw_query = " OR ".join([normalize_kw(k) for k in keywords])
-        parts.append(f"all:({kw_query})")
+        kw_parts = []
 
+        for kw in keywords:
+            nk = normalize_kw(kw)
+
+            # title / abstract 分开检索
+            kw_parts.append(f"ti:{nk}")
+            kw_parts.append(f"abs:{nk}")
+
+        parts.append(f"({' OR '.join(kw_parts)})")
+
+    # author
     if author:
         parts.append(f'au:"{author}"')
 
+    # category
     if category:
-        cat_query = " OR ".join([normalize_kw(c) for c in category])
-        parts.append(f"cat:{cat_query}")
+        cat_parts = [f"cat:{c}" for c in category]
+
+        parts.append(f"({' OR '.join(cat_parts)})")
 
     search_query = " AND ".join(parts)
 
-    fetch_n = min(max_results * 3, 40) if recent_days > 0 else max_results
+    # recent_days 时适当扩大抓取量
+    fetch_n = min(max_results * 3, 30) if recent_days > 0 else max_results
 
     params = {
         "search_query": search_query,
@@ -242,19 +284,53 @@ def arxiv_tool(
     - 检索结果按相关度排序，前10个结果通常已涵盖核心信息；超过20条后边际效用显著下降，噪音增加
     - 若工具多次返回 rate_limited，应停止尝试，基于已有信息回答
     """
+
+    # 精确 ID 查询：忽略时间过滤，结果数严格等于请求的 ID 数量
+    if arxiv_ids:
+        recent_days = 0
+        max_results = len(arxiv_ids)
+
     last_error = None
     params = build_arxiv_params(
         keywords, arxiv_ids, author, category, recent_days, max_results
     )
+
+    query_key = json.dumps(params, sort_keys=True)
+
+    failed_at = _RECENT_FAILED_QUERY.get(query_key)
+
+    if failed_at:
+        if time.time() - failed_at < FAILED_QUERY_TTL:
+            logger.warning("[arxiv] 相同query近期失败，跳过重复请求")
+
+            return json.dumps(
+                {
+                    "success": False,
+                    "error_type": "recent_failed_query",
+                    "error": "Recent identical query failed",
+                    "retryable": False,
+                    "message": (
+                        "An identical arXiv query recently failed. Avoid repeated retries."
+                    ),
+                    "papers": [],
+                },
+                ensure_ascii=False,
+            )
+
     logger.info("[arxiv] params: %s", params)
-    url = "http://export.arxiv.org/api/query"
+    url = "https://export.arxiv.org/api/query"
     headers = {"User-Agent": "PhysicsScholar/0.1 (13159331923@163.com)"}
 
     for attempt in range(MAX_RETRIES):
         try:
             wait_for_arxiv_rate_limit()
 
-            response = requests.get(url, params=params, headers=headers, timeout=30)
+            response = _SESSION.get(
+                url,
+                params=params,
+                headers=headers,
+                timeout=(10, 30),
+            )
             response.raise_for_status()
             break
         except requests.RequestException as e:
@@ -269,28 +345,49 @@ def arxiv_tool(
                     if e.response.status_code == 429:
                         error_type = "rate_limited"
 
-            backoff = 2**attempt
+                        global _ARXIV_BLOCK_UNTIL
+                        _ARXIV_BLOCK_UNTIL = time.time() + 60
+
+            if error_type in ["rate_limited", "timeout"]:
+                _RECENT_FAILED_QUERY[query_key] = time.time()
+
+            # 429 不建议疯狂重试
+            if error_type == "rate_limited":
+                backoff = 30 * (attempt + 1)
+
+            # timeout 给温和退避
+            elif error_type == "timeout":
+                backoff = 5 * (2**attempt)
+
+            else:
+                backoff = 3 * (2**attempt)
 
             logger.warning(
-                "[arxiv] 请求失败: %s，%.1f秒后重试 (%d/%d)",
+                "[arxiv] 请求失败(type=%s): %s，%.1f秒后重试 (%d/%d)",
+                error_type,
                 e,
                 backoff,
                 attempt + 1,
                 MAX_RETRIES,
             )
 
+            # rate_limited 第二次直接停止
+            if error_type == "rate_limited" and attempt >= 1:
+                break
+
             time.sleep(backoff)
     else:
-        logger.error("[arxiv] 两次请求均失败，返回空结果")
+        logger.error("[arxiv] 请求失败，返回空结果")
+
         return json.dumps(
             {
                 "success": False,
                 "error_type": error_type,
                 "error": str(last_error),
-                "retryable": error_type in ["timeout", "rate_limited"],
+                "retryable": error_type == "timeout",
                 "message": (
-                    "Arxiv API is temporarily unavailable. "
-                    "Avoid repeated retries with similar queries."
+                    "arXiv API is temporarily unavailable or rate limited. "
+                    "Do not retry similar queries repeatedly in this conversation."
                 ),
                 "papers": [],
             },
@@ -327,7 +424,10 @@ def arxiv_tool(
             }
         )
     filtered = filter_by_recent_days(papers, recent_days)
-    result = filtered[:max_results]
+
+    logger.info("[arxiv] 时间过滤前%d篇，过滤后%d篇", len(papers), len(filtered))
+
+    result = filtered if arxiv_ids else filtered[:max_results]
 
     logger.info("[arxiv] 检索完成: 命中%d篇，返回%d篇", len(papers), len(result))
 

@@ -251,10 +251,13 @@ class ConversationMemory:
         version = res.get("last_version") + 1
         return {"success": True, "new_parent_id": parent_id, "version": version}
 
-    def get(self, leaf_message_id: int = None) -> list[BaseMessage]:
+    def get(self, leaf_message_id=None, explicit=False) -> list[BaseMessage]:
         """返回本对话tokens上限内的合法历史记录,list(BaseMessage);
         无输入激活节点，则默认从最新节点往前追溯所有消息；
         输入激活节点，则从该节点往前追溯当前链路上的消息"""
+        if explicit and leaf_message_id is None:
+            # 根节点发消息，历史为空
+            return []
         if leaf_message_id:
             rows = self._repo.get_active_chain(leaf_message_id)
         else:

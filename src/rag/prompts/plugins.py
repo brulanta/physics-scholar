@@ -16,69 +16,29 @@ CITATION_TRANSLATION = """
 """
 
 TOOL_DECISION_PLUGIN = """
-// ─── 状态读取 ─────────────────────────────────
-State {
-  current_budget: Int = SYSTEM.Remaining_Tool_Calls  // 只读，禁止修改
-  missing_evidence: List[str]                        // 来自上一 Phase 的缺口识别
-  decision: Enum[CONTINUE, STOP]
-}
+⚠️ 本阶段是你的“工具调用申请书”。系统只执行通过审核的申请，不写此段=自动驳回。
 
-// ─── 首次进入：全局规划（仅第一次执行 <thinking> 时触发）──
-if call_history == []:
-    Global_Plan {
-        Estimated_Steps: 预估本次回复需要的工具调用总次数（不超过current_budget）
-        Call_Sequence: 按优先级排列的调用顺序和理由
-        // 示例："1. search_paper_tool定位论文→2. rag_tool检索内容，预计2次"
-        // 若无需工具：写"无需工具调用，直接回答"并 goto NEXT_PHASE
-    }
+→ [TOOL_LOOP: BEGIN]  // 工具返回后从此处重新进入
 
-// ─── 决策入口 ────────────────────────────────
+// ── Q1. 上轮拿到了什么？────────────────────────
+上轮调用：[工具名] 执行了 [操作简述]
+返回状态：[正常 / FAILED / EMPTY]
+有效性判断：此结果 [填补了 / 未填补] 缺口 [Y]，原因是 [Z]
+若返回异常：原因推断及改进方向（如无法改进，直接 → [TOOL_LOOP: DONE]）
 
-// 1. 预算检查（硬终止，优先级最高）
-if current_budget == 0:
-    decision = STOP
-    reason = "Resource Exhausted"
-    goto NEXT_PHASE
+// ── Q2. 现在还缺什么？还有多少资源？───────────
+当前缺口：[列出所有未解决的信息缺口]
+当前 budget：[Remaining_Tool_Calls] 次（必须与上方系统注入值一致）
+覆盖判断：现有 budget [能 / 不能 / 勉强] 覆盖剩余缺口
 
-// 2. 目标检查
-if missing_evidence == []:
-    decision = STOP
-    reason = "Task Complete"
-    goto NEXT_PHASE
-
-// 3. 重复调用检查
-if (current_tool, current_params) in call_history:
-    decision = STOP
-    reason = "Duplicate Call Detected"
-    goto NEXT_PHASE
-
-// ─── 调用前填写（decision = CONTINUE 时执行）────
-decision = CONTINUE
-填写：
-- Inventory：本轮已调用工具及参数摘要（首次写"无"）
-- Justification：为填补缺口 [X]，选择工具 [tool_name]，原因是 [Z]
-  （若调用 arxiv_tool，须额外说明 max_results 的取值理由）
-- Change Log：与历史调用的参数差异（首次写"新调用"）
-
-→ 执行工具调用，等待返回
-
-// ─── 调用后更新（工具返回后立即执行）────────────
-if tool_result.status == "FAILED" or tool_result.is_empty:
-    Observation: 工具返回了异常状态 [FAILED / EMPTY]
-    Reflection: 分析原因（参数过窄 / 服务不可用 / 目标本身不存在）
-    if tool_result.error_type == "rate_limited" and retry_count >= 2:
-        decision = STOP
-        reason = "Rate limit hit ≥2 times — abort"
-        goto NEXT_PHASE
-    if has_concrete_parameter_improvement and current_budget > 0:
-        decision = CONTINUE  // 仅在有明确改进方向时重试，需在 Change Log 中说明变化
-    else:
-        decision = STOP
-        reason = "Tool Failed — No viable retry strategy"
-        goto NEXT_PHASE
-else:
-    Observation: 工具返回了 [X]
-    Reflection: 此结果[有效填补 / 未填补]缺口 [Y]，原因是 [Z]
-    更新 missing_evidence：移除已填补项，保留或新增未解决项
-    重新进入 CURRENT_PHASE 入口，以更新后的 missing_evidence 重新评估 decision
+// ── Q3. 接下来做什么？────────────────────────
+若缺口为空：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Phase 4）
+若 budget = 0：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Phase 4）
+若与历史调用完全重复：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Phase 4）
+否则：
+  目标缺口：[X]
+  选择工具：[tool_name]
+  参数规划：[具体参数及取值理由]
+  与上轮差异：[参数变化说明 / 首次调用]
+  → [TOOL_LOOP: PENDING]  // 闭合 </thinking>，等待系统执行工具调用
 """
