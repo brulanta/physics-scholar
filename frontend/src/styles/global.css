@@ -40,7 +40,7 @@
   --text-3: #8e8e93;
   --accent: #3a5cff;
   --accent-dim: #2240cc;
-  --accent-glow: rgba(58, 92, 255, 0.10);
+  --accent-glow: rgba(58, 92, 255, 0.1);
   --green: #30a24a;
   --red: #d93025;
   --yellow: #c68000;
@@ -50,11 +50,13 @@
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", sans-serif;
   line-height: 1.6;
   height: 100vh;
   overflow: hidden;
-  transition: background 0.2s, color 0.2s;
+  transition:
+    background 0.2s,
+    color 0.2s;
 }
 
 #app {
@@ -76,53 +78,85 @@ body {
 .code-block-wrap {
   position: relative;
   margin: 0.5em 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
 }
 
-.code-block-wrap:hover .copy-btn {
-  opacity: 1;
+.code-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #1e2030;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] .code-block-header {
+  background: #e4e4e7;
+  border-bottom: 1px solid var(--border);
+}
+
+.code-lang {
+  font-size: 0.75em;
+  color: rgba(255, 255, 255, 0.45);
+  font-family: "JetBrains Mono", monospace;
+  text-transform: lowercase;
+}
+
+[data-theme="light"] .code-lang {
+  color: var(--text-3);
 }
 
 .code-block {
   background: #161821;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: none; /* 去掉原来的边框，由 wrap 统一处理 */
+  border-radius: 0; /* wrap 已经有圆角了 */
   padding: 0.9em 1.1em;
   overflow-x: auto;
   font-size: 0.88em;
-  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
   margin: 0;
 }
 
 [data-theme="light"] .code-block {
-  background: #f0f0f2;
+  background: #f6f6f8;
 }
 
 .copy-btn {
-  position: absolute;
-  top: 7px;
-  right: 8px;
-  opacity: 0;
-  transition: opacity 0.15s;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  color: var(--text-2);
   font-size: 0.75em;
-  padding: 3px 9px;
+  color: rgba(255, 255, 255, 0.4);
+  background: transparent;
+  border: none;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition:
+    color 0.12s,
+    background 0.12s;
+  white-space: nowrap;
 }
 
 .copy-btn:hover {
-  color: var(--text);
-  border-color: var(--border-light);
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .copy-btn.copied {
-  color: var(--green);
-  border-color: var(--green);
+  color: #7ec99a;
+}
+
+[data-theme="light"] .copy-btn {
+  color: var(--text-3);
+}
+
+[data-theme="light"] .copy-btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+[data-theme="light"] .copy-btn.copied {
+  color: #3a7d44;
 }
 
 /* Markdown */
@@ -150,7 +184,7 @@ body {
 }
 
 .md-body h3 {
-  font-size: 1.0em;
+  font-size: 1em;
 }
 
 .md-body ul,
@@ -185,7 +219,7 @@ body {
   border-radius: 4px;
   padding: 0.1em 0.4em;
   font-size: 0.87em;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: "JetBrains Mono", monospace;
 }
 
 .md-body table {
@@ -232,4 +266,144 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-3);
+}
+
+/* 行内角标 */
+.ref-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 1px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--accent);
+  background: var(--accent-dim);
+  border-radius: 6px;
+  cursor: pointer;
+  vertical-align: super;
+  transition: opacity 0.12s;
+  user-select: none;
+  color: #ffffff;
+  background: var(--accent);
+  /* 把 accent-dim 改为 accent，背景更深更实 */
+}
+
+.ref-badge:hover {
+  opacity: 0.75;
+}
+
+.ref-block {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.ref-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  font-size: 0.78em;
+  padding: 2px 0;
+  transition: color 0.12s;
+  user-select: none;
+}
+
+.ref-toggle:hover {
+  color: var(--text-2);
+}
+
+.ref-toggle svg {
+  transform: rotate(-90deg);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+
+.ref-block.open .ref-toggle svg {
+  transform: rotate(0deg);
+}
+
+.ref-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: var(--bg-3);
+  font-size: 0.9em;
+}
+
+.ref-list {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease;
+}
+
+.ref-block.open .ref-list {
+  max-height: 2000px;
+}
+
+.ref-list > div {
+  padding-top: 8px;
+  min-width: 0;
+}
+
+.ref-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  min-width: 0;
+  word-break: break-word;
+  scroll-margin: 30vh;
+}
+
+.ref-item:last-child {
+  border-bottom: none;
+}
+
+.ref-id {
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: 600;
+  min-width: 22px;
+  font-size: 0.78em;
+}
+
+.ref-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.78em;
+  line-height: 1.55;
+}
+
+.ref-source {
+  color: var(--text-2);
+  word-break: break-word;
+}
+
+.ref-excerpt {
+  color: var(--text-3);
+  font-style: italic;
+  padding-left: 6px;
+  border-left: 2px solid var(--border);
+  word-break: break-word;
+}
+
+.ref-zh {
+  color: var(--text-3);
+  padding-left: 6px;
+  border-left: 2px solid var(--accent-dim);
+  word-break: break-word;
 }

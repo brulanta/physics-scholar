@@ -48,6 +48,7 @@ function getPrevUserContent(msg) {
 const windowRef = ref(null)
 const showScrollBtn = ref(false)
 const isNearBottom = ref(true)
+const userScrolledUp = ref(false)  // 新增：用户是否主动向上滚
 
 function onScroll() {
   const el = windowRef.value
@@ -55,11 +56,47 @@ function onScroll() {
   const dist = el.scrollHeight - el.scrollTop - el.clientHeight
   isNearBottom.value = dist < 80
   showScrollBtn.value = dist > 200
+
+  // 用户主动上滚时标记，接近底部时自动解除
+  if (dist > 80) {
+    userScrolledUp.value = true
+  } else {
+    userScrolledUp.value = false
+  }
 }
+
+// streaming 追底：尊重用户的滚动意图
+watch(() => props.streamingContent, async () => {
+  if (props.streamingSessionId !== props.currentSessionId) return
+  if (userScrolledUp.value) return   // 用户主动上滚，不强制追底
+  await nextTick()
+  if (isNearBottom.value) scrollToBottom()
+})
+
+// 新消息出现时的滚动逻辑也加保护
+watch(() => props.messages?.length, async (newLen, oldLen) => {
+  if (!newLen) return
+  await nextTick()
+  const el = windowRef.value
+  if (!el) return
+  const added = newLen - (oldLen ?? 0)
+  if (added <= 0) return
+  const lastMsg = props.messages[newLen - 1]
+  if (lastMsg.role === 'user') {
+    const rows = el.querySelectorAll('.message-row')
+    const lastRow = rows[rows.length - 1]
+    if (lastRow) el.scrollTo({ top: lastRow.offsetTop - 20, behavior: 'smooth' })
+  } else if (lastMsg.role === 'assistant') {
+    // 新 assistant 消息出现时（非 streaming），重置上滚标记
+    userScrolledUp.value = false
+    if (isNearBottom.value) scrollToBottom()
+  }
+})
 
 function scrollToBottom(smooth = false) {
   const el = windowRef.value
   if (!el) return
+  userScrolledUp.value = false  // 主动点击回底，重置标记
   el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' })
 }
 
