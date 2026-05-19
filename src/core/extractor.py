@@ -6,6 +6,7 @@ from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import json
+from src.config import MAIN_LLM_API_KEY, MAIN_LLM_BASE_URL
 
 load_dotenv()
 
@@ -70,9 +71,7 @@ def query_crossref(doi: str) -> dict:
 
 def extract_from_llm(first_page_text: str) -> dict:
     # 传给LLM，返回title/author/year
-    client = OpenAI(
-        api_key=os.getenv("DEEPSEEK_API_KEY"), base_url="https://api.deepseek.com"
-    )
+    client = OpenAI(api_key=MAIN_LLM_API_KEY, base_url=MAIN_LLM_BASE_URL)
     PROMPT = """
 角色：
 你是一个论文信息提取助手。

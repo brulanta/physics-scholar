@@ -43,6 +43,7 @@ from openai import (
     InternalServerError,
     RateLimitError,
 )
+from src.llm import main_llm as llm
 
 MAX_THINKING_RETRIES = 3
 
@@ -77,18 +78,6 @@ class AgentState(TypedDict):
     thinking_retry_count: int
     is_thinking_correction: bool
     pending_correction: str  # 新增
-
-
-llm = ChatOpenAI(
-    model="deepseek-v4-flash",
-    temperature=0.15,
-    api_key=os.getenv("DEEPSEEK_API_KEY"),
-    base_url="https://api.deepseek.com",
-    extra_body={
-        "thinking": {"type": "disabled"},
-        "parallel_tool_calls": False,
-    },
-)
 
 
 def thinking_guard(state: AgentState) -> dict:

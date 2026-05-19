@@ -1,0 +1,16 @@
+# ── 主 LLM（必填）───────────────────────────────────────
+main_llm:
+  api_key: "" # 你的 API Key
+  base_url: "https://api.deepseek.com" # 兼容 OpenAI 格式的地址
+  model: "deepseek-chat" # 模型名
+
+# ── 副 LLM（选填，留空则自动复用主 LLM）────────────────
+slice_llm:
+  api_key: ""
+  base_url: ""
+  model: ""
+
+# ── 第三方工具（选填）──────────────────────────────────
+tools:
+  jina_api_key: "" # 留空仍可使用，但限速更严
+  s2_api_key: "" # Semantic Scholar，留空也可
