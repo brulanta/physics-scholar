@@ -1,29 +1,48 @@
 <template>
-  <!-- 右键菜单 -->
   <Teleport to="body">
     <div v-if="visible" class="ctx-overlay" @click="close" @contextmenu.prevent="close" />
     <div v-if="visible" class="ctx-menu" :style="{ top: y + 'px', left: x + 'px' }">
       <div class="ctx-header">
-        检测到 {{ links.length }} 篇 arXiv 论文
+        检测到 {{ links.length }} 篇论文
       </div>
 
       <div class="ctx-list">
-        <div v-for="link in links" :key="link.arxivId" class="ctx-item">
+        <div v-for="link in links" :key="link.pdfUrl" class="ctx-item">
           <div class="ctx-item-info">
-            <span class="ctx-arxiv-id">{{ link.arxivId }}</span>
-            <a :href="link.absUrl" target="_blank" class="ctx-abs-link" @click.stop>页面</a>
+            <!-- 【改】arXiv 显示 ID，其他显示截断域名 -->
+            <span class="ctx-arxiv-id">{{ link.type === 'arxiv' ? link.arxivId : link.displayUrl }}</span>
+
+            <!-- 【改】可用性指示器 -->
+            <span v-if="link.urlOk === null" class="ctx-checking spin" title="检测中">⟳</span>
+            <span v-else-if="link.urlOk === false" class="ctx-unavail" :title="link.errorMsg">⚠</span>
+
+            <a v-if="link.absUrl" :href="link.absUrl" target="_blank" class="ctx-abs-link" @click.stop>页面</a>
           </div>
+
+          <!-- 【新】不可用时展示错误提示条 -->
+          <div v-if="link.urlOk === false" class="ctx-url-error">
+            {{ link.errorMsg }}
+          </div>
+
           <div class="ctx-item-actions">
-            <button class="ctx-btn download" @click="download(link)">
+            <!-- 【改】不可用时下载按钮降级提示 -->
+            <button class="ctx-btn download" :class="{ unavail: link.urlOk === false }"
+              :title="link.urlOk === false ? link.errorMsg : '在浏览器中打开 PDF'" @click="download(link)">
               <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                 <path d="M5.5 1v6M2.5 5l3 3 3-3M1 9.5h9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
                   stroke-linejoin="round" />
               </svg>
-              下载
+              {{ link.urlOk === false ? '尝试打开' : '下载' }}
             </button>
-            <button class="ctx-btn ingest"
-              :class="{ done: link.phase === 'done', error: link.phase === 'error', loading: link.phase === 'loading' }"
-              :disabled="link.phase === 'done' || link.phase === 'loading'" @click="ingest(link)">
+
+            <button class="ctx-btn ingest" :class="{
+              done: link.phase === 'done',
+              error: link.phase === 'error',
+              loading: link.phase === 'loading',
+              disabled: link.urlOk === false && link.phase === 'idle'
+            }"
+              :disabled="link.phase === 'done' || link.phase === 'loading' || (link.urlOk === false && link.phase === 'idle')"
+              :title="link.urlOk === false && link.phase === 'idle' ? '链接不可用，无法入库' : ''" @click="ingest(link)">
               <span v-if="link.phase === 'loading'" class="spin">⟳</span>
               <span v-else-if="link.phase === 'done'">✓</span>
               <span v-else-if="link.phase === 'error'">✗</span>
@@ -31,16 +50,18 @@
                 <path d="M5.5 7V1M2.5 4l3-3 3 3M1 9.5h9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
                   stroke-linejoin="round" />
               </svg>
-              {{ phaseLabel(link.phase) }}
+              {{ phaseLabel(link.phase, link.urlOk) }}
             </button>
           </div>
+
           <div v-if="link.phase === 'error'" class="ctx-error">{{ link.errorMsg }}</div>
         </div>
       </div>
 
       <div v-if="links.length > 1" class="ctx-footer">
-        <button class="ctx-btn-all" :disabled="allDone" @click="ingestAll">
-          全部入库（{{ pendingCount }}）
+        <!-- 【改】只统计链接可用的 pending 数量 -->
+        <button class="ctx-btn-all" :disabled="allDone || availablePendingCount === 0" @click="ingestAll">
+          全部入库（{{ availablePendingCount }}）
         </button>
       </div>
     </div>
@@ -49,88 +70,84 @@
 
 <script setup>
 import { ref, computed, reactive } from 'vue'
-import { ingestFromArxiv, listPapers } from '../../api/paper.js'
+import { ingestFromArxiv, ingestFromUrl, listPapers } from '../../api/paper.js'
+import { extractLinks } from '../../utils/extractLinks.js'  // 抽出去的提取函数
 
 const visible = ref(false)
 const x = ref(0)
 const y = ref(0)
 const links = ref([])
 
-// 从气泡文本提取arxiv链接
-function extractArxivLinks(text) {
-  const pattern = /https?:\/\/arxiv\.org\/(abs|pdf)\/([0-9]{4}\.[0-9]+(?:v\d+)?)/gi
-  const seen = new Set()
-  const results = []
-  let match
-  while ((match = pattern.exec(text)) !== null) {
-    const arxivId = match[2]
-    const baseId = arxivId.replace(/v\d+$/, '')
-    if (!seen.has(baseId)) {
-      seen.add(baseId)
-      results.push(reactive({
-        arxivId,
-        pdfUrl: `https://arxiv.org/pdf/${arxivId}`,
-        absUrl: `https://arxiv.org/abs/${arxivId}`,
-        phase: 'idle',   // idle | loading | done | error
-        errorMsg: ''
-      }))
-    }
-  }
-  return results
-}
-
 async function open(event, text) {
-  const extracted = extractArxivLinks(text)
+  const extracted = extractLinks(text)
   if (extracted.length === 0) return
 
-  // 查重：拉当前论文列表，比对文件名
-  let existingFileNames = new Set()
+  // open() 里替换原来的 existingFileNames 逻辑
+  let existingUrls = new Set()
   try {
     const res = await listPapers()
-    const papers = res.data.papers || []
-    existingFileNames = new Set(papers.map(p => p.file_name))
+    existingUrls = new Set(
+      (res.data.papers || [])
+        .map(p => p.source_url)
+        .filter(Boolean)
+        .map(u => u.replace(/v\d+$/, '').replace(/\/$/, ''))  // 去版本号、去末尾斜杠
+    )
   } catch (_) { }
 
   links.value = extracted.map(link => {
-    const fileName = `${link.arxivId.replace(/v\d+$/, '')}.pdf`
-    const alreadyIn = existingFileNames.has(fileName) ||
-      // 也检查带版本号的
-      existingFileNames.has(`${link.arxivId}.pdf`)
-    return reactive({
-      ...link,
-      phase: alreadyIn ? 'done' : 'idle',
-      errorMsg: ''
-    })
+    const normalizedUrl = link.pdfUrl.replace(/v\d+$/, '').replace(/\/$/, '')
+    const alreadyIn = existingUrls.has(normalizedUrl)
+    return reactive({ ...link, phase: alreadyIn ? 'done' : 'idle' })
   })
 
-  // 菜单位置
-  const menuW = 320
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  // ① 固定最大高度320px，位置计算不再依赖动态menuH
+  // 菜单定位（原有逻辑不变）
+  const menuW = 320, vw = window.innerWidth, vh = window.innerHeight, menuMaxH = 360
   x.value = event.clientX + menuW > vw ? event.clientX - menuW : event.clientX
-  // 优先在点击位置下方，放不下就往上
-  const menuMaxH = 360
-  y.value = event.clientY + menuMaxH > vh
-    ? Math.max(8, event.clientY - menuMaxH)
-    : event.clientY
-
+  y.value = event.clientY + menuMaxH > vh ? Math.max(8, event.clientY - menuMaxH) : event.clientY
   visible.value = true
+
+  // 【新】异步预检所有链接可用性
+  links.value.forEach(link => {
+    if (link.phase !== 'done') preflight(link)
+    else link.urlOk = true
+  })
 }
 
-function close() {
-  visible.value = false
+// 【新】预检函数
+async function preflight(link) {
+  if (link.type === 'arxiv') { link.urlOk = true; return }
+  try {
+    const res = await fetch(`/proxy-head?url=${encodeURIComponent(link.pdfUrl)}`, {
+      signal: AbortSignal.timeout(6000)
+    })
+    const data = await res.json()
+    const ct = data.content_type || ''
+    if (data.status === 0 || data.status >= 400) {
+      link.urlOk = false
+      link.errorMsg = `链接无法访问（HTTP ${data.status}）`
+    } else if (!ct.includes('pdf') && !ct.includes('octet-stream')) {
+      link.urlOk = false
+      link.errorMsg = `非 PDF 内容（${ct.split(';')[0]}），可能需要机构权限`
+    } else {
+      link.urlOk = true
+    }
+  } catch (e) {
+    link.urlOk = false
+    link.errorMsg = e.name === 'TimeoutError' ? '访问超时，可能需要机构权限' : '无法验证链接可用性'
+  }
 }
 
-function download(link) {
-  window.open(link.pdfUrl, '_blank')
-}
+function close() { visible.value = false }
 
+function download(link) { window.open(link.pdfUrl, '_blank') }
+
+// 【改】不再分 arXiv/URL 两条路，统一传 pdfUrl
 async function ingest(link) {
   if (link.phase === 'done' || link.phase === 'loading') return
+  if (link.urlOk === false && link.phase === 'idle') return
   link.phase = 'loading'
   try {
-    const res = await ingestFromArxiv([link.arxivId])
+    const res = await ingestFromUrl([link.pdfUrl])  // 数组，单个元素
     const result = res.data[0]
     if (result.success) {
       link.phase = 'done'
@@ -145,20 +162,29 @@ async function ingest(link) {
 }
 
 async function ingestAll() {
-  const pending = links.value.filter(l => l.phase === 'idle' || l.phase === 'error')
-  await Promise.all(pending.map(ingest))
-}
-
-const pendingCount = computed(() =>
-  links.value.filter(l => l.phase === 'idle' || l.phase === 'error').length
-)
-
-const allDone = computed(() =>
-  links.value.every(l => l.phase === 'done')
-)
-
-function phaseLabel(phase) {
-  return { idle: '入库', loading: '入库中', done: '已入库', error: '重试' }[phase] || '入库'
+  const pending = links.value.filter(l =>
+    (l.phase === 'idle' || l.phase === 'error') && l.urlOk !== false
+  )
+  // 先把所有 pending 标为 loading
+  pending.forEach(l => l.phase = 'loading')
+  try {
+    const res = await ingestFromUrl(pending.map(l => l.pdfUrl))
+    res.data.forEach(result => {
+      const link = pending.find(l => l.pdfUrl === result.pdf_url)
+      if (!link) return
+      if (result.success) {
+        link.phase = 'done'
+      } else {
+        link.phase = 'error'
+        link.errorMsg = result.detail || '入库失败'
+      }
+    })
+  } catch (err) {
+    pending.forEach(l => {
+      l.phase = 'error'
+      l.errorMsg = '网络错误'
+    })
+  }
 }
 
 defineExpose({ open })
