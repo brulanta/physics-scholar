@@ -71,6 +71,7 @@ class PaperMeta(BaseModel):
     file_name: str
     upload_time: str
     source_type: Literal["seed", "user"] = Field(default="user")
+    source_url: str = Field(default="")  # 新增
     user_id: str = Field(default="")
     status: Literal["pending", "processing", "indexed", "failed"] = Field(
         default="pending"

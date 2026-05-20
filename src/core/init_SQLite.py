@@ -46,6 +46,7 @@ def init_db():
         file_name TEXT NOT NULL,
         upload_time TEXT,
         source_type TEXT,
+        source_url TEXT,          -- 新增
         status TEXT CHECK(status IN ('pending', 'processing', 'indexed', 'failed')),
         page_count INTEGER,
         chunk_count INTEGER,

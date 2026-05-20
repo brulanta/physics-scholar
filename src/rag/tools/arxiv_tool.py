@@ -280,6 +280,7 @@ def arxiv_tool(
                 "categories": 所属分类列表,
                 "primary_category": 主分类
             },
+        "message": 情况详释,
             ...
         ]
     }
@@ -290,7 +291,7 @@ def arxiv_tool(
         "error_type": "rate_limited" | "timeout" | "request_failed" | "recent_failed_query",
         "error": 错误详情,
         "retryable": true | false,
-        "message": 处理建议（含是否应回退至 s2_search_tool 的提示）,
+        "message": 情况详释与处理建议,
         "papers": []
     }
 
@@ -303,6 +304,20 @@ def arxiv_tool(
     - 若工具多次返回 rate_limited，停止尝试，切换到 s2_search_tool
     - 相同 query 失败后 120 秒内不会重复请求
     """
+    # 谬误拦截：防止 Agent 传入全空参数导致 API 报错 400 Bad Request
+    if not keywords and not arxiv_ids and not author and not category:
+        return json.dumps(
+            {
+                "success": False,
+                "error_type": "invalid_arguments",
+                "error": "No search criteria provided",
+                "retryable": False,
+                "message": "调用错误：你没有提供任何搜索条件。请至少提供 keywords、arxiv_ids、author 或 category 中的一项。",
+                "papers": [],
+            },
+            ensure_ascii=False,
+        )
+
     if arxiv_ids:
         recent_days = 0
         max_results = len(arxiv_ids)
@@ -320,7 +335,7 @@ def arxiv_tool(
                 "error_type": "recent_failed_query",
                 "error": "Recent identical query failed",
                 "retryable": False,
-                "message": "相同的 arXiv 查询近期失败，请勿重复尝试。如需继续检索请使用 s2_search_tool。",
+                "message": "相同的查询在近期刚刚失败过，已被系统拦截。请改变搜索关键词，或者直接回退至 s2_search_tool。",
                 "papers": [],
             },
             ensure_ascii=False,
@@ -351,7 +366,9 @@ def arxiv_tool(
                 if e.response.status_code == 429:
                     error_type = "rate_limited"
                     global _ARXIV_BLOCK_UNTIL
-                    _ARXIV_BLOCK_UNTIL = time.time() + 60
+                elif e.response.status_code == 400:
+                    error_type = "bad_request"
+                    # arXiv API 如果查询语法错误会报 400
 
             if error_type in ("rate_limited", "timeout"):
                 _mark_failed(query_key)
@@ -360,6 +377,10 @@ def arxiv_tool(
                 backoff = 30.0 * (attempt + 1)
             elif error_type == "timeout":
                 backoff = 5.0 * (2**attempt)
+            elif error_type == "bad_request":
+                # 查询语法错误，重试无用直接退出
+                break
+
             else:
                 backoff = 3.0 * (2**attempt)
 
@@ -379,6 +400,18 @@ def arxiv_tool(
     else:
         logger.error("[arxiv] 请求失败，返回空结果")
         return _error_payload(error_type, last_error, error_type == "timeout")
+    if error_type == "bad_request":
+        return json.dumps(
+            {
+                "success": False,
+                "error_type": "bad_request",
+                "error": last_error,
+                "retryable": False,
+                "message": "查询语法被 arXiv API 拒绝（可能是 keywords 包含了非法特殊符号）。建议简化关键词并重试，或者回退至 s2_search_tool。",
+                "papers": [],
+            },
+            ensure_ascii=False,
+        )
 
     feed = feedparser.parse(response.text)
     papers = []
@@ -409,9 +442,28 @@ def arxiv_tool(
 
     result = filtered if arxiv_ids else filtered[:max_results]
     logger.info("[arxiv] 检索完成：命中 %d 篇，返回 %d 篇", len(papers), len(result))
+    # 构建针对 Agent 的行为指导 message
+    message = "检索成功并返回结果。"
+    if len(result) == 0:
+        if len(papers) > 0:
+            # 谬误厘清：API搜到了，但是被 recent_days 砍没了
+            message = f"检索成功。API 原本命中了 {len(papers)} 篇论文，但全部不在 recent_days={recent_days} 天的限制内。建议将 recent_days 设为 0 重新检索。"
+        elif arxiv_ids:
+            # ID没查到
+            message = (
+                f"未能找到指定的 arXiv ID：{arxiv_ids}，请检查论文 ID 格式是否正确。"
+            )
+        else:
+            # 真没搜到
+            message = "未检索到任何符合条件的论文。请尝试减少关键词数量、使用更宽泛的词汇、移除 category 限制，或直接使用 s2_search_tool 进行跨平台广搜。"
 
     return json.dumps(
-        {"success": True, "count": len(result), "papers": result},
+        {
+            "success": True,
+            "count": len(result),
+            "papers": result,
+            "message": message,
+        },
         ensure_ascii=False,
         indent=2,
     )

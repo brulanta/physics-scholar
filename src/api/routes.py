@@ -13,9 +13,28 @@ import requests
 from typing import Literal
 from src.rag.memory import ConversationMemory, MessageRepo, ConversationRepo
 from src.utils.logger import get_logger
+import httpx
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+# ── 防 CORS，轻量 ─────────────────────────────────────────────────
+
+
+@router.get("/proxy-head")
+async def proxy_head(url: str):
+    async with httpx.AsyncClient(timeout=8) as client:
+        try:
+            r = await client.head(
+                url, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"}
+            )
+            return {
+                "status": r.status_code,
+                "content_type": r.headers.get("content-type", ""),
+            }
+        except Exception as e:
+            return {"status": 0, "content_type": "", "error": str(e)}
+
 
 # ── 会话 ─────────────────────────────────────────────────
 
@@ -143,64 +162,57 @@ def list_papers(user_id: str = "default"):
                 "status": v["status"],
                 "chunk_count": v.get("chunk_count", -1),
                 "file_name": v.get("file_name", ""),
+                "source_url": v.get("source_url", ""),  # 新增
             }
             for v in reg.values()
         ],
     }
 
 
-# 只下载，不写注册表，不入库
-# 废弃
-# @router.post("/download_from_arxiv")
-# async def download_from_arxiv(arxiv_ids: list[str], user_id: str = "default"):
-#     results = []
-#     for arxiv_id in arxiv_ids:
-#         pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
-#         response = requests.get(pdf_url)
-#         file_bytes = response.content
-#         file_name = f"{arxiv_id}.pdf"
-#         # 落盘但不写注册表
-#         pdf_path = PDF_DIR / file_name
-#         pdf_path.write_bytes(file_bytes)
-#         results.append({"arxiv_id": arxiv_id, "file_name": file_name, "success": True})
-#     return results
+class IngestFromUrlRequest(BaseModel):
+    pdf_urls: list[str]
+    user_id: str = "default"
 
 
-# 入库：复用ingest_pdf（文件已在盘上）
-@router.post("/ingest_from_arxiv")
-async def ingest_from_arxiv(arxiv_ids: list[str], user_id: str = "default"):
+@router.post("/ingest_from_url")
+async def ingest_from_url(req: IngestFromUrlRequest):
     results = []
-    for arxiv_id in arxiv_ids:
-        file_name = f"{arxiv_id}.pdf"
+    for pdf_url in req.pdf_urls:
+        # 取 URL 末段作为文件名，兜底用 hash
+        file_name = pdf_url.rstrip("/").split("/")[-1]
+        if not file_name.endswith(".pdf"):
+            file_name = file_name + ".pdf"
+
         pdf_path = PDF_DIR / file_name
         if not pdf_path.exists():
-            # 还没下载过，先下载
-            pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
             response = requests.get(pdf_url)
             pdf_path.write_bytes(response.content)
 
         file_bytes = pdf_path.read_bytes()
-        # strict=True，arxiv论文元数据完整
         result = ingest_pdf(
-            file_bytes, file_name, source_type="user", user_id=user_id, strict=True
+            file_bytes,
+            file_name,
+            source_type="user",
+            user_id=req.user_id,
+            strict=True,
+            source_url=pdf_url,  # 存原始 URL
         )
         if not result["success"]:
             results.append(
-                {"arxiv_id": arxiv_id, "success": False, "detail": result["detail"]}
+                {"pdf_url": pdf_url, "success": False, "detail": result["detail"]}
             )
             continue
 
-        # 自动confirm，arxiv标题可信
         meta = result["paper_meta"]
         confirm_result = confirm_and_index(
             paper_meta=meta,
             pdf_path=str(pdf_path),
             confirmed_title=meta.title,
-            user_id=user_id,
+            user_id=req.user_id,
         )
         results.append(
             {
-                "arxiv_id": arxiv_id,
+                "pdf_url": pdf_url,
                 "success": confirm_result["success"],
                 "title": meta.title,
             }

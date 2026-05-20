@@ -141,6 +141,7 @@ def ingest_pdf(
     source_type: str = "user",
     user_id: str = "default",
     strict: bool = False,
+    source_url: str = "",  # 新增
 ) -> dict:
     """
     第一阶段：保存文件 + 哈希去重 + 提取元数据 + 写注册表(pending)
@@ -165,6 +166,7 @@ def ingest_pdf(
             file_name=file_name,
             upload_time=datetime.now().isoformat(),
             source_type=source_type,
+            source_url=source_url,  # 新增
             user_id=user_id,
             status="pending",
             **metadata,

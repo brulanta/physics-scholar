@@ -122,6 +122,8 @@ def _handle_request_error(
         if e.response.status_code == 429:
             error_type = "rate_limited"
             _S2_BLOCK_UNTIL = time.time() + 60
+        elif e.response.status_code == 404:
+            error_type = "not_found"
 
     if error_type == "rate_limited":
         backoff = 30.0 * (attempt + 1)
@@ -134,6 +136,7 @@ def _handle_request_error(
 
 
 def _error_payload(error_type: str, error: str, retryable: bool) -> str:
+    """系统级/网络级失败返回给 Agent 的报文"""
     return json.dumps(
         {
             "success": False,
@@ -141,13 +144,15 @@ def _error_payload(error_type: str, error: str, retryable: bool) -> str:
             "error": error,
             "retryable": retryable,
             "message": (
-                "S2 API 暂时不可用或触发速率限制。"
-                "请勿在同一对话内反复重试相同查询。"
-                "如需继续检索，可尝试 arxiv_tool 作为备用。"
+                "S2 API 暂时不可用、网络超时或触发了服务商的速率限制(429)。"
+                "这是系统或网络层面的错误，绝非你的关键词不好！"
+                "请勿通过频繁修改关键词来重复尝试此工具。"
+                "如需继续检索，评估是否需要启动备用工具 arxiv_tool。"
             ),
             "papers": [],
         },
         ensure_ascii=False,
+        indent=2,
     )
 
 
@@ -210,15 +215,18 @@ def _parse_paper(entry: dict, full_abstract: bool) -> dict:
     }
 
 
-def _fetch_single_paper(request_id: str, full_abstract: bool) -> dict | None:
-    """通过 /paper/{id} 精确拉取单篇论文，含 tldr。返回解析后的 dict 或 None。"""
+def _fetch_single_paper(
+    request_id: str, full_abstract: bool
+) -> tuple[dict | None, str | None]:
+    """通过 /paper/{id} 精确拉取单篇论文。
+    返回: (parsed_paper_dict_或者_None, error_type_字符串_或者_None)"""
     query_key = f"paper::{request_id}"
     if _is_recently_failed(query_key):
         logger.warning("[s2] 跳过近期失败的 ID: %s", request_id)
-        return None
+        return None, "recent_failed_query"
 
     url = _S2_PAPER_URL.format(paper_id=request_id)
-    error_type = "request_failed"
+    last_error_type = None
 
     for attempt in range(MAX_RETRIES):
         try:
@@ -230,13 +238,21 @@ def _fetch_single_paper(request_id: str, full_abstract: bool) -> dict | None:
                 timeout=(10, 30),
             )
             resp.raise_for_status()
-            return _parse_paper(resp.json(), full_abstract)
+            return _parse_paper(resp.json(), full_abstract), None
+
         except requests.RequestException as e:
             error_type, backoff = _handle_request_error(e, attempt)
+
+            last_error_type = error_type
+
+            if error_type == "not_found":
+                # 404 说明真的没有这篇论文，不需要重试，直接返回
+                return None, "not_found"
+
             if error_type in ("rate_limited", "timeout"):
                 _mark_failed(query_key)
             logger.warning(
-                "[s2] ID查询失败(type=%s): %s，%.1f 秒后重试 (%d/%d)",
+                "[s2] ID精确查询异常(type=%s): %s，%.1f 秒后重试 (%d/%d)",
                 error_type,
                 e,
                 backoff,
@@ -247,14 +263,14 @@ def _fetch_single_paper(request_id: str, full_abstract: bool) -> dict | None:
                 break
             time.sleep(backoff)
         except Exception as e:
-            logger.warning("[s2] 解析 ID %s 响应失败: %s", request_id, e)
-            break
+            logger.error("[s2] 解析 ID %s 响应严重失败: %s", request_id, e)
+            return None, "parse_error"
 
-    return None
+    return None, last_error_type
 
 
 # ──────────────────────────────────────────────
-# Tool
+# Tool Schema
 # ──────────────────────────────────────────────
 
 
@@ -387,6 +403,7 @@ def s2_search_tool(
         "success": true,
         "count": 实际返回论文数量,
         "has_s2_key": 是否使用了 API Key（影响速率上限）,
+        "message": 情况详释,
         "papers": [
             {
                 "title": 论文标题,
@@ -417,7 +434,7 @@ def s2_search_tool(
                       | "recent_failed_query" | "invalid_params",
         "error": 错误详情,
         "retryable": true | false,
-        "message": 处理建议（含是否应回退至 arxiv_tool 的提示）,
+        "message": 情况详释与处理建议
         "papers": []
     }
 
@@ -440,21 +457,46 @@ def s2_search_tool(
             ids_to_fetch.append(f"arXiv:{aid.strip()}")
 
         results = []
+        stat_not_found = 0
+        stat_failed = 0
+
         for request_id in ids_to_fetch:
-            paper = _fetch_single_paper(request_id, full_abstract)
-            if paper is not None:
+            paper, err = _fetch_single_paper(request_id, full_abstract)
+            if err is None and paper is not None:
                 results.append(paper)
+            elif err == "not_found":
+                stat_not_found += 1
+            else:
+                stat_failed += 1
+                # 如果遇到了网络错或 429，为了防止 Agent 误判，直接中断并返回错误 Payload
+                if err in ("rate_limited", "timeout", "request_failed"):
+                    logger.error("[s2] ID查询过程中断：因遭遇系统级错误 %s", err)
+                    return _error_payload(
+                        err, f"Failed while fetching ID: {request_id}", retryable=True
+                    )
 
         logger.info(
-            "[s2] ID精确查询完成：请求 %d 个，成功 %d 个",
+            "[s2] ID精确查询完成。总请求数: %d | 成功拉取: %d | 确认不存在(404): %d | 内部失败: %d",
             len(ids_to_fetch),
             len(results),
+            stat_not_found,
+            stat_failed,
         )
+
+        # 组装成功报文（即使 count 为 0，只要 success=True 且没有系统阻断，说明状态可信）
+        message = ""
+        if not results:
+            message = (
+                "查询请求已完全成功执行，但在数据库中没有找到对应的 ID 条目（可能已被删除或ID输入错误）。"
+                "这不是网络问题，请勿盲目重试。请检查你的 ID 来源，或改用关键词搜索模式。"
+            )
+
         return json.dumps(
             {
                 "success": True,
                 "count": len(results),
                 "has_s2_key": bool(S2_API_KEY),
+                "message": message,
                 "papers": results,
             },
             ensure_ascii=False,
@@ -505,6 +547,7 @@ def s2_search_tool(
 
     last_error = ""
     error_type = "request_failed"
+    resp_success = False
 
     for attempt in range(MAX_RETRIES):
         try:
@@ -516,6 +559,8 @@ def s2_search_tool(
                 timeout=(10, 30),
             )
             resp.raise_for_status()
+            resp_success = True
+
             break
         except requests.RequestException as e:
             last_error = str(e)
@@ -533,8 +578,10 @@ def s2_search_tool(
             if error_type == "rate_limited" and attempt >= 1:
                 break
             time.sleep(backoff)
-    else:
-        logger.error("[s2] 关键词检索失败，返回空结果")
+
+    if not resp_success:
+        logger.error("[s2] 关键词检索彻底失败，触发错误回退")
+
         return _error_payload(error_type, last_error, error_type == "timeout")
 
     try:
@@ -545,13 +592,24 @@ def s2_search_tool(
     raw_papers = data.get("data", [])
     papers = [_parse_paper(p, full_abstract) for p in raw_papers]
 
-    logger.info("[s2] 关键词检索完成：返回 %d 篇", len(papers))
+    # 核心优化：如果请求 200 成功，但是返回了 0 篇论文，给 Agent 打上明确的补丁指南
+    message = ""
+    if len(papers) == 0:
+        logger.info("[s2] 关键词检索完成：API调用成功，但检索结果为 0 篇 (零命中)")
+        message = (
+            "API 检索已完全成功，但是该关键词组合在数据库中【未命中任何论文】。"
+            "这不是网络或服务故障，请勿盲目使用完全相同的参数重试。建议行动：1. 减少关键词数量（放宽条件）；"
+            "2. 替换过于生僻的词，改用更通用的学术专业名词；3. 检查单词拼写。"
+        )
+    else:
+        logger.info("[s2] 关键词检索完成：成功返回 %d 篇论文", len(papers))
 
     return json.dumps(
         {
             "success": True,
             "count": len(papers),
             "has_s2_key": bool(S2_API_KEY),
+            "message": message,
             "papers": papers,
         },
         ensure_ascii=False,
