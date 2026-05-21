@@ -1,4 +1,4 @@
-# src/rag/tools/search_paper_tool.py
+# src/rag/tools/lookup_local_paper_id.py
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 from src.core.registry import search_by_keyword
@@ -17,16 +17,14 @@ class SearchPaperRequest(BaseModel):
 
 def make_search_tool(user_id: str):
     @tool(args_schema=SearchPaperRequest)
-    def search_paper_tool(keywords: list[str]) -> str:
+    def lookup_local_paper_id(keywords: list[str]) -> str:
         """
         在本地论文注册表中按关键词检索论文，返回匹配的标题和 doc_id。
 
-        当用户提及或隐含指向某篇具体论文时调用（包括不完整、模糊或有误的描述）。
-
-        输入应为推断出的、可能出现在论文标题、作者或年份中的关键词或短语，
+        输入应为可能出现在论文标题、作者或年份中的关键词或短语，
         而不是宽泛主题词。
 
-        返回结果按匹配度排序。
+        返回结果按匹配度排序。。
         """
         results = search_by_keyword(keywords, user_id)
         logger.info("[paper_id_search] params: %s", keywords)
@@ -43,4 +41,4 @@ def make_search_tool(user_id: str):
             {"success": True, "results": results}, ensure_ascii=False, indent=2
         )
 
-    return search_paper_tool
+    return lookup_local_paper_id

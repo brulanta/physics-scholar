@@ -42,6 +42,9 @@ from langchain.tools import tool
 from pydantic import BaseModel, Field
 
 from src.utils.logger import get_logger
+import re
+from langchain_core.messages import SystemMessage, HumanMessage
+from src.llm import sub_llm
 
 # ══════════════════════════════════════════════════════════════════
 # 外部配置注入
@@ -50,9 +53,9 @@ from src.utils.logger import get_logger
 
 from src.config import (
     JINA_API_KEY,
-    SLICE_LLM_API_KEY,
-    SLICE_LLM_BASE_URL,
-    SLICE_LLM_MODEL,
+    SUB_LLM_API_KEY,
+    SUB_LLM_BASE_URL,
+    SUB_LLM_MODEL,
 )
 
 logger = get_logger(__name__)
@@ -270,41 +273,40 @@ def set_slice_system_prompt(prompt: str) -> None:
 
 
 def _score_chunk(chunk: str, query: str) -> int:
-    """
-    调用副 LLM 对单个片段打分。
-    返回 1-10 的整数；解析失败返回 0（该片段将排在末尾）。
-    """
-    if not SLICE_LLM_BASE_URL or not SLICE_LLM_API_KEY or not SLICE_LLM_MODEL:
-        logger.warning("[jina] 副 LLM 未配置，片段分数默认为 0")
-        return 0
-
+    """调用副 LLM 对单个片段打分。"""
     user_message = f"QUERY: {query}\n\nTEXT PASSAGE:\n{chunk}"
 
-    payload = {
-        "model": SLICE_LLM_MODEL,
-        "messages": [
-            {"role": "system", "content": SLICE_SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
-        "max_tokens": 32,  # {"score": N} 最多十几个字符，32 绝对够
-        "temperature": 0.0,  # 打分任务要确定性输出
-    }
-    headers = {
-        "Authorization": f"Bearer {SLICE_LLM_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    url = SLICE_LLM_BASE_URL.rstrip("/") + "/chat/completions"
+    messages = [
+        SystemMessage(content=SLICE_SYSTEM_PROMPT),
+        HumanMessage(content=user_message),
+    ]
+
+    # 临时绑定较低的 token 和 json 格式
+    score_llm = sub_llm.bind(response_format={"type": "json_object"}, max_tokens=128)
 
     try:
-        resp = _SESSION.post(url, json=payload, headers=headers, timeout=(10, 30))
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"].strip()
-        # 兼容模型可能在 JSON 外加 markdown 围栏
-        content = content.replace("```json", "").replace("```", "").strip()
-        score = int(json.loads(content)["score"])
-        return max(1, min(10, score))  # 夹紧到 [1, 10]
+        res = score_llm.invoke(messages)
+        content = res.content.strip()
+
+        # 兼容处理
+        clean_content = content.replace("```json", "").replace("```", "").strip()
+        try:
+            score = int(json.loads(clean_content)["score"])
+        except Exception:
+            match = re.search(r'(?i)"score"\s*:\s*(\d+)', content)
+            if match:
+                score = int(match.group(1))
+            else:
+                raise ValueError(f"无法从文本中解析分数: {content}")
+
+        return max(1, min(10, score))
+
     except Exception as e:
-        logger.warning("[jina] 副 LLM 打分失败: %s", e)
+        logger.warning(
+            "[jina] 副 LLM 打分失败: %s | 返回: %s",
+            e,
+            repr(locals().get("content", "")),
+        )
         return 0
 
 
@@ -516,16 +518,20 @@ def jina_tool(
         )
 
     # ── 有 query：提前校验副 LLM 配置，避免拿完全文才发现无法打分 ──
-    if query and (
-        not SLICE_LLM_BASE_URL or not SLICE_LLM_API_KEY or not SLICE_LLM_MODEL
-    ):
-        logger.warning("[jina] 有 query 但副 LLM 未配置")
-        return _error_payload(
-            "slice_no_config",
-            "query 参数需要副 LLM 打分，但 set_slice_llm() 尚未配置",
-            False,
-            url,
+    if query:
+        # 从 LangChain 实例中安全获取真实的 API Key
+        api_key = (
+            sub_llm.openai_api_key.get_secret_value() if sub_llm.openai_api_key else ""
         )
+
+        if not api_key:
+            logger.warning("[jina] 有 query 但副 LLM 未配置")
+            return _error_payload(
+                "slice_no_config",
+                "query 参数需要副 LLM 打分，但尚未配置有效的 API Key",
+                False,
+                url,
+            )
 
     # ── 获取全文 ──
     logger.info("[jina] 开始读取: %s", url)
@@ -544,16 +550,15 @@ def jina_tool(
         was_truncated = len(full_text) > limit_chars
         est_tokens = _estimate_tokens(truncated)
 
-        note = (
-            f"全文共 {len(full_text)} 字符，已截断至前 {len(truncated)} 字符"
-            f"（约 {est_tokens} token）。"
-            + (
-                "如需查找特定内容，请提供 query 参数启用分片打分模式。"
-                if was_truncated
-                else ""
+        if was_truncated:
+            note = (
+                f"全文共 {len(full_text)} 字符，已截断至前 {len(truncated)} 字符"
+                f"（约 {est_tokens} token）。如需查找特定内容，请提供 query 参数启用分片打分模式。"
             )
-        )
-        logger.info("[jina] 全文截断模式：返回 %d 字符", len(truncated))
+        else:
+            note = f"全文共 {len(full_text)} 字符，完整返回（约 {est_tokens} token）。"
+
+        logger.info("[jina] 全文模式：返回 %d 字符", len(truncated))
         return json.dumps(
             {
                 "success": True,

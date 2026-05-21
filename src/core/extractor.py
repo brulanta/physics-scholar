@@ -7,6 +7,8 @@ import os
 from dotenv import load_dotenv
 import json
 from src.config import MAIN_LLM_API_KEY, MAIN_LLM_BASE_URL
+from langchain_core.messages import SystemMessage
+from src.llm import sub_llm
 
 load_dotenv()
 
@@ -70,8 +72,6 @@ def query_crossref(doi: str) -> dict:
 
 
 def extract_from_llm(first_page_text: str) -> dict:
-    # 传给LLM，返回title/author/year
-    client = OpenAI(api_key=MAIN_LLM_API_KEY, base_url=MAIN_LLM_BASE_URL)
     PROMPT = """
 角色：
 你是一个论文信息提取助手。
@@ -87,28 +87,26 @@ def extract_from_llm(first_page_text: str) -> dict:
 }}
     
 限制：
-返回JSON格式。
+必须返回纯 JSON 格式。
 如果推断后仍存在不明确的信息项则留空，不要编造。
 
 论文首页文本:
 {first_page_text}
 """
-    res = client.chat.completions.create(
-        model="deepseek-chat",
-        messages=[
-            {
-                "role": "system",
-                "content": PROMPT.format(first_page_text=first_page_text),
-            },
-        ],
-        response_format={"type": "json_object"},
-        n=1,
-        temperature=0.1,
-        max_tokens=200,
-        stop=["你:"],
-    )
-    answer = json.loads(res.choices[0].message.content)
-    return answer
+    # 让 sub_llm 动态绑定 json 格式输出
+    json_llm = sub_llm.bind(response_format={"type": "json_object"})
+
+    # 构建消息并调用
+    messages = [SystemMessage(content=PROMPT.format(first_page_text=first_page_text))]
+    res = json_llm.invoke(messages)
+
+    try:
+        # LangChain 返回的是 AIMessage 对象，内容在 .content 属性里
+        answer = json.loads(res.content)
+        return answer
+    except Exception as e:
+        # 加上容错机制，防止页面解析彻底崩溃
+        return {"title": "", "author": "", "year": ""}
 
 
 def is_good_enough(res: dict, strict: bool) -> bool:

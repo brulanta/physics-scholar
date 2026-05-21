@@ -43,12 +43,10 @@ MAIN_LLM_API_KEY = _get("MAIN_API_KEY", "main_llm", "api_key")
 MAIN_LLM_BASE_URL = _get("MAIN_BASE_URL", "main_llm", "base_url")
 MAIN_LLM_MODEL = _get("MAIN_MODEL", "main_llm", "model")
 
-# ── 副 LLM（slice打分用，空则回退到主LLM）─────────────────
-SLICE_LLM_API_KEY = _get("SLICE_API_KEY", "slice_llm", "api_key") or MAIN_LLM_API_KEY
-SLICE_LLM_BASE_URL = (
-    _get("SLICE_BASE_URL", "slice_llm", "base_url") or MAIN_LLM_BASE_URL
-)
-SLICE_LLM_MODEL = _get("SLICE_MODEL", "slice_llm", "model") or MAIN_LLM_MODEL
+# ── 副 LLM（打分、提取等轻任务，空则回退到主 LLM）───────────
+SUB_LLM_API_KEY = _get("SUB_API_KEY", "sub_llm", "api_key") or MAIN_LLM_API_KEY
+SUB_LLM_BASE_URL = _get("SUB_BASE_URL", "sub_llm", "base_url") or MAIN_LLM_BASE_URL
+SUB_LLM_MODEL = _get("SUB_MODEL", "sub_llm", "model") or MAIN_LLM_MODEL
 
 # ── 第三方工具 Key ────────────────────────────────────────
 JINA_API_KEY = _get("JINA_API_KEY", "tools", "jina_api_key")

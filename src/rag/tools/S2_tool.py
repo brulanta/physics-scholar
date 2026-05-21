@@ -373,12 +373,6 @@ def s2_search_tool(
     """
     在 Semantic Scholar (S2) 上检索学术论文。
 
-    ## 使用时机
-    本工具是主力检索工具，绝大多数论文检索任务优先使用本工具。
-    仅在以下情况改用 arxiv_tool：
-      1. 用户明确要查找 arXiv 上刚上传的最新预印本（S2 有数周收录延迟）
-      2. 本工具返回 rate_limited 错误
-
     ## 三种查询模式
 
     ### 模式一：关键词检索（广撒网）
@@ -387,13 +381,12 @@ def s2_search_tool(
     建议根据标题和引用数筛选目标论文，记录 s2_paper_id 供后续精确查询。
 
     ### 模式二：S2 Paper ID 精确查询
-    已知 S2 Paper ID 时，填写 s2_paper_ids，配合 full_abstract=True 获取完整摘要。
+    填写 s2_paper_ids，配合 full_abstract=True 获取完整摘要。
     返回额外包含 tldr（S2 AI 生成的一句话总结）。
-    对话历史中已出现的 s2_paper_id 视为可信，直接使用，无需关键词二次确认。
+    对话历史中已出现的 s2_paper_id 视为可信，直接使用。
 
     ### 模式三：arXiv ID 精确查询
-    已知 arXiv ID 时，填写 arxiv_ids。
-    通过 S2 获取该论文的完整信息（引用数、venue 等 arXiv 本身不提供的字段）。
+    填写 arxiv_ids，通过 S2 获取该论文的完整元数据（引用数、venue 等）。
     适合在 arxiv_tool 检索后，用 S2 补充元数据的场景。
 
     ## 返回格式
@@ -439,12 +432,11 @@ def s2_search_tool(
     }
 
     ## 下游工具
-    若需深入阅读某篇论文的 PDF 全文，请将 open_access_pdf 字段的值传给 jina_tool。
+    若需深入阅读论文全文，将 open_access_pdf 字段的值传给 jina_tool。
     本工具不处理全文内容。
 
     ## 注意
     - 批量检索时保持 full_abstract=False，避免 token 超限
-    - 若工具多次返回 rate_limited，停止尝试，切换到 arxiv_tool
     - 相同 query 失败后 120 秒内不会重复请求
     - 无 API Key 时速率限制更严格（3.5 秒/次），对话内请合理规划调用次数
     """

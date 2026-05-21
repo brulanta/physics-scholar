@@ -13,7 +13,7 @@ from typing import TypedDict, Annotated, Sequence
 import os
 from dotenv import load_dotenv
 from src.rag.tools.rag_tool import make_rag_tool
-from src.rag.tools.search_paper_tool import make_search_tool
+from src.rag.tools.lookup_local_paper_id import make_search_tool
 from src.rag.tools.arxiv_tool import arxiv_tool
 from src.rag.memory import (
     ConversationMemory,

@@ -23,7 +23,7 @@ class RagToolRequest(BaseModel):
     )
     doc_id: str = Field(
         default="",
-        description="限定召回某篇特定论文，留空则全库检索。需先调用search_paper_tool获取doc_id",
+        description="限定召回某篇特定论文，留空则全库检索。需先调用lookup_local_paper_id获取doc_id",
     )
 
 
@@ -69,11 +69,6 @@ def make_rag_tool(user_id: str):
     ) -> str:
         """
         从本地向量知识库中检索与问题语义相关的文段，作为回答依据。
-
-        适用于以下情况：
-        - 需要引用论文或教材内容支撑回答
-        - 用户询问具体研究工作、方法或结论
-        - 用户希望讨论某一篇论文（可配合 search_paper_tool 使用 doc_id）
         """
 
         # 1. 调用外部的 build_filter，逻辑清晰且可复用

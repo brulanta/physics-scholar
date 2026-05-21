@@ -243,23 +243,14 @@ def arxiv_tool(
     """
     在 arXiv 上检索学术论文。
 
-    ## 使用时机
-    本工具是备用检索渠道，请优先使用 s2_search_tool。
-    仅在以下两种情况下调用本工具：
-      1. 用户明确要查找 arXiv 上刚上传的最新预印本
-         （S2 对新预印本的收录存在数周延迟）
-      2. s2_search_tool 返回了 rate_limited 错误
-
     ## 两种查询模式
 
     ### 模式一：关键词检索（广撒网）
-    适用于探索某研究方向或获取最新预印本。
     填写 keywords，可选填 author、category、recent_days。
-    返回论文列表，包含标题、截断摘要、作者、分类标签、arXiv ID 和 PDF 链接。
+    返回论文列表，含标题、截断摘要、作者、分类标签、arXiv ID 和 PDF 链接。
 
     ### 模式二：ID 精确查询
-    已知 arXiv ID 时直接获取论文信息，填写 arxiv_ids，忽略其他检索参数。
-    可配合 full_abstract=True 获取完整摘要。
+    填写 arxiv_ids，可配合 full_abstract=True 获取完整摘要。
 
     ## 返回格式
 
@@ -280,9 +271,9 @@ def arxiv_tool(
                 "categories": 所属分类列表,
                 "primary_category": 主分类
             },
-        "message": 情况详释,
             ...
-        ]
+        ],
+        "message": 情况详释,
     }
 
     ### 失败时
@@ -296,12 +287,11 @@ def arxiv_tool(
     }
 
     ## 下游工具
-    若需深入阅读某篇论文的 PDF 全文，请将返回的 pdf_url 传给 jina_tool。
+    若需深入阅读论文全文，将 pdf_url 传给 jina_tool。
     本工具不处理全文内容。
 
     ## 注意
     - 批量检索时保持 full_abstract=False，避免 token 超限
-    - 若工具多次返回 rate_limited，停止尝试，切换到 s2_search_tool
     - 相同 query 失败后 120 秒内不会重复请求
     """
     # 谬误拦截：防止 Agent 传入全空参数导致 API 报错 400 Bad Request
