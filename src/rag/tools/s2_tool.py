@@ -172,6 +172,7 @@ _SEARCH_FIELDS = (
 _DETAIL_FIELDS = _SEARCH_FIELDS + ",tldr"
 
 _S2_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+_S2_SEARCH_BULK_URL = "https://api.semanticscholar.org/graph/v1/paper/search/bulk"
 _S2_PAPER_URL = "https://api.semanticscholar.org/graph/v1/paper/{paper_id}"
 
 
@@ -348,6 +349,58 @@ class S2SearchRequest(BaseModel):
             "- 精确 ID 查询少量论文时可设为True"
         ),
     )
+    sort: str = Field(
+        default="",
+        description=(
+            "排序方式（可选）：\n"
+            "- 填写后将切换至 bulk 检索端点（不再按相关性排序）\n"
+            "- 格式：'field:order'，其中 field 可选 citationCount / publicationDate / paperId，"
+            "order 可选 asc / desc\n"
+            "- 常用示例：'citationCount:desc'（引用数从高到低）、"
+            "'publicationDate:desc'（最新论文优先）\n"
+            "- 留空则使用相关性排序（默认，推荐关键词检索时使用）"
+        ),
+    )
+    min_citation_count: int = Field(
+        default=0,
+        description=(
+            "最低引用数过滤（可选）：\n"
+            "- 只返回引用数 >= 该值的论文\n"
+            "- 0 表示不限制\n"
+            "- 适合过滤低影响力论文，如设为 50 可只看有一定引用量的工作"
+        ),
+        ge=0,
+    )
+    open_access_only: bool = Field(
+        default=False,
+        description=(
+            "是否只返回有开放获取 PDF 的论文（默认False）：\n"
+            "- True 时只返回可直接获取全文的论文\n"
+            "- 配合后续 jina_tool 读取全文时建议开启"
+        ),
+    )
+    publication_date_range: str = Field(
+        default="",
+        description=(
+            "精确日期范围过滤（可选）：\n"
+            "- 格式：'<startDate>:<endDate>'，日期为 YYYY-MM-DD\n"
+            "- 两端均可省略，表示开放区间\n"
+            "- 示例：'2023-01-01:2024-06-30'、'2024-01-01:'（某日之后）、':2023-12-31'（某日之前）\n"
+            "- 与 year_range 互补：需要精确到月/日时用本字段，只需限定年份用 year_range\n"
+            "- 注意：部分论文无精确日期，会被视为发表于当年 1 月 1 日"
+        ),
+    )
+    publication_types: list[str] = Field(
+        default=[],
+        description=(
+            "论文类型过滤（可选）：\n"
+            "可选值：Review, JournalArticle, CaseReport, ClinicalTrial, Conference, "
+            "Dataset, Editorial, LettersAndComments, MetaAnalysis, News, Study, Book, BookSection\n"
+            "- 多个类型之间为 OR 关系\n"
+            "- 常用组合：['JournalArticle', 'Conference']（正式发表）、['Review']（综述）\n"
+            "- 留空不限制"
+        ),
+    )
 
 
 def _build_search_query(keywords: list[str], author: str) -> str:
@@ -369,6 +422,11 @@ def s2_search_tool(
     fields_of_study: list[str] = [],
     max_results: int = 5,
     full_abstract: bool = False,
+    sort: str = "",
+    min_citation_count: int = 0,
+    open_access_only: bool = False,
+    publication_date_range: str = "",
+    publication_types: list[str] = [],
 ) -> str:
     """
     在 Semantic Scholar (S2) 上检索学术论文。
@@ -505,6 +563,10 @@ def s2_search_tool(
             ensure_ascii=False,
         )
 
+    # 根据是否指定 sort 决定使用哪个端点
+    use_bulk = bool(sort)
+    search_url = _S2_SEARCH_BULK_URL if use_bulk else _S2_SEARCH_URL
+
     params: dict = {
         "query": query,
         "fields": _SEARCH_FIELDS,
@@ -514,6 +576,17 @@ def s2_search_tool(
         params["year"] = year_range
     if fields_of_study:
         params["fieldsOfStudy"] = ",".join(fields_of_study)
+    # 新增字段
+    if sort:
+        params["sort"] = sort
+    if min_citation_count > 0:
+        params["minCitationCount"] = str(min_citation_count)
+    if open_access_only:
+        params["openAccessPdf"] = ""
+    if publication_date_range:
+        params["publicationDateOrYear"] = publication_date_range
+    if publication_types:
+        params["publicationTypes"] = ",".join(publication_types)
 
     query_key = json.dumps(params, sort_keys=True)
     if _is_recently_failed(query_key):
@@ -530,7 +603,11 @@ def s2_search_tool(
             ensure_ascii=False,
         )
 
-    logger.info("[s2] 关键词检索 params: %s", params)
+    logger.info(
+        "[s2] 关键词检索 endpoint=%s params=%s",
+        "bulk" if use_bulk else "relevance",
+        params,
+    )
 
     last_error = ""
     error_type = "request_failed"
@@ -540,7 +617,7 @@ def s2_search_tool(
         try:
             _wait_for_s2_rate_limit()
             resp = _SESSION.get(
-                _S2_SEARCH_URL,
+                search_url,
                 params=params,
                 headers=_s2_headers(),
                 timeout=(10, 30),

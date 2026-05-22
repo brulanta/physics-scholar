@@ -286,6 +286,116 @@ class TestS2SearchKeyword:
         headers = mock_get.call_args[1]["headers"]
         assert "x-api-key" not in headers
 
+    # ── 新增：路由与新参数透传测试 ──
+
+    def test_sort_triggers_bulk_endpoint(self):
+        """填写 sort 时，请求应发往 bulk 端点。"""
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke(
+                {"keywords": ["transformer"], "sort": "citationCount:desc"}
+            )
+        called_url = mock_get.call_args[0][0]
+        assert "search/bulk" in called_url
+
+    def test_no_sort_uses_relevance_endpoint(self):
+        """不填 sort 时，请求应发往 relevance 端点（不含 /bulk）。"""
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke({"keywords": ["transformer"]})
+        called_url = mock_get.call_args[0][0]
+        assert "search/bulk" not in called_url
+        assert "paper/search" in called_url
+
+    def test_sort_param_passed_to_api(self):
+        """sort 字符串应原样透传到请求参数。"""
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke(
+                {"keywords": ["optics"], "sort": "publicationDate:desc"}
+            )
+        params = mock_get.call_args[1]["params"]
+        assert params.get("sort") == "publicationDate:desc"
+
+    def test_min_citation_count_passed_to_api(self):
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke({"keywords": ["optics"], "min_citation_count": 50})
+        params = mock_get.call_args[1]["params"]
+        assert params.get("minCitationCount") == "50"
+
+    def test_min_citation_count_zero_not_passed(self):
+        """min_citation_count=0（默认值）不应出现在请求参数中。"""
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke({"keywords": ["optics"], "min_citation_count": 0})
+        params = mock_get.call_args[1]["params"]
+        assert "minCitationCount" not in params
+
+    def test_open_access_only_passed_to_api(self):
+        """open_access_only=True 时，参数 key 存在且 value 为空字符串。"""
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke({"keywords": ["optics"], "open_access_only": True})
+        params = mock_get.call_args[1]["params"]
+        assert "openAccessPdf" in params
+        assert params["openAccessPdf"] == ""
+
+    def test_open_access_only_false_not_passed(self):
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke({"keywords": ["optics"], "open_access_only": False})
+        params = mock_get.call_args[1]["params"]
+        assert "openAccessPdf" not in params
+
+    def test_publication_date_range_passed_to_api(self):
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke(
+                {
+                    "keywords": ["optics"],
+                    "publication_date_range": "2023-01-01:2024-06-30",
+                }
+            )
+        params = mock_get.call_args[1]["params"]
+        assert params.get("publicationDateOrYear") == "2023-01-01:2024-06-30"
+
+    def test_publication_types_passed_to_api(self):
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke(
+                {
+                    "keywords": ["optics"],
+                    "publication_types": ["JournalArticle", "Conference"],
+                }
+            )
+        params = mock_get.call_args[1]["params"]
+        pub_types = params.get("publicationTypes", "")
+        assert "JournalArticle" in pub_types
+        assert "Conference" in pub_types
+
+    def test_sort_and_filters_combined(self):
+        """sort + 其他过滤参数同时存在时，走 bulk 且所有参数均透传。"""
+        mock_resp = _mock_response({"data": [], "total": 0})
+        with patch.object(s2_mod._SESSION, "get", return_value=mock_resp) as mock_get:
+            s2_search_tool.invoke(
+                {
+                    "keywords": ["neural network"],
+                    "sort": "citationCount:desc",
+                    "min_citation_count": 100,
+                    "open_access_only": True,
+                    "publication_types": ["JournalArticle"],
+                }
+            )
+        called_url = mock_get.call_args[0][0]
+        params = mock_get.call_args[1]["params"]
+
+        assert "search/bulk" in called_url
+        assert params.get("sort") == "citationCount:desc"
+        assert params.get("minCitationCount") == "100"
+        assert "openAccessPdf" in params
+        assert "JournalArticle" in params.get("publicationTypes", "")
+
 
 # ══════════════════════════════════════════════════════════════════
 # 精确 ID 查询 Mock 测试
@@ -491,7 +601,7 @@ class TestS2Live:
     def test_keyword_search_returns_results(self):
         result = json.loads(
             s2_search_tool.invoke(
-                {"keywords": ["optical frequency comb"], "max_results": 2}
+                {"keywords": ["deep photonic reservoir computing"], "max_results": 2}
             )
         )
         # 如果因为真实环境被频控导致请求失败，直接跳过测试，不判定为 Bug
