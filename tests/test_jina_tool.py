@@ -224,7 +224,9 @@ class TestJinaNoQuery:
             )
 
         assert result["content"] == short_text
-        assert "截断" not in result["note"] or "已截断" not in result["note"]
+        assert (
+            "截断" not in result["agent_hint"] or "已截断" not in result["agent_hint"]
+        )
 
     def test_note_mentions_truncation_when_long(self):
         full_text = "x" * 10000
@@ -237,7 +239,7 @@ class TestJinaNoQuery:
                 )
             )
 
-        assert "query" in result["note"]  # 提示用户可以加 query
+        assert "query" in result["agent_hint"]  # 提示用户可以加 query
 
     def test_has_jina_key_false_without_key(self):
         mock_resp = _mock_jina_response("content")
@@ -365,7 +367,7 @@ class TestJinaWithQuery:
                 )
 
         assert result["returned_chunks"] == 0
-        assert "阈值" in result["note"]
+        assert "阈值" in result["agent_hint"]
 
     def test_top_n_limits_returned_chunks(self, slice_llm_configured):
         full_text = "High quality content about experiments. " * 500

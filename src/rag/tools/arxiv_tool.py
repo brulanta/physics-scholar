@@ -89,7 +89,7 @@ def _error_payload(error_type: str, error: str, retryable: bool) -> str:
             "error_type": error_type,
             "error": error,
             "retryable": retryable,
-            "message": (
+            "agent_hint": (
                 "arXiv API 暂时不可用或触发速率限制。"
                 "请勿在同一对话内反复重试相同查询。"
                 "如需继续检索，可尝试 s2_search_tool。"
@@ -273,7 +273,7 @@ def arxiv_tool(
             },
             ...
         ],
-        "message": 情况详释,
+        "agent_hint": 情况详释,
     }
 
     ### 失败时
@@ -282,7 +282,7 @@ def arxiv_tool(
         "error_type": "rate_limited" | "timeout" | "request_failed" | "recent_failed_query",
         "error": 错误详情,
         "retryable": true | false,
-        "message": 情况详释与处理建议,
+        "agent_hint": 情况详释与处理建议,
         "papers": []
     }
 
@@ -302,7 +302,7 @@ def arxiv_tool(
                 "error_type": "invalid_arguments",
                 "error": "No search criteria provided",
                 "retryable": False,
-                "message": "调用错误：你没有提供任何搜索条件。请至少提供 keywords、arxiv_ids、author 或 category 中的一项。",
+                "agent_hint": "调用错误：你没有提供任何搜索条件。请至少提供 keywords、arxiv_ids、author 或 category 中的一项。",
                 "papers": [],
             },
             ensure_ascii=False,
@@ -325,7 +325,7 @@ def arxiv_tool(
                 "error_type": "recent_failed_query",
                 "error": "Recent identical query failed",
                 "retryable": False,
-                "message": "相同的查询在近期刚刚失败过，已被系统拦截。请改变搜索关键词，或者直接回退至 s2_search_tool。",
+                "agent_hint": "相同的查询在近期刚刚失败过，已被系统拦截。请改变搜索关键词，或者直接回退至 s2_search_tool。",
                 "papers": [],
             },
             ensure_ascii=False,
@@ -337,6 +337,7 @@ def arxiv_tool(
     headers = {"User-Agent": "PhysicsScholar/0.1 (13159331923@163.com)"}
     last_error = ""
     error_type = "request_failed"
+    request_success = False  # 新增：明确标记是否拿到了 200 OK
 
     for attempt in range(MAX_RETRIES):
         try:
@@ -344,8 +345,9 @@ def arxiv_tool(
             response = _SESSION.get(
                 url, params=params, headers=headers, timeout=(10, 30)
             )
-            response.raise_for_status()
-            break
+            response.raise_for_status()  # 拦截所有非 200 状态码
+            request_success = True
+            break  # 只有真正 200 成功，才跳出重试循环
         except requests.RequestException as e:
             last_error = str(e)
             error_type = "request_failed"
@@ -356,21 +358,34 @@ def arxiv_tool(
                 if e.response.status_code == 429:
                     error_type = "rate_limited"
                     global _ARXIV_BLOCK_UNTIL
+                    _ARXIV_BLOCK_UNTIL = time.time() + 60
                 elif e.response.status_code == 400:
                     error_type = "bad_request"
-                    # arXiv API 如果查询语法错误会报 400
+                elif e.response.status_code >= 500:
+                    error_type = "server_error"
 
             if error_type in ("rate_limited", "timeout"):
                 _mark_failed(query_key)
 
+            # 遇到 400 错误，直接返回给 Agent，不需要重试
+            if error_type == "bad_request":
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error_type": "bad_request",
+                        "error": last_error,
+                        "retryable": False,
+                        "agent_hint": "查询语法被 arXiv API 拒绝。建议简化关键词并重试，或者回退至 s2_search_tool。",
+                        "papers": [],
+                    },
+                    ensure_ascii=False,
+                )
+
+            # 计算退避时间
             if error_type == "rate_limited":
                 backoff = 30.0 * (attempt + 1)
             elif error_type == "timeout":
                 backoff = 5.0 * (2**attempt)
-            elif error_type == "bad_request":
-                # 查询语法错误，重试无用直接退出
-                break
-
             else:
                 backoff = 3.0 * (2**attempt)
 
@@ -383,28 +398,42 @@ def arxiv_tool(
                 MAX_RETRIES,
             )
 
-            if error_type == "rate_limited" and attempt >= 1:
-                break
+            # 核心修复：如果达到最大重试次数，或者决定不再重试 429，直接 return 返回错误载荷！
+            if attempt == MAX_RETRIES - 1 or (
+                error_type == "rate_limited" and attempt >= 1
+            ):
+                logger.error("[arxiv] 放弃重试，向 Agent 返回报错状态")
+                return _error_payload(error_type, last_error, error_type == "timeout")
 
             time.sleep(backoff)
-    else:
-        logger.error("[arxiv] 请求失败，返回空结果")
-        return _error_payload(error_type, last_error, error_type == "timeout")
-    if error_type == "bad_request":
+
+    # 兜底：如果因为某种不可预见原因跳出了循环但未成功
+    if not request_success:
+        return _error_payload(error_type, last_error, False)
+
+    # ================= 只有确信拿到了 200 OK 的 response，才会走到这里 =================
+
+    feed = feedparser.parse(response.text)
+
+    # 额外增加一层对 arXiv 返回内容的保险校验
+    # arXiv API 即便 0 命中，也会返回一个带规范 feed 属性的 XML。
+    # 如果 feed.feed 字典为空，说明解析出的根本不是标准 RSS/Atom，极可能是网络层透明代理/WAF的报错页
+    if not feed.feed and not feed.entries:
+        logger.error("[arxiv] 拿到了200状态码，但内容无法被 feedparser 识别，疑似假200")
         return json.dumps(
             {
                 "success": False,
-                "error_type": "bad_request",
-                "error": last_error,
-                "retryable": False,
-                "message": "查询语法被 arXiv API 拒绝（可能是 keywords 包含了非法特殊符号）。建议简化关键词并重试，或者回退至 s2_search_tool。",
+                "error_type": "parse_error",
+                "error": "Failed to parse arXiv response (might be a false 200 OK)",
+                "retryable": True,
+                "agent_hint": "获取数据时遭遇内容损坏（非学术论文的假结果），请重新尝试，或回退至 s2_search_tool。",
                 "papers": [],
             },
             ensure_ascii=False,
         )
 
-    feed = feedparser.parse(response.text)
     papers = []
+    # ... 后续解析逻辑保持不变 ...
     for entry in feed.entries:
         tags = getattr(entry, "tags", [])
         summary = entry.summary
@@ -432,27 +461,27 @@ def arxiv_tool(
 
     result = filtered if arxiv_ids else filtered[:max_results]
     logger.info("[arxiv] 检索完成：命中 %d 篇，返回 %d 篇", len(papers), len(result))
-    # 构建针对 Agent 的行为指导 message
-    message = "检索成功并返回结果。"
+    # 构建针对 Agent 的行为指导 agent_hint
+    agent_hint = "检索成功并返回结果。"
     if len(result) == 0:
         if len(papers) > 0:
             # 谬误厘清：API搜到了，但是被 recent_days 砍没了
-            message = f"检索成功。API 原本命中了 {len(papers)} 篇论文，但全部不在 recent_days={recent_days} 天的限制内。建议将 recent_days 设为 0 重新检索。"
+            agent_hint = f"检索成功。API 原本命中了 {len(papers)} 篇论文，但全部不在 recent_days={recent_days} 天的限制内。建议将 recent_days 设为 0 重新检索。"
         elif arxiv_ids:
             # ID没查到
-            message = (
+            agent_hint = (
                 f"未能找到指定的 arXiv ID：{arxiv_ids}，请检查论文 ID 格式是否正确。"
             )
         else:
             # 真没搜到
-            message = "未检索到任何符合条件的论文。请尝试减少关键词数量、使用更宽泛的词汇、移除 category 限制，或直接使用 s2_search_tool 进行跨平台广搜。"
+            agent_hint = "未检索到任何符合条件的论文。请尝试减少关键词数量、使用更宽泛的词汇、移除 category 限制，或直接使用 s2_search_tool 进行跨平台广搜。"
 
     return json.dumps(
         {
             "success": True,
             "count": len(result),
             "papers": result,
-            "message": message,
+            "agent_hint": agent_hint,
         },
         ensure_ascii=False,
         indent=2,

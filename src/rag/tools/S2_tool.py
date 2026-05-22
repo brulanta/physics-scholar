@@ -143,7 +143,7 @@ def _error_payload(error_type: str, error: str, retryable: bool) -> str:
             "error_type": error_type,
             "error": error,
             "retryable": retryable,
-            "message": (
+            "agent_hint": (
                 "S2 API 暂时不可用、网络超时或触发了服务商的速率限制(429)。"
                 "这是系统或网络层面的错误，绝非你的关键词不好！"
                 "请勿通过频繁修改关键词来重复尝试此工具。"
@@ -396,7 +396,7 @@ def s2_search_tool(
         "success": true,
         "count": 实际返回论文数量,
         "has_s2_key": 是否使用了 API Key（影响速率上限）,
-        "message": 情况详释,
+        "agent_hint": 情况详释,
         "papers": [
             {
                 "title": 论文标题,
@@ -427,7 +427,7 @@ def s2_search_tool(
                       | "recent_failed_query" | "invalid_params",
         "error": 错误详情,
         "retryable": true | false,
-        "message": 情况详释与处理建议
+        "agent_hint": 情况详释与处理建议
         "papers": []
     }
 
@@ -460,39 +460,34 @@ def s2_search_tool(
                 stat_not_found += 1
             else:
                 stat_failed += 1
-                # 如果遇到了网络错或 429，为了防止 Agent 误判，直接中断并返回错误 Payload
                 if err in ("rate_limited", "timeout", "request_failed"):
-                    logger.error("[s2] ID查询过程中断：因遭遇系统级错误 %s", err)
-                    return _error_payload(
-                        err, f"Failed while fetching ID: {request_id}", retryable=True
-                    )
+                    logger.error("[s2] ID查询遭遇系统级错误 %s: %s", err, request_id)
+                    # 【修改点】如果前面已经拿到了部分结果，不要 return error，而是终止循环并返回已有结果
+                    if results:
+                        break
+                    else:
+                        return _error_payload(
+                            err,
+                            f"Failed while fetching ID: {request_id}",
+                            retryable=True,
+                        )
 
-        logger.info(
-            "[s2] ID精确查询完成。总请求数: %d | 成功拉取: %d | 确认不存在(404): %d | 内部失败: %d",
-            len(ids_to_fetch),
-            len(results),
-            stat_not_found,
-            stat_failed,
-        )
-
-        # 组装成功报文（即使 count 为 0，只要 success=True 且没有系统阻断，说明状态可信）
-        message = ""
+        # 组装成功报文（统一使用 agent_hint）
+        agent_hint = "检索成功。"
         if not results:
-            message = (
-                "查询请求已完全成功执行，但在数据库中没有找到对应的 ID 条目（可能已被删除或ID输入错误）。"
-                "这不是网络问题，请勿盲目重试。请检查你的 ID 来源，或改用关键词搜索模式。"
-            )
+            agent_hint = "查询请求已完全成功执行，但在数据库中没有找到对应的 ID 条目（可能已被删除或ID输入错误）。请勿盲目重试，改用关键词搜索模式。"
+        elif stat_failed > 0:
+            agent_hint = f"部分拉取成功（{len(results)}篇），但有 {stat_failed} 篇因速率限制/网络错误未能拉取。你可以先基于已有内容回答。"
 
         return json.dumps(
             {
                 "success": True,
                 "count": len(results),
                 "has_s2_key": bool(S2_API_KEY),
-                "message": message,
+                "agent_hint": agent_hint,
                 "papers": results,
             },
             ensure_ascii=False,
-            indent=2,
         )
 
     # ── 模式一：关键词检索 ──
@@ -504,7 +499,7 @@ def s2_search_tool(
                 "error_type": "invalid_params",
                 "error": "keywords、s2_paper_ids、arxiv_ids 和 author 不能同时为空",
                 "retryable": False,
-                "message": "请至少提供 keywords、s2_paper_ids、arxiv_ids 或 author 之一。",
+                "agent_hint": "请至少提供 keywords、s2_paper_ids、arxiv_ids 或 author 之一。",
                 "papers": [],
             },
             ensure_ascii=False,
@@ -529,7 +524,7 @@ def s2_search_tool(
                 "error_type": "recent_failed_query",
                 "error": "Recent identical query failed",
                 "retryable": False,
-                "message": "相同的 S2 查询近期失败，请勿重复尝试。如需继续检索请使用 arxiv_tool。",
+                "agent_hint": "相同的 S2 查询近期失败，请勿重复尝试。如需继续检索请使用 arxiv_tool。",
                 "papers": [],
             },
             ensure_ascii=False,
@@ -585,10 +580,10 @@ def s2_search_tool(
     papers = [_parse_paper(p, full_abstract) for p in raw_papers]
 
     # 核心优化：如果请求 200 成功，但是返回了 0 篇论文，给 Agent 打上明确的补丁指南
-    message = ""
+    agent_hint = ""
     if len(papers) == 0:
         logger.info("[s2] 关键词检索完成：API调用成功，但检索结果为 0 篇 (零命中)")
-        message = (
+        agent_hint = (
             "API 检索已完全成功，但是该关键词组合在数据库中【未命中任何论文】。"
             "这不是网络或服务故障，请勿盲目使用完全相同的参数重试。建议行动：1. 减少关键词数量（放宽条件）；"
             "2. 替换过于生僻的词，改用更通用的学术专业名词；3. 检查单词拼写。"
@@ -601,7 +596,7 @@ def s2_search_tool(
             "success": True,
             "count": len(papers),
             "has_s2_key": bool(S2_API_KEY),
-            "message": message,
+            "agent_hint": agent_hint,
             "papers": papers,
         },
         ensure_ascii=False,

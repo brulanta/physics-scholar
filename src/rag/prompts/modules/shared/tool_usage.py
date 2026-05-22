@@ -48,6 +48,8 @@ TOOL_USAGE = """
 
 **跳过条件**：对话历史中已有该论文的完整信息，直接使用。
 
+**输出链接**：用户需要论文链接时，给 open_access_pdf（若有）；无开放PDF时告知用户该论文暂无免费全文链接。
+
 #### arxiv_tool（备用）
 
 **定位**：arXiv 直连检索，用于获取最新预印本，或在 s2_search_tool 不可用时作为替代。
@@ -57,6 +59,8 @@ TOOL_USAGE = """
 **降级条件（切换至 s2_search_tool）**：本工具返回 rate_limited 或其他失败错误。
 
 **与 S2 联动**：arxiv_tool 检索后，可将 arxiv_id 传入 s2_search_tool 补充引用数、venue 等元数据。
+
+**输出链接**：用户需要论文链接时，给 pdf_url（PDF直链），不给 link（arXiv页面链接）。
 
 ---
 

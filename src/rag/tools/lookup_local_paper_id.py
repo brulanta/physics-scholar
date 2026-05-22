@@ -15,7 +15,7 @@ class SearchPaperRequest(BaseModel):
     )
 
 
-def make_search_tool(user_id: str):
+def make_paper_id_search_tool(user_id: str):
     @tool(args_schema=SearchPaperRequest)
     def lookup_local_paper_id(keywords: list[str]) -> str:
         """

@@ -375,8 +375,8 @@ class TestS2ErrorHandling:
         )  # 429 触发后，在当前对话内引导 Agent 切换工具，故为 False
 
         # 3. 增强断言：验证我们新增的 Agent 心理防线机制是否成功塞入
-        assert "message" in result
-        assert "绝非你的关键词不好" in result["message"]
+        assert "agent_hint" in result
+        assert "绝非你的关键词不好" in result["agent_hint"]
 
         # 4. 善后清理：避免当前用例留下的 60s 冷却期把后面的正常单测给卡死
         s2_mod._S2_BLOCK_UNTIL = 0.0
@@ -433,7 +433,7 @@ class TestS2ErrorHandling:
             with patch("time.sleep"):
                 result = json.loads(s2_search_tool.invoke({"keywords": ["test"]}))
 
-        assert "arxiv_tool" in result["message"]
+        assert "arxiv_tool" in result["agent_hint"]
 
     def test_single_id_failure_doesnt_block_others(self):
         """多个 ID 中某一个请求失败，其他 ID 应继续处理。"""

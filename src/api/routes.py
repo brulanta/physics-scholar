@@ -2,7 +2,7 @@
 import uuid
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Response
 from pydantic import BaseModel, Field
 from src.config import PDF_DIR
 from src.core import registry
@@ -22,7 +22,8 @@ logger = get_logger(__name__)
 
 
 @router.get("/proxy-head")
-async def proxy_head(url: str):
+async def proxy_head(url: str, response: Response):
+    response.headers["Cache-Control"] = "no-store"
     async with httpx.AsyncClient(timeout=8) as client:
         try:
             r = await client.head(

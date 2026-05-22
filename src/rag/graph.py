@@ -13,8 +13,10 @@ from typing import TypedDict, Annotated, Sequence
 import os
 from dotenv import load_dotenv
 from src.rag.tools.rag_tool import make_rag_tool
-from src.rag.tools.lookup_local_paper_id import make_search_tool
+from src.rag.tools.lookup_local_paper_id import make_paper_id_search_tool
 from src.rag.tools.arxiv_tool import arxiv_tool
+from src.rag.tools.s2_tool import s2_search_tool
+from src.rag.tools.jina_tool import jina_tool
 from src.rag.memory import (
     ConversationMemory,
     format_history,
@@ -275,9 +277,9 @@ def build_final_prefill() -> str:
 
 
 def build_agent(user_id: str):
-    search_tool = make_search_tool(user_id)
+    paper_id_search_tool = make_paper_id_search_tool(user_id)
     rag_tool = make_rag_tool(user_id)
-    tools = [rag_tool, search_tool, arxiv_tool]
+    tools = [rag_tool, paper_id_search_tool, arxiv_tool, s2_search_tool, jina_tool]
     llm_with_tools = llm.bind_tools(tools)
     tool_node = ToolNode(tools)
 

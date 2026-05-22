@@ -332,7 +332,7 @@ def _error_payload(error_type: str, error: str, retryable: bool, url: str) -> st
             "error_type": error_type,
             "error": error,
             "retryable": retryable,
-            "message": msg_map.get(error_type, "未知错误。"),
+            "agent_hint": msg_map.get(error_type, "未知错误。"),
             "mode": None,
             "content": None,
         },
@@ -460,7 +460,7 @@ def jina_tool(
         "has_jina_key": 是否使用了 Jina API Key,
         "content": 截断后的全文文本,
         "estimated_tokens": 估算 token 数,
-        "note": 说明（是否被截断，原文总长等）
+        "agent_hint": 情况详释
     }
 
     ### 有 query 成功时
@@ -482,7 +482,7 @@ def jina_tool(
             },
             ...
         ],
-        "note": 说明
+        "agent_hint": 情况详释
     }
 
     ### 失败时
@@ -493,7 +493,7 @@ def jina_tool(
                       | "auth_error" | "recent_failed" | "no_url" | "slice_no_config",
         "error": 错误详情,
         "retryable": true | false,
-        "message": 处理建议,
+        "agent_hint": 情况详释与处理建议,
         "mode": null,
         "content": null
     }
@@ -539,6 +539,31 @@ def jina_tool(
     if err:
         return _error_payload(err, f"Jina Reader 失败: {err}", err == "timeout", url)
 
+    # 【新增点】防范假 200 OK（反爬/登录墙校验）
+    text_lower = full_text.lower()
+    if len(full_text) < 1000 and any(
+        kw in text_lower
+        for kw in [
+            "please enable javascript",
+            "verify you are human",
+            "checking your browser",
+            "log in to view",
+        ]
+    ):
+        return json.dumps(
+            {
+                "success": False,
+                "url": url,
+                "error_type": "access_denied",
+                "error": "Hit a paywall or anti-bot challenge",
+                "retryable": False,
+                "agent_hint": "该链接存在反爬虫验证或要求登录（付费墙），Jina 无法读取有效内容。请放弃读取该链接，尝试寻找这篇论文的 arXiv 预印本，或向用户说明无法获取全文。",
+                "mode": None,
+                "content": None,
+            },
+            ensure_ascii=False,
+        )
+
     has_key = bool(JINA_API_KEY)
 
     # ════════════════════════════════════════
@@ -551,12 +576,14 @@ def jina_tool(
         est_tokens = _estimate_tokens(truncated)
 
         if was_truncated:
-            note = (
+            agent_hint = (
                 f"全文共 {len(full_text)} 字符，已截断至前 {len(truncated)} 字符"
                 f"（约 {est_tokens} token）。如需查找特定内容，请提供 query 参数启用分片打分模式。"
             )
         else:
-            note = f"全文共 {len(full_text)} 字符，完整返回（约 {est_tokens} token）。"
+            agent_hint = (
+                f"全文共 {len(full_text)} 字符，完整返回（约 {est_tokens} token）。"
+            )
 
         logger.info("[jina] 全文模式：返回 %d 字符", len(truncated))
         return json.dumps(
@@ -567,7 +594,7 @@ def jina_tool(
                 "has_jina_key": has_key,
                 "content": truncated,
                 "estimated_tokens": est_tokens,
-                "note": note,
+                "agent_hint": agent_hint,
             },
             ensure_ascii=False,
             indent=2,
@@ -645,7 +672,7 @@ def jina_tool(
             "returned_chunks": len(result_chunks),
             "estimated_tokens": total_returned_tokens,
             "chunks": result_chunks,
-            "note": "".join(note_parts),
+            "agent_hint": "".join(note_parts),
         },
         ensure_ascii=False,
         indent=2,
