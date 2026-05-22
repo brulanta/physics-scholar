@@ -12,8 +12,7 @@
       </div>
 
       <div class="session-list">
-        <div class="session-item new-item" :class="{ active: sessions.currentId === '' }" @click="goWelcome"
-          title="新对话">
+        <div class="session-item new-item" :class="{ active: sessions.currentId === '' }" @click="goWelcome" title="新对话">
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none" style="flex-shrink:0">
             <path d="M6.5 1v11M1 6.5h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
           </svg>
@@ -21,7 +20,7 @@
         </div>
 
         <SessionItem v-for="s in sessions.list" :key="s.id" :session="s" :active="s.id === sessions.currentId"
-          :collapsed="collapsed" @click="switchSession(s.id)" @rename="(id, t) => handleRename(id, t)""
+          :collapsed="collapsed" @click="switchSession(s.id)" @rename="(id, t) => handleRename(id, t)"
           @delete="(id) => confirmDelete(id)" />
       </div>
 
@@ -77,7 +76,6 @@
 
 <script setup>
 import { ref, computed, reactive, onMounted, provide, nextTick, watch } from 'vue'
-import axios from 'axios'
 import {
   sessions, settings,
   createSession, getSession,
@@ -92,6 +90,7 @@ import {
   deleteConversation,
   listConversations,
   updateConversationTitle,
+  newConversation
 } from '../api/chat.js'
 import ChatWindow from '../components/Chat/ChatWindow.vue'
 import InputBox from '../components/Chat/InputBox.vue'
@@ -99,7 +98,6 @@ import WelcomePage from '../components/Chat/WelcomePage.vue'
 import SessionItem from '../components/Sidebar/SessionItem.vue'
 import SettingsDrawer from '../components/Settings/SettingsDrawer.vue'
 
-const BASE = 'http://localhost:8000'
 const collapsed = ref(false)
 const showSettings = ref(false)
 const loading = ref(false)
@@ -421,7 +419,7 @@ async function handleWelcomeSend({ text, discuss }) {
 
   let convId
   try {
-    const res = await axios.post(`${BASE}/conv_id/new`)
+    const res = await newConversation()
     convId = res.data.conv_id
   } catch {
     convId = 'local-' + Date.now()

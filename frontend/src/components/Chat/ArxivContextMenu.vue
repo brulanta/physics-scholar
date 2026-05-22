@@ -27,7 +27,7 @@
           <div class="ctx-item-actions">
             <!-- 【改】不可用时下载按钮降级提示 -->
             <button class="ctx-btn download" :class="{ unavail: link.urlOk === false }"
-              :title="link.urlOk === false ? link.errorMsg : '在浏览器中打开 PDF'" @click="download(link)">
+              :title="link.urlOk === false ? link.errorMsg : '在浏览器中打开 PDF'" :disabled="checking" @click="download(link)">
               <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                 <path d="M5.5 1v6M2.5 5l3 3 3-3M1 9.5h9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
                   stroke-linejoin="round" />
@@ -41,7 +41,7 @@
               loading: link.phase === 'loading',
               disabled: link.urlOk === false && link.phase === 'idle'
             }"
-              :disabled="link.phase === 'done' || link.phase === 'loading' || (link.urlOk === false && link.phase === 'idle')"
+              :disabled="checking || link.phase === 'done' || link.phase === 'loading' || (link.urlOk === false && link.phase === 'idle')"
               :title="link.urlOk === false && link.phase === 'idle' ? '链接不可用，无法入库' : ''" @click="ingest(link)">
               <span v-if="link.phase === 'loading'" class="spin">⟳</span>
               <span v-else-if="link.phase === 'done'">✓</span>
@@ -60,8 +60,8 @@
 
       <div v-if="links.length > 1" class="ctx-footer">
         <!-- 【改】只统计链接可用的 pending 数量 -->
-        <button class="ctx-btn-all" :disabled="allDone || availablePendingCount === 0" @click="ingestAll">
-          全部入库（{{ availablePendingCount }}）
+        <button class="ctx-btn-all" :disabled="checking || allDone || availablePendingCount === 0" @click="ingestAll">
+          {{ checking ? '检测中…' : `全部入库（${availablePendingCount}）` }}
         </button>
       </div>
     </div>
@@ -70,15 +70,18 @@
 
 <script setup>
 import { ref, computed, reactive } from 'vue'
-import { ingestFromArxiv, ingestFromUrl, listPapers } from '../../api/paper.js'
+import { ingestFromUrl, listPapers } from '../../api/paper.js'
 import { extractLinks } from '../../utils/extractLinks.js'  // 抽出去的提取函数
 
 const visible = ref(false)
 const x = ref(0)
 const y = ref(0)
 const links = ref([])
+const checking = ref(false)
 
 async function open(event, text) {
+  if (checking.value) return  // 预检中直接拦截重复触发
+
   const extracted = extractLinks(text)
   if (extracted.length === 0) return
 
@@ -105,22 +108,30 @@ async function open(event, text) {
   x.value = event.clientX + menuW > vw ? event.clientX - menuW : event.clientX
   y.value = event.clientY + menuMaxH > vh ? Math.max(8, event.clientY - menuMaxH) : event.clientY
   visible.value = true
+  checking.value = true
 
-  // 【新】异步预检所有链接可用性
-  links.value.forEach(link => {
-    if (link.phase !== 'done') preflight(link)
-    else link.urlOk = true
-  })
+  // 等所有预检完成
+  await Promise.all(
+    links.value.map(link => {
+      if (link.phase !== 'done') return preflight(link)
+      else { link.urlOk = true; return Promise.resolve() }
+    })
+  )
+
+  checking.value = false
 }
 
 // 【新】预检函数
 async function preflight(link) {
   if (link.type === 'arxiv') { link.urlOk = true; return }
   try {
-    const res = await fetch(`/proxy-head?url=${encodeURIComponent(link.pdfUrl)}`, {
+    const res = await fetch(`/api/proxy-head?url=${encodeURIComponent(link.pdfUrl)}`, {
+      cache: 'no-cache',
       signal: AbortSignal.timeout(6000)
     })
+    console.log('proxy-head status:', res.status)        // 加这行
     const data = await res.json()
+    console.log('proxy-head data:', data)                // 加这行
     const ct = data.content_type || ''
     if (data.status === 0 || data.status >= 400) {
       link.urlOk = false
@@ -132,12 +143,16 @@ async function preflight(link) {
       link.urlOk = true
     }
   } catch (e) {
+    console.log('preflight error:', e)                   // 加这行
     link.urlOk = false
     link.errorMsg = e.name === 'TimeoutError' ? '访问超时，可能需要机构权限' : '无法验证链接可用性'
   }
 }
 
-function close() { visible.value = false }
+function close() {
+  if (checking.value) return  // 预检中不允许关闭
+  visible.value = false
+}
 
 function download(link) { window.open(link.pdfUrl, '_blank') }
 
@@ -185,6 +200,23 @@ async function ingestAll() {
       l.errorMsg = '网络错误'
     })
   }
+}
+
+const pendingCount = computed(() =>
+  links.value.filter(l => l.phase === 'idle' || l.phase === 'error').length
+)
+
+const availablePendingCount = computed(() =>
+  links.value.filter(l => (l.phase === 'idle' || l.phase === 'error') && l.urlOk !== false).length
+)
+
+const allDone = computed(() =>
+  links.value.every(l => l.phase === 'done')
+)
+
+function phaseLabel(phase, urlOk) {
+  if (urlOk === false && phase === 'idle') return '不可用'
+  return { idle: '入库', loading: '入库中', done: '已入库', error: '重试' }[phase] || '入库'
 }
 
 defineExpose({ open })

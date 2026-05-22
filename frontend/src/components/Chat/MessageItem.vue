@@ -34,9 +34,8 @@
           </button>
           <button class="act" :class="{ active: localLiked === -1 }" @click="toggleLike(-1)">
             <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M11 6.5H9.5v-5H11v5zM8.5 6.5l-2 4a.9.9 0 01-.9-.9V8H3l-.5-.9L3.5 3H8.5v3.5z"
-                stroke="currentColor" stroke-width="1" stroke-linejoin="round"
-                :fill="localLiked === -1 ? 'currentColor' : 'none'" />
+              <path d="M11 6.5H9.5v-5H11v5zM8.5 6.5l-2 4a.9.9 0 01-.9-.9V8H3l-.5-.9L3.5 3H8.5v3.5z" stroke="currentColor"
+                stroke-width="1" stroke-linejoin="round" :fill="localLiked === -1 ? 'currentColor' : 'none'" />
             </svg>
           </button>
           <button class="act" :disabled="regenerating || globalLoading"
