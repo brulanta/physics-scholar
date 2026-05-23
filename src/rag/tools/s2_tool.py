@@ -283,7 +283,7 @@ class S2SearchRequest(BaseModel):
             "- 每个元素为英文技术关键词（1-3个词），如 'transformer', 'optical comb'\n"
             "- 不要使用完整句子或中文\n"
             "- 不要包含无意义词（如 paper, study, method）\n"
-            "- 多个关键词之间为 AND 关系（S2 默认行为）\n"
+            "- 多个关键词之间为 AND 关系\n"
             "- 可用引号包裹短语，如 '\"attention mechanism\"'\n"
             "- 使用 s2_paper_ids 或 arxiv_ids 精确查询时可留空"
         ),
@@ -292,7 +292,7 @@ class S2SearchRequest(BaseModel):
         default=[],
         description=(
             "S2 Paper ID 列表（可选）：\n"
-            "- 若已知 S2 Paper ID（从本工具历史结果或对话历史中获取），直接填写\n"
+            "- 若已知 S2 Paper ID，直接填写\n"
             "- 填写后将忽略 keywords、author、year_range、fields_of_study\n"
             "- 建议配合 full_abstract=True 获取完整摘要\n"
             "- 可同时传入多个，逐一精确查询"
@@ -302,7 +302,7 @@ class S2SearchRequest(BaseModel):
         default=[],
         description=(
             "arXiv ID 列表（可选）：\n"
-            "- S2 支持以 arXiv ID 直接查询，格式如 '2301.07041'（工具内自动加前缀）\n"
+            "- S2 支持以 arXiv ID 直接查询，格式如 '2301.07041'\n"
             "- 填写后将忽略 keywords、author、year_range、fields_of_study\n"
             "- 适用于已从 arxiv_tool 获得 arxiv_id、想在 S2 补充引用数等字段的场景"
         ),
@@ -434,9 +434,11 @@ def s2_search_tool(
     ## 三种查询模式
 
     ### 模式一：关键词检索（广撒网）
-    填写 keywords，可选填 author、year_range、fields_of_study。
+    填写 keywords，可选填 author、year_range、publication_date_range、fields_of_study、
+    publication_types、min_citation_count、open_access_only。
     返回论文列表，包含标题、截断摘要、引用数、s2_paper_id、open_access_pdf 等。
     建议根据标题和引用数筛选目标论文，记录 s2_paper_id 供后续精确查询。
+    默认按相关性排序；填写 sort 字段可改为按引用数或发表日期排序（自动切换至 bulk 端点）。
 
     ### 模式二：S2 Paper ID 精确查询
     填写 s2_paper_ids，配合 full_abstract=True 获取完整摘要。
@@ -496,7 +498,7 @@ def s2_search_tool(
     ## 注意
     - 批量检索时保持 full_abstract=False，避免 token 超限
     - 相同 query 失败后 120 秒内不会重复请求
-    - 无 API Key 时速率限制更严格（3.5 秒/次），对话内请合理规划调用次数
+    - 需要排序或精确日期过滤时填写 sort / publication_date_range，工具会自动切换检索端点
     """
     # ── 模式二 & 三：精确 ID 查询 ──
     if s2_paper_ids or arxiv_ids:

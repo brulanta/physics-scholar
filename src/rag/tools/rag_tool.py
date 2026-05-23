@@ -69,6 +69,15 @@ def make_rag_tool(user_id: str):
     ) -> str:
         """
         从本地向量知识库中检索与问题语义相关的文段，作为回答依据。
+
+        ## 两种模式
+
+        ### 跨库检索
+        不传 doc_id，对整个本地库做语义检索。
+
+        ### 定向检索
+        传入 doc_id，检索范围限定为该论文。doc_id 由 lookup_local_paper_id 获取。
+        section 参数可选 body（正文）或 reference（参考文献）。
         """
 
         # 1. 调用外部的 build_filter，逻辑清晰且可复用

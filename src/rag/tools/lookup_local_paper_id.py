@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 class SearchPaperRequest(BaseModel):
     keywords: list[str] = Field(
         ...,
-        description="用于匹配论文的关键词或短语列表，应尽量来自论文标题、作者或年份等可检索字段。避免使用宽泛主题词，应选择更具体、可能出现在标题中的片段。",
+        description="用于匹配论文的关键词或短语列表，应尽量来自论文标题、作者或年份等可检索字段。避免使用宽泛主题词。",
     )
 
 
@@ -21,10 +21,7 @@ def make_paper_id_search_tool(user_id: str):
         """
         在本地论文注册表中按关键词检索论文，返回匹配的标题和 doc_id。
 
-        输入应为可能出现在论文标题、作者或年份中的关键词或短语，
-        而不是宽泛主题词。
-
-        返回结果按匹配度排序。。
+        返回结果按匹配度排序。
         """
         results = search_by_keyword(keywords, user_id)
         logger.info("[paper_id_search] params: %s", keywords)
