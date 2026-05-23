@@ -585,9 +585,9 @@ async function handleRegenerate({ msgId, parentId, question }) {
 
   const messages = sessionCache[convId].messages
 
-  // 1️⃣ 立刻从缓存中移除旧 agent 消息
+  // 1️⃣ 立刻从缓存中移除旧 agent 消息及其后所有消息
   const idx = messages.findIndex(m => m.id === Number(msgId))
-  if (idx !== -1) messages.splice(idx, 1)
+  if (idx !== -1) sessionCache[convId].messages = messages.slice(0, idx)
 
   const myCount = ++streamingCounter
   streamingSessionId.value = convId
