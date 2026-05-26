@@ -3,6 +3,9 @@ from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+# 新增：统一定义兼容标签
+THINK_TAG_PATTERN = r"(?:thinking|think)"
+
 
 def is_tool_call_leak(text: str) -> bool:
     """检测是否包含DS内部tool_call格式泄漏"""
@@ -31,19 +34,32 @@ def extract_thinking(text: str) -> tuple[list[str], str, str]:
     if not text:
         return [], "", ""
 
-    # 查找最后一个 </thinking> 的位置，作为 thinking 和 answer 的分割线
-    last_close = text.rfind("</thinking>")
+    # 查找最后一个 tag 的位置，作为 thinking 和 answer 的分割线
+    last_close_match = list(
+        re.finditer(rf"</{THINK_TAG_PATTERN}>", text, re.IGNORECASE)
+    )
+    last_close = last_close_match[-1].start() if last_close_match else -1
+    last_close_tag = last_close_match[-1].group(0) if last_close_match else ""
 
     if last_close != -1:
         # 存在至少一个 </thinking>
         thinking_part = text[:last_close]  # 最后一个 </thinking> 之前的部分
-        answer = text[last_close + len("</thinking>") :].strip()  # 之后的部分
+        answer = text[last_close + len(last_close_tag) :].strip()  # 之后的部分
 
         # 分块提取（仅用于日志）
-        thinking_blocks = re.findall(r"<thinking>([\s\S]*?)</thinking>", thinking_part)
+        thinking_blocks = re.findall(
+            rf"<{THINK_TAG_PATTERN}>([\s\S]*?)</{THINK_TAG_PATTERN}>",
+            thinking_part,
+            re.IGNORECASE,
+        )
 
         # 生成完整 thinking_raw：去除所有标签后的纯文本
-        thinking_raw = re.sub(r"</?thinking>", "", thinking_part).strip()
+        thinking_raw = re.sub(
+            rf"</?{THINK_TAG_PATTERN}>",
+            "",
+            thinking_part,
+            flags=re.IGNORECASE,
+        ).strip()
 
         # 如果 thinking_part 非空但没有提取到块（如只有 <thinking> 没有前面的闭合），
         # 则整个 thinking_part 视为无法解析的思维链残留，不加入 blocks
@@ -54,9 +70,11 @@ def extract_thinking(text: str) -> tuple[list[str], str, str]:
         return [t.strip() for t in thinking_blocks], answer, thinking_raw
 
     # 无任何 </thinking>：沿用原有启发式兜底逻辑
-    if "<thinking>" in text:
-        last_open = text.rfind("<thinking>")
-        after_tag = text[last_open + len("<thinking>") :].strip()
+    open_matches = list(re.finditer(rf"<{THINK_TAG_PATTERN}>", text, re.IGNORECASE))
+
+    if open_matches:
+        last_open_match = open_matches[-1]
+        after_tag = text[last_open_match.end() :].strip()
 
         if not after_tag:
             return [], "", ""
@@ -84,7 +102,9 @@ def process_llm_output(text: str, context: str = "") -> str:
 
     # 日志打印
     is_truncated = (
-        bool(thinking_blocks) and not answer and "</thinking>" not in (text or "")
+        bool(thinking_blocks)
+        and not answer
+        and not re.search(rf"</{THINK_TAG_PATTERN}>", text or "", re.IGNORECASE)
     )
 
     if not thinking_blocks and not thinking_raw and not answer:
@@ -92,7 +112,7 @@ def process_llm_output(text: str, context: str = "") -> str:
 
     elif not thinking_blocks and not thinking_raw and answer:
         # 包含直出和启发式兜底两种情况
-        if "<thinking>" in text:
+        if re.search(rf"<{THINK_TAG_PATTERN}>", text, re.IGNORECASE):
             logger.debug(
                 "%s启发式提取answer（无闭合标签），%d chars", prefix, len(answer)
             )

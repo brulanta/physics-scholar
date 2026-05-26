@@ -24,7 +24,7 @@ OUTPUT_FORMAT_SHARED = """
 ### Thinking 质量要求
 - 必须按当前协议指定的顺序逐步执行，不得跳步
 - 不写空 thinking，不使用"信息已足够""好的，现在来组织回答"等无信息量的过渡语
-- [TOOL_LOOP: DONE] 时保持 thinking 开启，直接进入 Phase 4，不重复闭合
+- [TOOL_LOOP: DONE] 时保持 thinking 开启，直接进入 Next Phase，不重复闭合
 
 ### 回答格式
 - 最终回答直接呈现，不加"回答如下："等引导语

@@ -491,7 +491,9 @@ def jina_tool(
 
     ## 注意
     - 无法访问需要登录的页面（付费期刊正文等）
+    - open_access_pdf 链接有时指向出版商页面而非 PDF 本体，可能因访问限制导致内容极短或无效；返回结果中若含 content_warning 字段，说明内容可疑，应告知用户并放弃继续读取
     - 有 query 时副 LLM 调用次数 = 切片数，长文档会消耗较多资源
+    - 有 query 时若 returned_chunks 为 0，参考 agent_hint 字段的说明判断原因，不要直接重复调用
     - 副 LLM 未配置时，有 query 的请求直接返回错误
     - 相同 URL 失败后 120 秒内不会重复请求
     - 不要对同一 URL 反复调用；如需多次讨论同一篇文章，建议用户将其下载入库
@@ -530,17 +532,19 @@ def jina_tool(
     if err:
         return _error_payload(err, f"Jina Reader 失败: {err}", err == "timeout", url)
 
-    # 【新增点】防范假 200 OK（反爬/登录墙校验）
+    # ── 内容有效性检查（两层）──
+
+    # 第一层：硬拦截——假 200 OK（反爬/登录墙关键词）
     text_lower = full_text.lower()
-    if len(full_text) < 1000 and any(
-        kw in text_lower
-        for kw in [
-            "please enable javascript",
-            "verify you are human",
-            "checking your browser",
-            "log in to view",
-        ]
-    ):
+    _BLOCKED_KEYWORDS = [
+        "please enable javascript",
+        "verify you are human",
+        "checking your browser",
+        "log in to view",
+        "sign in to access",
+        "access denied",
+    ]
+    if len(full_text) < 1000 and any(kw in text_lower for kw in _BLOCKED_KEYWORDS):
         return json.dumps(
             {
                 "success": False,
@@ -548,12 +552,43 @@ def jina_tool(
                 "error_type": "access_denied",
                 "error": "Hit a paywall or anti-bot challenge",
                 "retryable": False,
-                "agent_hint": "该链接存在反爬虫验证或要求登录（付费墙），Jina 无法读取有效内容。请放弃读取该链接，尝试寻找这篇论文的 arXiv 预印本，或向用户说明无法获取全文。",
+                "agent_hint": (
+                    "该链接存在反爬虫验证或要求登录（付费墙），Jina 无法读取有效内容。"
+                    "请放弃读取该链接，尝试寻找这篇论文的 arXiv 预印本，或向用户说明无法获取全文。"
+                ),
                 "mode": None,
                 "content": None,
             },
             ensure_ascii=False,
         )
+
+    # 第二层：软警告——内容疑似无效（短且缺乏学术特征词）
+    # 不直接报错，继续处理，但在返回结果中附带 content_warning 字段
+    _ACADEMIC_SIGNALS = [
+        "abstract",
+        "introduction",
+        "conclusion",
+        "references",
+        "doi",
+        "arxiv",
+        "figure",
+        "table",
+        "experiment",
+        "method",
+        "result",
+        "dataset",
+    ]
+    _SHORT_THRESHOLD = 800
+    _content_warning: str | None = None
+    if len(full_text) < _SHORT_THRESHOLD and not any(
+        sig in text_lower for sig in _ACADEMIC_SIGNALS
+    ):
+        _content_warning = (
+            f"页面内容极短（{len(full_text)} 字符）且缺乏学术内容特征，"
+            "可能为出版商跳转页、访问受限页面或无效链接。"
+            "后续结果仅供参考；如内容明显无意义，请放弃并尝试 arXiv 预印本版本。"
+        )
+        logger.warning("[jina] 内容疑似无效：%d 字符，无学术特征词", len(full_text))
 
     has_key = bool(JINA_API_KEY)
 
@@ -586,6 +621,7 @@ def jina_tool(
                 "content": truncated,
                 "estimated_tokens": est_tokens,
                 "agent_hint": agent_hint,
+                "content_warning": _content_warning,  # 新增
             },
             ensure_ascii=False,
             indent=2,
@@ -648,9 +684,18 @@ def jina_tool(
         f"估算共 {total_returned_tokens} token。",
     ]
     if len(result_chunks) == 0:
-        note_parts.append(
-            "所有片段分数均低于阈值，建议调低 score_threshold 或修改 query。"
-        )
+        # 区分两种零召回原因，给 agent 更明确的行动指引
+        if total_chunks <= 2:
+            note_parts.append(
+                "全文切片数极少，原因可能是页面内容过短或为无效页面（出版商跳转/访问受限）。"
+                "建议先切换为无 query 模式确认页面内容是否有效，再决定是否继续。"
+            )
+        else:
+            note_parts.append(
+                "所有片段分数均低于阈值，内容可能与 query 无关。"
+                "可尝试：① 修改 query 使其更贴近论文用语；② 调低 score_threshold；"
+                "③ 切换为无 query 模式先确认页面内容。"
+            )
 
     return json.dumps(
         {
@@ -664,6 +709,7 @@ def jina_tool(
             "estimated_tokens": total_returned_tokens,
             "chunks": result_chunks,
             "agent_hint": "".join(note_parts),
+            "content_warning": _content_warning,  # 新增
         },
         ensure_ascii=False,
         indent=2,

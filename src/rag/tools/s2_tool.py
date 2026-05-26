@@ -197,6 +197,7 @@ def _parse_paper(entry: dict, full_abstract: bool) -> dict:
     return {
         "title": entry.get("title", ""),
         "abstract": _fmt_abstract(entry.get("abstract"), full_abstract),
+        "has_abstract": bool(entry.get("abstract")),
         "tldr": (entry.get("tldr") or {}).get("text", ""),
         "authors": authors,
         "year": entry.get("year"),
@@ -279,13 +280,17 @@ class S2SearchRequest(BaseModel):
     keywords: list[str] = Field(
         default=[],
         description=(
-            "检索关键词列表：\n"
-            "- 每个元素为英文技术关键词（1-3个词），如 'transformer', 'optical comb'\n"
-            "- 不要使用完整句子或中文\n"
-            "- 不要包含无意义词（如 paper, study, method）\n"
-            "- 多个关键词之间为 AND 关系\n"
-            "- 可用引号包裹短语，如 '\"attention mechanism\"'\n"
-            "- 使用 s2_paper_ids 或 arxiv_ids 精确查询时可留空"
+            "检索关键词列表（核心技术词，极其重要）：\n"
+            "- CRITICAL: keyword 会被按 AND 关系联合检索，因此数量必须极简！通常 1-3 个核心词即可。\n"
+            "- 推荐使用英文技术关键词或短语，如 ['photonic', 'ADC']、['optical comb']。\n"
+            "- 不要写完整句子、论文摘要式描述、长修饰语，错误示例：['different half-wave voltage']。\n"
+            "- 严禁把论文标题拆成多个碎词加入 keyword，这会极大降低召回率。\n"
+            "- 如果目标是某篇已知论文，请直接将【完整论文标题】作为唯一元素，例如：['An electrooptic analog-to-digital converter']，此时不要再附加其他关键词。\n"
+            "- 同一个检索意图如果有多种表达（如 same half-wave voltage 和 equal Vpi），请选择其中一种最通用的。"
+            "- 可使用引号包裹固定短语，如 ['\"attention mechanism\"']。\n"
+            "- 不要包含无意义泛词，如 paper、study、method、approach。\n"
+            "- 严禁包含年份数字（如 1975），年份请填写到 year_range 字段。\n"
+            "- 使用 s2_paper_ids 或 arxiv_ids 精确查询时，可留空。"
         ),
     )
     s2_paper_ids: list[str] = Field(
@@ -311,7 +316,7 @@ class S2SearchRequest(BaseModel):
         default="",
         description=(
             "作者姓名（可选）：\n"
-            "- 仅当用户明确指定作者时填写\n"
+            "- 仅在寻找特定学者的工作、或已知作者时填写。\n"
             "- 只填写人名（如 'Vaswani'），不要附加其他词"
         ),
     )
@@ -406,9 +411,11 @@ class S2SearchRequest(BaseModel):
 def _build_search_query(keywords: list[str], author: str) -> str:
     parts = []
     if keywords:
+        # 确保 keywords 里面没有被 LLM 误塞进长句子，将其规范化
         parts.append(" ".join(keywords))
     if author:
-        parts.append(f"author:{author}")
+        # 去掉 'author:' 伪语法，S2 检索直接拼人名即可，例如 "photonic ADC Taylor"
+        parts.append(author.strip())
     return " ".join(parts)
 
 
@@ -461,6 +468,7 @@ def s2_search_tool(
             {
                 "title": 论文标题,
                 "abstract": 摘要（full_abstract=False 时截断至300字符）,
+                "has_abstract": 是否存在摘要,
                 "tldr": S2 AI 一句话总结（精确查询时有，批量检索时为空）,
                 "authors": 作者列表,
                 "year": 发表年份,
@@ -499,6 +507,7 @@ def s2_search_tool(
     - 批量检索时保持 full_abstract=False，避免 token 超限
     - 相同 query 失败后 120 秒内不会重复请求
     - 需要排序或精确日期过滤时填写 sort / publication_date_range，工具会自动切换检索端点
+    - abstract 为空是 S2 的正常现象，出现频率较高；返回结果中 has_abstract: false 的论文无需再做精确查询，精确查询不会补全摘要。若需要该论文摘要，优先检查arxiv_id 字段是否存在，存在则可用 arxiv_tool 尝试获取；其次检查 open_access_pdf 字段是否存在，存在则可用 jina_tool 尝试读取
     """
     # ── 模式二 & 三：精确 ID 查询 ──
     if s2_paper_ids or arxiv_ids:
@@ -551,6 +560,25 @@ def s2_search_tool(
         )
 
     # ── 模式一：关键词检索 ──
+
+    # 【新增：防御性清洗逻辑】
+    cleaned_keywords = []
+    for kw in keywords:
+        # 如果 Agent 误把一长串句子当成一个 keyword 传进来，帮它按空格切分
+        sub_kws = kw.split()
+        for sub_kw in sub_kws:
+            # 过滤掉 4 位数字（年份，如 1975），因为年份应当走 year_range 参数
+            # 年份混在 query 里在老文献检索中非常容易导致 0 命中
+            if sub_kw.isdigit() and len(sub_kw) == 4:
+                # 如果当前请求没指定 year_range，顺手帮它把年份补到参数里
+                if not year_range:
+                    year_range = sub_kw
+                continue
+            cleaned_keywords.append(sub_kw)
+
+    # 重新把清洗后的列表赋给 keywords
+    keywords = cleaned_keywords
+
     query = _build_search_query(keywords, author)
     if not query.strip():
         return json.dumps(
@@ -572,8 +600,10 @@ def s2_search_tool(
     params: dict = {
         "query": query,
         "fields": _SEARCH_FIELDS,
-        "limit": min(max_results, 20),
     }
+    # search 端点支持 limit 参数做服务端截断；bulk 端点不支持，在本地截断
+    if not use_bulk:
+        params["limit"] = min(max_results, 20)
     if year_range:
         params["year"] = year_range
     if fields_of_study:
@@ -656,6 +686,8 @@ def s2_search_tool(
         return _error_payload("parse_error", str(e), False)
 
     raw_papers = data.get("data", [])
+    if use_bulk:
+        raw_papers = raw_papers[:max_results]  # bulk 端点在本地截断
     papers = [_parse_paper(p, full_abstract) for p in raw_papers]
 
     # 核心优化：如果请求 200 成功，但是返回了 0 篇论文，给 Agent 打上明确的补丁指南

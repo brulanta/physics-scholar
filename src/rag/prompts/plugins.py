@@ -32,9 +32,9 @@ TOOL_DECISION_PLUGIN = """
 覆盖判断：现有 budget [能 / 不能 / 勉强] 覆盖剩余缺口
 
 // ── Q3. 接下来做什么？────────────────────────
-若缺口为空：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Phase 4）
-若 budget = 0：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Phase 4）
-若与历史调用完全重复：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Phase 4）
+若缺口为空：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Next Phase）
+若 budget = 0：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Next Phase）
+若与历史调用完全重复：→ [TOOL_LOOP: DONE]（保持 thinking 开启，直接进入 Next Phase）
 否则：
   目标缺口：[X]
   选择工具：[tool_name]
