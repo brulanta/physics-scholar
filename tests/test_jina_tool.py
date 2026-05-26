@@ -521,6 +521,99 @@ class TestJinaWithQuery:
 
 
 # ══════════════════════════════════════════════════════════════════
+# 短文本阻拦预警 Mock 测试
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestJinaContentWarning:
+    def test_short_content_with_academic_signals_no_warning(self):
+        """短但有学术特征词的内容不应触发软警告。"""
+        short_academic = (
+            "Abstract: This paper introduces a new method. References: [1] Doe 2020."
+        )
+        mock_resp = _mock_jina_response(short_academic)
+        with patch.object(jina_mod._SESSION, "get", return_value=mock_resp):
+            result = json.loads(
+                jina_tool.invoke({"url": "https://example.com/paper.pdf"})
+            )
+        assert result["success"] is True
+        assert result.get("content_warning") is None
+
+    def test_short_content_without_academic_signals_triggers_warning(self):
+        """短且无学术特征词的内容应触发软警告，但仍返回 success=True。"""
+        garbage = "Please subscribe to read this article. Thank you."
+        mock_resp = _mock_jina_response(garbage)
+        with patch.object(jina_mod._SESSION, "get", return_value=mock_resp):
+            result = json.loads(
+                jina_tool.invoke({"url": "https://example.com/paper.pdf"})
+            )
+        assert result["success"] is True  # 软警告，不报错
+        assert result["content_warning"] is not None
+        assert "极短" in result["content_warning"]
+
+    def test_blocked_keywords_trigger_hard_error(self):
+        """含反爬关键词且内容短时，应硬拦截返回 access_denied。"""
+        blocked = "Please enable JavaScript to continue."
+        mock_resp = _mock_jina_response(blocked)
+        with patch.object(jina_mod._SESSION, "get", return_value=mock_resp):
+            result = json.loads(
+                jina_tool.invoke({"url": "https://example.com/paper.pdf"})
+            )
+        assert result["success"] is False
+        assert result["error_type"] == "access_denied"
+
+    def test_long_content_without_signals_no_warning(self):
+        """内容足够长时不触发软警告，即使没有学术特征词。"""
+        long_text = "random text without academic signals. " * 30  # > 800 字符
+        mock_resp = _mock_jina_response(long_text)
+        with patch.object(jina_mod._SESSION, "get", return_value=mock_resp):
+            result = json.loads(
+                jina_tool.invoke({"url": "https://example.com/paper.pdf"})
+            )
+        assert result.get("content_warning") is None
+
+    def test_zero_recall_few_chunks_gives_page_invalid_hint(self, slice_llm_configured):
+        """切片数<=2 且零召回时，agent_hint 应提示页面可能无效。"""
+        short_text = "Too short to be a real paper."  # 切出 1 片
+        jina_resp = _mock_jina_response(short_text)
+        low_score = _mock_score_response(2)
+        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+            with patch.object(jina_mod._SESSION, "post", return_value=low_score):
+                result = json.loads(
+                    jina_tool.invoke(
+                        {
+                            "url": "https://example.com/paper.pdf",
+                            "query": "experiment setup",
+                            "score_threshold": 5,
+                        }
+                    )
+                )
+        assert result["returned_chunks"] == 0
+        assert "无效页面" in result["agent_hint"] or "内容过短" in result["agent_hint"]
+
+    def test_zero_recall_many_chunks_gives_query_hint(self, slice_llm_configured):
+        """切片数>2 且零召回时，agent_hint 应提示修改 query 或调低阈值。"""
+        long_text = "Unrelated content about cooking recipes. " * 200
+        jina_resp = _mock_jina_response(long_text)
+        low_score = _mock_score_response(2)
+        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+            with patch.object(jina_mod._SESSION, "post", return_value=low_score):
+                result = json.loads(
+                    jina_tool.invoke(
+                        {
+                            "url": "https://example.com/paper.pdf",
+                            "query": "quantum entanglement",
+                            "score_threshold": 5,
+                        }
+                    )
+                )
+        assert result["returned_chunks"] == 0
+        assert (
+            "query" in result["agent_hint"] or "score_threshold" in result["agent_hint"]
+        )
+
+
+# ══════════════════════════════════════════════════════════════════
 # 错误处理 Mock 测试
 # ══════════════════════════════════════════════════════════════════
 

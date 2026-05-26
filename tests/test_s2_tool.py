@@ -180,6 +180,17 @@ class TestParsePaper:
         assert parsed["authors"] == []
         assert parsed["abstract"] == ""
 
+    def test_has_abstract_true_when_present(self):
+        raw = _make_s2_paper(abstract="A real abstract here.")
+        parsed = _parse_paper(raw, full_abstract=False)
+        assert parsed["has_abstract"] is True
+
+    def test_has_abstract_false_when_absent(self):
+        raw = _make_s2_paper(abstract="")
+        raw["abstract"] = None  # 模拟 S2 返回 null
+        parsed = _parse_paper(raw, full_abstract=False)
+        assert parsed["has_abstract"] is False
+
 
 class TestBuildSearchQuery:
     def test_keywords_only(self):
