@@ -14,3 +14,4 @@ sub_llm:
 tools:
   jina_api_key: ""
   s2_api_key: ""
+  openalex_email: ""
