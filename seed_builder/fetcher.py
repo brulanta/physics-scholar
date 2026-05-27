@@ -19,6 +19,9 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent.parent / ".env")
 S2_API_KEY = os.getenv("S2_API_KEY", "")
 S2_BASE = "https://api.semanticscholar.org/graph/v1"
 HEADERS = {"x-api-key": S2_API_KEY} if S2_API_KEY else {}
+print(
+    f"🔥 [DEBUG] 检测到 S2_API_KEY 长度为: {len(S2_API_KEY)}。当前 HEADERS 内容: {HEADERS}"
+)
 SLEEP = 1.2  # 每次 API 调用后的间隔（秒）
 
 # ── 7 篇入口综述 (已修复缺漏 DOI 与冗余搜索词) ──────────────────────────────
@@ -208,64 +211,91 @@ def resolve_paper(review: dict) -> tuple[str, str] | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def fetch_refs_paginated(paper_id: str, batch_size: int = 100) -> list[dict]:
-    all_refs, offset = [], 0
-    while True:
-        data = s2_get(
-            f"{S2_BASE}/paper/{paper_id}/references",
-            params={"fields": REF_FIELDS, "offset": offset, "limit": batch_size},
-        )
-        if not data:
-            break
-        batch = data.get("data", [])
-        if not batch:
-            break
-        for item in batch:
-            cited = item.get("citedPaper") or {}
-            # 这里如果 REF_FIELDS 里没有 paperId 就会一直被过滤掉，已修复
-            if cited.get("paperId"):
-                all_refs.append(cited)
-        offset += len(batch)
-        if len(batch) < batch_size:
-            break
-        time.sleep(SLEEP)
-    return all_refs
+# def fetch_refs_paginated(paper_id: str, batch_size: int = 100) -> list[dict]:
+#     all_refs, offset = [], 0
+#     while True:
+#         data = s2_get(
+#             f"{S2_BASE}/paper/{paper_id}/references",
+#             params={"fields": REF_FIELDS, "offset": offset, "limit": batch_size},
+#         )
+#         if not data:
+#             break
+#         batch = data.get("data", [])
+#         if not batch:
+#             break
+#         for item in batch:
+#             cited = item.get("citedPaper") or {}
+#             # 这里如果 REF_FIELDS 里没有 paperId 就会一直被过滤掉，已修复
+#             if cited.get("paperId"):
+#                 all_refs.append(cited)
+#         offset += len(batch)
+#         if len(batch) < batch_size:
+#             break
+#         time.sleep(SLEEP)
+#     return all_refs
 
 
-def fetch_refs_via_detail(paper_id: str) -> list[dict]:
-    """兜底路径：使用独立的请求语法"""
-    # 修复：给每个独立字段前加入 references. 映射，例如 references.paperId,references.title
-    detail_fields = ",".join(f"references.{f}" for f in REF_FIELDS.split(","))
-    data = s2_get(
-        f"{S2_BASE}/paper/{paper_id}",
-        params={"fields": f"referenceCount,{detail_fields}"},
-    )
-    if not data:
+# def fetch_refs_via_detail(paper_id: str) -> list[dict]:
+#     """兜底路径：使用独立的请求语法"""
+#     # 修复：给每个独立字段前加入 references. 映射，例如 references.paperId,references.title
+#     detail_fields = ",".join(f"references.{f}" for f in REF_FIELDS.split(","))
+#     data = s2_get(
+#         f"{S2_BASE}/paper/{paper_id}",
+#         params={"fields": f"referenceCount,{detail_fields}"},
+#     )
+#     if not data:
+#         return []
+#     refs = data.get("references") or []
+#     ref_count = data.get("referenceCount", 0)
+#     results = [item for item in refs if item.get("paperId")]
+#     log.info(f"  [detail兜底] referenceCount={ref_count}，实际获取={len(results)}")
+#     return results
+
+
+# def fetch_references(paper_id: str, review_label: str) -> list[dict]:
+# log.info(f"  拉取 references（分页）…")
+# refs = fetch_refs_paginated(paper_id)
+# time.sleep(SLEEP)
+
+# if len(refs) == 0:
+#     log.warning(f"  [!] 分页端点返回 0 条，尝试 paper detail 兜底 …")
+#     refs = fetch_refs_via_detail(paper_id)
+#     time.sleep(SLEEP)
+
+# if len(refs) == 0:
+#     log.error(
+#         f"  [!!] {review_label} 的 references 两种方式均返回 0，"
+#         f"S2 可能未收录该论文的参考文献列表。"
+#     )
+
+# return refs
+
+
+def fetch_references(paper_id: str, review_label: str = "") -> list[dict]:
+    """
+    【终极绕过限制版】直接使用 /paper/{id} 详情接口，一次性把 references 全部揪出来！
+    完全抛弃脆弱的 /references 分页端点，解决 0 条 Bug 和频繁 429 报错。
+    """
+    log.info(f"  [绕过限制] 正在通过详情主端点透传拉取参考文献列表...")
+    url = f"{S2_BASE}/paper/{paper_id}"
+
+    # 这里的写法是致胜关键：加上 references. 前缀，直接向主接口索要全部文献的完整字段
+    fields = "references.paperId,references.title,references.authors,references.year,references.citationCount,references.abstract,references.externalIds,references.venue,references.publicationTypes,references.openAccessPdf"
+
+    # 直接调用现成的 s2_get
+    data = s2_get(url, params={"fields": fields})
+
+    if not data or "references" not in data:
+        log.error(f"  [!!] {review_label} 接口未返回任何数据或被强行阻断。")
         return []
+
     refs = data.get("references") or []
-    ref_count = data.get("referenceCount", 0)
-    results = [item for item in refs if item.get("paperId")]
-    log.info(f"  [detail兜底] referenceCount={ref_count}，实际获取={len(results)}")
-    return results
 
+    # 过滤掉 S2 数据库里那些没有实体 ID 的幽灵文献
+    valid_refs = [r for r in refs if r.get("paperId")]
 
-def fetch_references(paper_id: str, review_label: str) -> list[dict]:
-    log.info(f"  拉取 references（分页）…")
-    refs = fetch_refs_paginated(paper_id)
-    time.sleep(SLEEP)
-
-    if len(refs) == 0:
-        log.warning(f"  [!] 分页端点返回 0 条，尝试 paper detail 兜底 …")
-        refs = fetch_refs_via_detail(paper_id)
-        time.sleep(SLEEP)
-
-    if len(refs) == 0:
-        log.error(
-            f"  [!!] {review_label} 的 references 两种方式均返回 0，"
-            f"S2 可能未收录该论文的参考文献列表。"
-        )
-
-    return refs
+    log.info(f"  [成功] 透传接口实际获取到 {len(valid_refs)} 条有效参考文献！")
+    return valid_refs
 
 
 # ─────────────────────────────────────────────────────────────────────────────
