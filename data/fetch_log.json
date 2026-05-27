@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-27T17:42:36.727376",
+  "generated_at": "2026-05-27T18:40:53.982144",
   "total_papers": 759,
   "cited_by_multiple_reviews": 9,
   "citation_distribution": {
@@ -9,37 +9,43 @@
     "<50": 214,
     "unknown": 0
   },
-  "reviews_ok": 3,
-  "total_elapsed_s": 37.0,
+  "reviews_ok": 4,
+  "total_elapsed_s": 31.4,
   "fetch_log": [
     {
       "doi": "10.1038/nphoton.2007.89",
       "label": "Capmany & Novak 2007",
       "layer": "classic",
       "journal": "Nature Photonics",
-      "resolved_title": "Microwave photonics combines two worlds",
+      "resolved_title": "Capmany & Novak 2007 (Resolved by manual s2_id)",
       "s2_paper_id": "f560c6a66b05b41f57ef7c276756551765db9e90",
       "raw_ref_count": 0,
       "new_added": 0,
-      "elapsed_s": 8.3,
+      "elapsed_s": 13.2,
       "status": "ok_but_empty_refs"
     },
     {
       "doi": "10.1109/JLT.2008.2009551",
       "label": "Yao 2009",
-      "status": "failed",
-      "reason": "S2 解析失败（DOI+标题均未命中）"
+      "layer": "classic",
+      "journal": "Journal of Lightwave Technology",
+      "resolved_title": "Yao 2009 (Resolved by manual s2_id)",
+      "s2_paper_id": "481948f3421e35ae2854c7594719a57d0b214042",
+      "raw_ref_count": 0,
+      "new_added": 0,
+      "elapsed_s": 5.9,
+      "status": "ok_but_empty_refs"
     },
     {
       "doi": "10.1038/s41566-018-0310-5",
       "label": "Marpaung, Yao & Capmany 2019",
       "layer": "frontier",
       "journal": "Nature Photonics",
-      "resolved_title": "Integrated microwave photonics",
+      "resolved_title": "Marpaung, Yao & Capmany 2019 (Resolved by manual s2_id)",
       "s2_paper_id": "f81c8633704deca0f29bdd289b80bc237339a6e4",
       "raw_ref_count": 0,
       "new_added": 0,
-      "elapsed_s": 7.8,
+      "elapsed_s": 1.6,
       "status": "ok_but_empty_refs"
     },
     {
@@ -47,11 +53,11 @@
       "label": "Yao & Capmany 2022",
       "layer": "frontier",
       "journal": "Science China Information Sciences",
-      "resolved_title": "Microwave photonics",
+      "resolved_title": "Yao & Capmany 2022 (Resolved by manual s2_id)",
       "s2_paper_id": "c53e296ca6737938f3de2c27c7e8de832d754446",
       "raw_ref_count": 0,
       "new_added": 0,
-      "elapsed_s": 7.6,
+      "elapsed_s": 1.8,
       "status": "ok_but_empty_refs"
     }
   ]
