@@ -58,39 +58,44 @@ def make_gemini_client() -> OpenAI:
 
 # ── 模型配置──────────────────────────────────────────────
 # provider决定用哪个client；model_id是传给API的model字符串
-JUDGE_MODELS = os.environ.get(
-    "JUDGE_MODELS",
-    [
-        {"name": "deepseek-v3", "provider": "deepseek", "model_id": "deepseek-chat"},
-        {
-            "name": "deepseek-v4-flash",
-            "provider": "deepseek",
-            "model_id": "deepseek-v4-flash",
-        },
-        {
-            "name": "gemini-2.5-flash",
-            "provider": "gemini",
-            "model_id": "gemini-2.5-flash-preview-04-17",
-        },
-        {
-            "name": "gemini-2.5-pro",
-            "provider": "gemini",
-            "model_id": "gemini-2.5-pro-preview-05-06",
-        },
-    ],
-)
-JUDGE_MODELS = json.loads(JUDGE_MODELS)
-
-SUMMARY_MODEL = os.environ.get(
-    "SUMMARY_MODEL",
-    {
-        "name": "gemini-3.1-pro-preview",
-        "provider": "gemini",
-        "model_id": "gemini-3.1-pro-preview",
-    },
+JUDGE_MODELS = json.loads(
+    os.getenv(
+        "JUDGE_MODELS",
+        json.dumps(
+            [
+                {
+                    "name": "deepseek-v3",
+                    "provider": "deepseek",
+                    "model_id": "deepseek-chat",
+                },
+                {
+                    "name": "deepseek-v4-flash",
+                    "provider": "deepseek",
+                    "model_id": "deepseek-v4-flash",
+                },
+                {
+                    "name": "gemini-3.1-pro",
+                    "provider": "gemini",
+                    "model_id": "gemini-3.1-pro",
+                },
+            ]
+        ),
+    )
 )
 
-SUMMARY_MODEL = json.loads(SUMMARY_MODEL)
+SUMMARY_MODEL = json.loads(
+    os.getenv(
+        "SUMMARY_MODEL",
+        json.dumps(
+            {
+                "name": "gemini-3.1-pro-summary",
+                "provider": "gemini",
+                "model_id": "gemini-3.1-pro",
+            }
+        ),
+    )
+)
+
 
 # ── Prompt第一层：评分宪法（固定）────────────────────────
 SCORING_CONSTITUTION = """
@@ -322,11 +327,38 @@ def build_summary_prompt(case: dict, judge_results: list) -> str:
     return "\n".join(parts)
 
 
+# ── 限速配置──────────────────────────────────────────────
+# 所有模型统一限速：1分钟5次 = 每次间隔12s，留2s余量
+RATE_LIMIT_INTERVAL = 14.0  # 秒
+
+# 每个模型独立记录上次调用时间，互不干扰
+import threading
+
+_rate_lock = threading.Lock()
+_last_call_time: dict = {}  # model name -> float
+
+
 # ── API调用（openai SDK，同步；用to_thread并行）──────────
 def _sync_call(
     model_cfg: dict, prompt: str, system: str, max_tokens: int = 1024
 ) -> str:
-    """同步调用，在线程池中执行以支持asyncio并行。"""
+    """同步调用，含限速保护，在线程池中执行。"""
+    import time
+
+    name = model_cfg["name"]
+
+    # 限速：每个模型独立计时
+    with _rate_lock:
+        last = _last_call_time.get(name, 0.0)
+        wait = RATE_LIMIT_INTERVAL - (time.monotonic() - last)
+        if wait > 0:
+            _last_call_time[name] = time.monotonic() + wait
+        else:
+            _last_call_time[name] = time.monotonic()
+
+    if wait > 0:
+        time.sleep(wait)
+
     provider = model_cfg["provider"]
     model_id = model_cfg["model_id"]
 
@@ -356,7 +388,7 @@ async def call_model(
     system: str = "You are a helpful evaluator.",
     max_tokens: int = 1024,
 ) -> str:
-    """异步包装：在线程池中运行同步SDK调用。"""
+    """异步包装：在线程池中运行同步SDK调用（含限速）。"""
     return await asyncio.to_thread(_sync_call, model_cfg, prompt, system, max_tokens)
 
 

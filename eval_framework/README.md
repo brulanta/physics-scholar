@@ -5,8 +5,9 @@
 ```
 eval_framework/
 ├── evaluator.py        # 主脚本
-├── test_cases.json     # 测试用例（你填写answer和tool_log）
+├── test_cases.json     # 测试用例
 ├── check_models.py     # 测试模型是否连接
+├── repair.py           # 修复打分报错项
 ├── .env                # 环境变量填写
 ├── results/
 │   ├── raw/            # 原始评分存档（每次运行生成一个JSON）
@@ -19,8 +20,16 @@ eval_framework/
 运行前.env内设置API密钥：
 
 ```.env
-DEEPSEEK_API_KEY=sk-xxx
-GEMINI_API_KEY=xxx
+DEEPSEEK_API_KEY = xxx
+GEMINI_API_KEY = xxx
+
+DEEPSEEK_BASE_URL = xxx
+GEMINI_BASE_URL = xxx
+
+# 评委模型 (List[Dict])
+JUDGE_MODELS = xxx
+# 汇总模型 (Dict)
+SUMMARY_MODEL = xxx
 ```
 
 ## 依赖安装
@@ -31,14 +40,14 @@ pip install openai python-dotenv
 
 ## 填写测试用例
 
-在 `test_cases.json` 中，每道题需要你填写：
+在 `test_cases.json` 中，每道题需要填写：
 
 ```json
 {
   "id": "Q01",
-  "question": "问题原文（已填好）",
+  "question": "问题原文",
   "intents": ["I3"],
-  "reference_points": "参考要点（已填好，I2类题为空字符串）",
+  "reference_points": "参考要点（I2类题为空字符串）",
   "answer": "← 粘贴PhysicsScholar的回答",
   "tool_log": "← 粘贴整理好的工具调用简报，无调用填空字符串"
 }
@@ -74,8 +83,7 @@ python evaluator.py Q01 Q02 Q05
 | ----------------- | ----------------- | -------- |
 | deepseek-v3       | deepseek-chat     | 打分评委 |
 | deepseek-v4-flash | deepseek-v4-flash | 打分评委 |
-| gemini-2.5-flash  | gemini-2.5-flash  | 打分评委 |
-| gemini-2.5-pro    | gemini-2.5-pro    | 打分评委 |
+| gemini-3.1-pro    | gemini-3.1-pro    | 打分评委 |
 | gemini-3.1-pro    | gemini-3.1-pro    | 汇总评委 |
 
 ## 输出说明

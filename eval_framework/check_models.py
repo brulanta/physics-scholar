@@ -97,7 +97,7 @@ async def main():
     print(f"Gemini  base_url  : {GEMINI_BASE_URL}")
     print()
 
-    all_models = JUDGE_MODELS + [SUMMARY_MODEL]
+    all_models = JUDGE_MODELS
     print(f"待测模型：{len(all_models)} 个，并行发送测试消息...\n")
 
     results = await asyncio.gather(*[check_one(m) for m in all_models])
