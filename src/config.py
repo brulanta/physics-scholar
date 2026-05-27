@@ -51,6 +51,7 @@ SUB_LLM_MODEL = _get("SUB_MODEL", "sub_llm", "model") or MAIN_LLM_MODEL
 # ── 第三方工具 Key ────────────────────────────────────────
 JINA_API_KEY = _get("JINA_API_KEY", "tools", "jina_api_key")
 S2_API_KEY = _get("S2_API_KEY", "tools", "s2_api_key")
+OPENALEX_EMAIL = _get("OPENALEX_EMAIL", "tools", "openalex_email")
 
 # ── LLM extra参数（DeepSeek特有，可选）───────────────────
 DEEPSEEK_EXTRA_BODY: dict = {
