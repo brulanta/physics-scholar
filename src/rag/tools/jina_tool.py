@@ -8,7 +8,8 @@ Jina 网页/PDF 阅读工具
 ## 典型调用链
   s2_search_tool  →  (取 open_access_pdf)  →  jina_tool
   arxiv_tool      →  (取 pdf_url)          →  jina_tool
-  用户直接提供 URL                          →  jina_tool
+  openalex_tool   →  (取 open_access_pdf)  →  jina_tool
+  用户直接提供 URL                         →  jina_tool
 
 ## 工作模式
 
@@ -351,7 +352,7 @@ class JinaRequest(BaseModel):
             "目标网页或 PDF 的完整 URL（必填）：\n"
             "- 支持任意公开可访问的网页或 PDF 链接\n"
             "- 典型来源：\n"
-            "    s2_search_tool 返回的 open_access_pdf 字段\n"
+            "    s2_search_tool 或 openalex_tool 返回的 open_access_pdf 字段\n"
             "    arxiv_tool 返回的 pdf_url 字段\n"
             "    用户直接提供的链接\n"
             "- 不支持需要登录才能访问的页面"

@@ -18,6 +18,7 @@ import pytest
 import requests
 
 from langchain_core.messages import AIMessage
+from pydantic import SecretStr
 
 
 # ── 注册 --live 命令行选项（conftest 已注册时静默跳过）──────────
@@ -56,30 +57,19 @@ from src.rag.tools.jina_tool import (
 
 @pytest.fixture(autouse=True)
 def reset_jina_state():
-    """每个测试前重置模块级全局状态。"""
+    original_jina_key = jina_mod.JINA_API_KEY
+
     jina_mod.JINA_API_KEY = ""
-    jina_mod.SLICE_LLM_BASE_URL = ""
-    jina_mod.SLICE_LLM_API_KEY = ""
-    jina_mod.SLICE_LLM_MODEL = ""
     jina_mod._LAST_JINA_CALL = 0.0
     jina_mod._JINA_BLOCK_UNTIL = 0.0
     jina_mod._RECENT_FAILED.clear()
+
     yield
-    jina_mod.JINA_API_KEY = ""
-    jina_mod.SLICE_LLM_BASE_URL = ""
-    jina_mod.SLICE_LLM_API_KEY = ""
-    jina_mod.SLICE_LLM_MODEL = ""
+
+    jina_mod.JINA_API_KEY = original_jina_key
     jina_mod._LAST_JINA_CALL = 0.0
     jina_mod._JINA_BLOCK_UNTIL = 0.0
     jina_mod._RECENT_FAILED.clear()
-
-
-@pytest.fixture
-def slice_llm_configured():
-    """配置好副 LLM 的 fixture。"""
-    jina_mod.SLICE_LLM_BASE_URL = "https://api.deepseek.com/v1"
-    jina_mod.SLICE_LLM_API_KEY = "fake-slice-key"
-    jina_mod.SLICE_LLM_MODEL = "deepseek-chat"
 
 
 def _mock_jina_response(content: str, status_code: int = 200) -> MagicMock:
@@ -302,44 +292,53 @@ class TestJinaWithQuery:
         assert result["success"] is False
         assert result["error_type"] == "slice_no_config"
 
-    def test_query_with_llm_returns_scored_chunks(self, slice_llm_configured):
+    def test_query_with_llm_returns_scored_chunks(self):
         # 构造足够长的全文，能切出多个片段
         full_text = "This paper describes experimental methods. " * 100
 
         jina_resp = _mock_jina_response(full_text)
         score_resp = _mock_score_response(7)
 
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=score_resp):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "experimental methods",
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(jina_mod._SESSION, "post", return_value=score_resp):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "experimental methods",
+                            }
+                        )
                     )
-                )
 
         assert result["success"] is True
         assert result["mode"] == "scored_chunks"
         assert result["total_chunks"] >= 1
         assert "chunks" in result
 
-    def test_returned_chunks_have_required_fields(self, slice_llm_configured):
+    def test_returned_chunks_have_required_fields(self):
         full_text = "Sentence about experiment. " * 200
         jina_resp = _mock_jina_response(full_text)
         score_resp = _mock_score_response(8)
-
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=score_resp):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "experiment",
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(jina_mod._SESSION, "post", return_value=score_resp):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "experiment",
+                            }
+                        )
                     )
-                )
 
         for chunk in result["chunks"]:
             assert "index" in chunk
@@ -349,47 +348,59 @@ class TestJinaWithQuery:
             assert isinstance(chunk["score"], int)
             assert 1 <= chunk["score"] <= 10
 
-    def test_chunks_below_threshold_excluded(self, slice_llm_configured):
+    def test_chunks_below_threshold_excluded(self):
         full_text = "Some content here. " * 200
         jina_resp = _mock_jina_response(full_text)
         low_score_resp = _mock_score_response(3)  # 低于默认阈值 5
-
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=low_score_resp):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "anything",
-                            "score_threshold": 5,
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(
+                    jina_mod._SESSION, "post", return_value=low_score_resp
+                ):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "anything",
+                                "score_threshold": 5,
+                            }
+                        )
                     )
-                )
 
         assert result["returned_chunks"] == 0
         assert "阈值" in result["agent_hint"]
 
-    def test_top_n_limits_returned_chunks(self, slice_llm_configured):
+    def test_top_n_limits_returned_chunks(self):
         full_text = "High quality content about experiments. " * 500
         jina_resp = _mock_jina_response(full_text)
         high_score_resp = _mock_score_response(9)
-
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=high_score_resp):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "experiments",
-                            "top_n": 2,
-                            "score_threshold": 1,
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(
+                    jina_mod._SESSION, "post", return_value=high_score_resp
+                ):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "experiments",
+                                "top_n": 2,
+                                "score_threshold": 1,
+                            }
+                        )
                     )
-                )
 
         assert result["returned_chunks"] <= 2
 
-    def test_chunks_returned_in_original_order(self, slice_llm_configured):
+    def test_chunks_returned_in_original_order(self):
         """返回的 chunks 应按原文顺序（index 升序）排列，而非按分数顺序。"""
         full_text = (
             "Section A content. " * 100
@@ -404,66 +415,82 @@ class TestJinaWithQuery:
             return _mock_score_response(s)
 
         jina_resp = _mock_jina_response(full_text)
-
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", side_effect=score_side_effect):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "content",
-                            "top_n": 3,
-                            "score_threshold": 1,
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(
+                    jina_mod._SESSION, "post", side_effect=score_side_effect
+                ):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "content",
+                                "top_n": 3,
+                                "score_threshold": 1,
+                            }
+                        )
                     )
-                )
 
         indices = [c["index"] for c in result["chunks"]]
         assert indices == sorted(indices), "chunks 应按原文顺序（index升序）排列"
 
-    def test_token_budget_limits_total_size(self, slice_llm_configured):
+    def test_token_budget_limits_total_size(self):
         full_text = "Data about experiments in this paper. " * 500
         jina_resp = _mock_jina_response(full_text)
         score_resp = _mock_score_response(9)
-
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=score_resp):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "experiments",
-                            "top_n": 10,
-                            "score_threshold": 1,
-                            "max_return_tokens": 200,  # 很小的预算
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(jina_mod._SESSION, "post", return_value=score_resp):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "experiments",
+                                "top_n": 10,
+                                "score_threshold": 1,
+                                "max_return_tokens": 200,  # 很小的预算
+                            }
+                        )
                     )
-                )
 
         assert result["estimated_tokens"] <= 200 + 400  # 允许单片略超预算
 
-    def test_llm_called_once_per_chunk(self, slice_llm_configured):
+    def test_llm_called_once_per_chunk(self):
         """副 LLM 应为每个片段调用一次，不多不少。"""
         # 构造恰好能切成 3 片的文本
         full_text = "A" * 1000 + "B" * 1000 + "C" * 1000
         jina_resp = _mock_jina_response(full_text)
-
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            # 核心改动：直接 mock _score_chunk，不仅避开 Pydantic 的限制，
-            # 也不需要再伪造 AIMessage 对象了，直接让它返回整数分数即可。
-            with patch.object(jina_mod, "_score_chunk", return_value=6) as mock_score:
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "content",
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                # 核心改动：直接 mock _score_chunk，不仅避开 Pydantic 的限制，
+                # 也不需要再伪造 AIMessage 对象了，直接让它返回整数分数即可。
+                with patch.object(
+                    jina_mod, "_score_chunk", return_value=6
+                ) as mock_score:
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "content",
+                            }
+                        )
                     )
-                )
 
         assert mock_score.call_count == result["total_chunks"]
 
-    def test_llm_parse_failure_gives_score_zero(self, slice_llm_configured):
+    def test_llm_parse_failure_gives_score_zero(self):
         """副 LLM 返回格式错误时，该片段得分应为 0（不崩溃，排在末尾）。"""
         full_text = "Valid paper content about neural networks. " * 100
         jina_resp = _mock_jina_response(full_text)
@@ -474,24 +501,28 @@ class TestJinaWithQuery:
         bad_resp.json.return_value = {
             "choices": [{"message": {"content": "not json at all"}}]
         }
-
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=bad_resp):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "neural networks",
-                            "score_threshold": 1,
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(jina_mod._SESSION, "post", return_value=bad_resp):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "neural networks",
+                                "score_threshold": 1,
+                            }
+                        )
                     )
-                )
 
         # 得分为 0 的片段低于任何正常阈值，不会进入结果（threshold 默认 5）
         # 但工具本身不应崩溃
         assert result["success"] is True
 
-    def test_llm_score_clamped_to_1_10(self, slice_llm_configured):
+    def test_llm_score_clamped_to_1_10(self):
         """副 LLM 返回越界分数时，应夹紧到 [1, 10]。"""
         full_text = "Content here. " * 100
         jina_resp = _mock_jina_response(full_text)
@@ -503,18 +534,24 @@ class TestJinaWithQuery:
         bad_score_resp.json.return_value = {
             "choices": [{"message": {"content": '{"score": 15}'}}]
         }
-
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=bad_score_resp):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "content",
-                            "score_threshold": 1,
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(
+                    jina_mod._SESSION, "post", return_value=bad_score_resp
+                ):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "content",
+                                "score_threshold": 1,
+                            }
+                        )
                     )
-                )
 
         for chunk in result["chunks"]:
             assert 1 <= chunk["score"] <= 10
@@ -572,41 +609,51 @@ class TestJinaContentWarning:
             )
         assert result.get("content_warning") is None
 
-    def test_zero_recall_few_chunks_gives_page_invalid_hint(self, slice_llm_configured):
+    def test_zero_recall_few_chunks_gives_page_invalid_hint(self):
         """切片数<=2 且零召回时，agent_hint 应提示页面可能无效。"""
         short_text = "Too short to be a real paper."  # 切出 1 片
         jina_resp = _mock_jina_response(short_text)
         low_score = _mock_score_response(2)
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=low_score):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "experiment setup",
-                            "score_threshold": 5,
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(jina_mod._SESSION, "post", return_value=low_score):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "experiment setup",
+                                "score_threshold": 5,
+                            }
+                        )
                     )
-                )
         assert result["returned_chunks"] == 0
         assert "无效页面" in result["agent_hint"] or "内容过短" in result["agent_hint"]
 
-    def test_zero_recall_many_chunks_gives_query_hint(self, slice_llm_configured):
+    def test_zero_recall_many_chunks_gives_query_hint(self):
         """切片数>2 且零召回时，agent_hint 应提示修改 query 或调低阈值。"""
         long_text = "Unrelated content about cooking recipes. " * 200
         jina_resp = _mock_jina_response(long_text)
         low_score = _mock_score_response(2)
-        with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
-            with patch.object(jina_mod._SESSION, "post", return_value=low_score):
-                result = json.loads(
-                    jina_tool.invoke(
-                        {
-                            "url": "https://example.com/paper.pdf",
-                            "query": "quantum entanglement",
-                            "score_threshold": 5,
-                        }
+        with patch.object(
+            jina_mod.sub_llm,
+            "openai_api_key",
+            SecretStr("fake-key"),
+        ):
+            with patch.object(jina_mod._SESSION, "get", return_value=jina_resp):
+                with patch.object(jina_mod._SESSION, "post", return_value=low_score):
+                    result = json.loads(
+                        jina_tool.invoke(
+                            {
+                                "url": "https://example.com/paper.pdf",
+                                "query": "quantum entanglement",
+                                "score_threshold": 5,
+                            }
+                        )
                     )
-                )
         assert result["returned_chunks"] == 0
         assert (
             "query" in result["agent_hint"] or "score_threshold" in result["agent_hint"]
@@ -711,7 +758,7 @@ class TestJinaRateLimit:
 
 
 # @pytest.mark.skip(reason="已由 LangChain 底层接管 URL 组装")
-# def test_slice_llm_strips_trailing_slash_on_use(self, slice_llm_configured):
+# def test_slice_llm_strips_trailing_slash_on_use(self):
 #     """调用副 LLM 时 URL 不应有双斜杠。"""
 #     jina_mod.SLICE_LLM_BASE_URL = "https://api.deepseek.com/v1/"
 #     full_text = "content " * 100
@@ -741,15 +788,9 @@ class TestJinaLive:
     def inject_keys(self):
         from src.config import (
             JINA_API_KEY,
-            SUB_LLM_API_KEY,
-            SUB_LLM_BASE_URL,
-            SUB_LLM_MODEL,
         )
 
         jina_mod.JINA_API_KEY = JINA_API_KEY
-        jina_mod.SLICE_LLM_BASE_URL = SUB_LLM_BASE_URL
-        jina_mod.SLICE_LLM_API_KEY = SUB_LLM_API_KEY
-        jina_mod.SLICE_LLM_MODEL = SUB_LLM_MODEL
 
     def test_no_query_fetch_arxiv_pdf(self):
         # 使用 arXiv 上一篇公开论文的 PDF

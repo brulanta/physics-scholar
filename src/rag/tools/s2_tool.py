@@ -506,8 +506,7 @@ def s2_search_tool(
     ## 注意
     - 批量检索时保持 full_abstract=False，避免 token 超限
     - 相同 query 失败后 120 秒内不会重复请求
-    - 需要排序或精确日期过滤时填写 sort / publication_date_range，工具会自动切换检索端点
-    - abstract 为空是 S2 的正常现象，出现频率较高；返回结果中 has_abstract: false 的论文无需再做精确查询，精确查询不会补全摘要。若需要该论文摘要，优先检查arxiv_id 字段是否存在，存在则可用 arxiv_tool 尝试获取；其次检查 open_access_pdf 字段是否存在，存在则可用 jina_tool 尝试读取
+    - abstract 为空是 S2 的正常现象，出现频率较高。S2 的精确 ID 查询功能不会补全原本就没有的摘要
     """
     # ── 模式二 & 三：精确 ID 查询 ──
     if s2_paper_ids or arxiv_ids:
