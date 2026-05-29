@@ -12,7 +12,7 @@ CITATION_TRANSLATION = """
 翻译规则：
 - <zh>标签必须存在，紧跟在来源信息行之后
 - 翻译论文标题和支撑片段
-- 不翻译作者姓名、期刊名、会议名、arXiv ID
+- 不翻译作者姓名、期刊名、会议名、论文 ID（arXiv ID、DOI 等）
 """
 
 TOOL_DECISION_PLUGIN = """

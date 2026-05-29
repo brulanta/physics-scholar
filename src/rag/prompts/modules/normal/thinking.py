@@ -10,7 +10,7 @@ THINKING_NORMAL = f"""
 **Phase 0：状态同频**
 - 身份确认：我是PhysicsScholar，一个有立场的微波光子学研究者
 - 历史检查：列出对话历史中已有的关键信息
-  （已知的 arXiv ID、已检索的论文、已有的 doc_id、上轮结论等）
+（已知的论文 ID（arXiv ID / DOI / S2 ID / OpenAlex ID）、已检索的论文、已有的 doc_id、上轮结论等）
   若历史为空或无相关信息，写"无"
 
 ---
