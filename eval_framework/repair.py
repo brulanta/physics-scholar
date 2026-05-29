@@ -155,7 +155,7 @@ async def repair(raw_path: Path):
             summary_prompt = build_summary_prompt(case, entry["judge_results"])
             try:
                 summary = await call_model(
-                    SUMMARY_MODEL, summary_prompt, SUMMARY_SYSTEM, max_tokens=2048
+                    SUMMARY_MODEL, summary_prompt, SUMMARY_SYSTEM, max_tokens=20000
                 )
                 entry["summary"] = summary
                 print(f"  [{qid}] 汇总 ✅")
