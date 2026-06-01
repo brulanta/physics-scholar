@@ -1,0 +1,452 @@
+[
+    {
+        "paperId": "0145656ccbcbfdfb9928a47a4ec1f3e08882f088",
+        "title": "Discrete-time optical Processing of microwave signals",
+        "abstract": "This paper presents the fundamental principles and recent advances in the field of photonic filtering of microwave signals using discrete-time incoherent processing. We also provide a comprehensive review of the fundamentals, applications, and current state of the art.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Review"
+        ],
+        "tag_version_2": [
+            "Comprehensive/Device-Agnostic",
+            "Signal Processing & IFM",
+            "Review"
+        ]
+    },
+    {
+        "paperId": "e987b93282099cf1174d4493fe658303b7dc906c",
+        "title": "Millimeter-wave arbitrary waveform generation with a direct space-to-time pulse shaper.",
+        "abstract": "By using tailored pulse sequences from a novel, 1.5-microm direct space-to-time pulse shaper driving a high-speed photodetector, we have achieved, for the first time to our knowledge, millimeter-wave arbitrary waveform generation at center frequencies approaching 50 GHz. By appropriately designing the driving optical pulse sequences, we demonstrate the ability to synthesize strongly phase- and frequency-modulated millimeter-wave electrical signals on a cycle-by-cycle basis.",
+        "tag_version_1": [
+            "System Architecture Only",
+            "Signal Generation",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Optical Filter & Delay Line",
+            "Signal Generation",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "ab9f2c95f8f3e983b8294c3bcf017df1e097f5f8",
+        "title": "Adaptive RF-photonic arbitrary waveform generator",
+        "abstract": "Optical and radio-frequency waveforms with wide-band arbitrary modulation are generated using spectral shaping of a supercontinuum source followed by wavelength-to-time mapping. Adaptive computer control is used to mitigate the nonideal features inherent in the optical source and in the spectrum modulation process.",
+        "tag_version_1": [
+            "System Architecture Only",
+            "Signal Generation",
+            "Article"
+        ],
+        "tag_version_2": [
+            "Laser & Frequency Comb",
+            "Signal Generation",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "33d1ba9de7a97f55ffb60cc305471d1e07f2b79c",
+        "title": "Photonic synthesis of broadband microwave arbitrary waveforms applicable to ultra-wideband communication",
+        "abstract": "We demonstrate photonic synthesis of broadband radio-frequency (RF) waveforms suitable for ultra-wide bandwidth (UWB) systems via open-loop reflection-mode dispersive Fourier transform optical pulse shaping. Using this technique, we synthesize broadband burst, monocycle and pulsed waveforms with RF bandwidths ranging from /spl sim/1-8 GHz. Through appropriate optical waveform design, we demonstrate direct control over the shape of the RF spectrum - a capability that enables us to tailor our RF waveforms to conform to the low-power UWB spectral criteria.",
+        "tag_version_1": [
+            "System Architecture Only",
+            "Signal Generation",
+            "Article"
+        ],
+        "tag_version_2": [
+            "Optical Filter & Delay Line",
+            "Signal Generation",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "0d41d1d6ddb85100de80741c09404ef905f39b1f",
+        "title": "A tutorial on microwave photonic filters",
+        "abstract": "Microwave photonic filters are photonic subsystems designed with the aim of carrying equivalent tasks to those of an ordinary microwave filter within a radio frequency (RF) system or link, bringing supplementary advantages inherent to photonics such as low loss, high bandwidth, immunity to electromagnetic interference (EMI), tunability, and reconfigurability. There is an increasing interest in this subject since, on one hand, emerging broadband wireless access networks and standards spanning from universal mobile telecommunications system (UMTS) to fixed access picocellular networks and including wireless local area network (WLAN), World Interoperability for Microwave Access, Inc. (WIMAX), local multipoint distribution service (LMDS), etc., require an increase in capacity by reducing the coverage area. An enabling technology to obtain this objective is based on radio-over-fiber (RoF) systems where signal processing is carried at a central office to where signals are carried from inexpensive remote antenna units (RAUs). On the other hand, microwave photonic filters can find applications in specialized fields such as radar and photonic beamsteering of phased-arrayed antennas, where dynamical reconfiguration is an added value. This paper provides a tutorial introduction of this subject to the reader not working directly in the field but interested in getting an overall introduction of the subject and also to the researcher wishing to get a comprehensive background before working on the subject.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Review"
+        ],
+        "tag_version_2": [
+            "Comprehensive/Device-Agnostic",
+            "Signal Processing & IFM",
+            "Review"
+        ]
+    },
+    {
+        "paperId": "cf19262bbbce421baa5af932cf5058c897219200",
+        "title": "Novel tunable photonic microwave filter based on laser arrays and N/spl times/N AWG-based delay lines",
+        "abstract": "In this letter, a novel tunable and flexible photonic microwave filter architecture based on the use of laser arrays and the periodicity of N/spl times/N arrayed-waveguide-gratings optical response is proposed. Filter coarse and fine-tuning capabilities are experimentally demonstrated showing an excellent agreement with theory.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "System Architecture Only",
+            "Signal Processing & IFM",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "574ee7270031a878db0406523801287f700e8f8e",
+        "title": "Tunable all-optical negative multitap microwave filters based on uniform fiber Bragg gratings.",
+        "abstract": "We present a novel and simple technique for obtaining transversal filters with negative coefficients by using uniform fiber Bragg gratings. We demonstrate a wide tuning range, good performance, low cost, and easy implementation of multitap filters in an all-optical passive configuration in which negative taps are obtained by use of the transmission of a broadband source through uniform Bragg gratings.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Article"
+        ]
+    },
+    {
+        "paperId": "17d6e998c8953a1582b387d0b5570b27bed93a0a",
+        "title": "Optically generated true-time delay in phased-array antennas",
+        "abstract": "This tutorial review paper deals with various methods for solving a basic problem of wideband phased arrays, i.e. beam squinting, using optical technologies. The problem of beam squinting in phased arrays is analyzed and the concept of true-time delay is introduced. The advantages of realizing variable delay lines by optical rather than by microwave means are reviewed, together with principles of operation. Among the techniques described are switched-path length delay lines, fiber stretchers, tunable lasers with highly dispersive fiber, and coherent techniques incorporating dispersive delay. Recent experimental results are discussed in the light of practical system requirements.< <ETX xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">&gt;</ETX>",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Radar & Sensing",
+            "Review"
+        ],
+        "tag_version_2": [
+            "Comprehensive/Device-Agnostic",
+            "Radar & Sensing",
+            "Review"
+        ]
+    },
+    {
+        "paperId": "f560c6a66b05b41f57ef7c276756551765db9e90",
+        "title": "Microwave photonics combines two worlds",
+        "abstract": "",
+        "tag_version_1": [
+            "Comprehensive/Device-Agnostic",
+            "Comprehensive/Application-Agnostic",
+            "Review"
+        ],
+        "tag_version_2": [
+            "Pending",
+            "Pending",
+            "Pending"
+        ]
+    },
+    {
+        "paperId": "d5d86dc0703e4037d70d6f21a80217a6b69bbec2",
+        "title": "Integrated microwave photonics",
+        "abstract": "Microwave photonics (MWP) is an emerging field in which radio frequency (RF) signals are generated, distributed, processed and analyzed using the strength of photonic techniques. It is a technology that enables various functionalities which are not feasible to achieve only in the microwave domain. A particular aspect that recently gains significant interests is the use of photonic integrated circuit (PIC) technology in the MWP field for enhanced functionalities and robustness as well as the reduction of size, weight, cost and power consumption. This article reviews the recent advances in this emerging field which is dubbed as integrated microwave photonics. Key integrated MWP technologies are reviewed and the prospective of the field is discussed.",
+        "tag_version_1": [
+            "Comprehensive/Device-Agnostic",
+            "Comprehensive/Application-Agnostic",
+            "Review"
+        ],
+        "tag_version_2": [
+            "Photonic Integrated Chip",
+            "Comprehensive/Application-Agnostic",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "fcea412b462c3f2e7b511da71ca218ef3e80e104",
+        "title": "Photonic Generation of Ultrawideband Signals",
+        "abstract": "Ultrawideband (UWB) that is regulated by the Federal Communications Commission (FCC) for short-range high-throughput wireless communication and sensor networks with advantageous features, such as immunity to multipath fading, extremely short time duration, being carrier free, and having low duty cycle, wide bandwidth, and low power spectral density, has been a topic of interest recently. By wireless transmission, UWB communications systems can only operate in a short distance of a few meters to tens of meters. The convergence of UWB and optical fiber distribution techniques, or UWB over fiber, offers the availability of undisrupted service across different networks and eventually achieves high-data-rate access at any time and from any place. To distribute the UWB signals over the optical fiber, it is also desirable that the UWB signals can be generated in the optical domain without having extra electrical-to-optical conversion. In addition, UWB signals that are generated in the optical domain can be easily tailored to have a spectrum that meets the FCC-specified spectral mask. In this paper, techniques to generate UWB signals in the optical domain will be discussed. These techniques are divided into three categories, with the generation of UWB signals based on the following: 1) phase-modulation-to-intensity-modulation conversion; 2) a photonic microwave delay-line filter; and 3) optical spectral shaping and dispersion-induced frequency-to-time mapping. The areas for future development and the challenge of implementation of these techniques for practical applications will also be discussed.",
+        "tag_version_1": [
+            "Comprehensive/Device-Agnostic",
+            "Signal Generation",
+            "Review"
+        ],
+        "tag_version_2": [
+            "System Architecture Only",
+            "Signal Generation",
+            "Review"
+        ]
+    },
+    {
+        "paperId": "02cfa149a20d151c00180baaab0f482149ec4d49",
+        "title": "Comb-based radiofrequency photonic filters with rapid tunability and high selectivity",
+        "abstract": "Photonic technologies have received considerable attention regarding the enhancement of radiofrequency electrical systems, including high-frequency analogue signal transmission, control of phased arrays, analog-to-digital conversion and signal processing. Although the potential of radiofrequency photonics for the implementation of tunable electrical filters over broad radiofrequency bandwidths has been much discussed, the realization of programmable filters with highly selective filter lineshapes and rapid reconfigurability has faced significant challenges. A new approach for radiofrequency photonic filters based on frequency combs offers a potential route to simultaneous high stopband attenuation, fast tunability and bandwidth reconfiguration. In one configuration, tuning of the radiofrequency passband frequency is demonstrated with unprecedented (∼40 ns) speed by controlling the optical delay between combs. In a second, fixed filter configuration, cascaded four-wave mixing simultaneously broadens and smoothes the comb spectra, resulting in Gaussian radiofrequency filter lineshapes exhibiting an extremely high (>60 dB) main lobe to sidelobe suppression ratio and (>70 dB) stopband attenuation. Using electro-optically generated frequency combs, scientists demonstrate radiofrequency photonic filters that can potentially provide simultaneous high stopband attenuation, fast tunability and bandwidth reconfiguration.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Article"
+        ],
+        "tag_version_2": [
+            "Laser & Frequency Comb",
+            "Signal Processing & IFM",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "2b82f2439813f1bedbc970ea770575a7fc0b0402",
+        "title": "All-optical signal processing platforms for CMOS compatible integrated nonlinear optics",
+        "abstract": "Nonlinear photonic chips have enabled the generation and processing of signals using only light, with performance far superior to that possible electronically - particularly with respect to speed. Although silicon-on-insulator has been the leading platform for nonlinear optics, its high two-photon absorption at telecommunications wavelengths poses a fundamental limitation. We review recent progress in non-silicon CMOS-compatible platforms for nonlinear optics, with a focus on Si3N4 and Hydex. These material systems have opened up many new capabilities such as on-chip optical frequency comb generation and ultrafast optical pulse generation and measurement. This review highlights their potential impact as well as the challenges to achieving practical solutions for many key applications.",
+        "tag_version_1": [
+            "Photonic Integrated Chip",
+            "Comprehensive/Application-Agnostic",
+            "Review"
+        ],
+        "tag_version_2": [
+            "Photonic Integrated Chip",
+            "Signal Processing & IFM",
+            "Pending"
+        ]
+    },
+    {
+        "paperId": "43034efa432f55931d0ae00fb6a4eda26ac87f1d",
+        "title": "Single-chip microprocessor that communicates directly using light",
+        "abstract": "",
+        "tag_version_1": [
+            "Photonic Integrated Chip",
+            "Optical Wireless Communications",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Photonic Integrated Chip",
+            "Emerging Computing",
+            "Pending"
+        ]
+    },
+    {
+        "paperId": "6282c9736237aac5d35a8120584ead00226534d6",
+        "title": "Nanophotonic lithium niobate electro-optic modulators.",
+        "abstract": "Since the emergence of optical fiber communications, lithium niobate (LN) has been the material of choice for electro-optic modulators, featuring high data bandwidth and excellent signal fidelity. Conventional LN modulators however are bulky, expensive and power hungry, and cannot meet the growing demand in modern optical data links. Chip-scale, highly integrated, LN modulators could offer solutions to this problem, yet the fabrication of low-loss devices in LN thin films has been challenging. Here we overcome this hurdle and demonstrate monolithically integrated LN electro-optic modulators that are significantly smaller and more efficient than traditional bulk LN devices, while preserving LN's excellent material properties. Our compact LN electro-optic platform consists of low-loss nanoscale LN waveguides, micro-ring resonators and miniaturized Mach-Zehnder interferometers, fabricated by directly shaping LN thin films into sub-wavelength structures. The efficient confinement of both optical and microwave fields at the nanoscale dramatically improves the device performances featuring a half-wave electro-optic modulation efficiency of 1.8 V∙cm while operating at data rates up to 40 Gbps. Our monolithic LN nanophotonic platform enables dense integration of high-performance active components, opening new avenues for future high-speed, low power and cost-effective communication networks.",
+        "tag_version_1": [
+            "Modulator",
+            "Optical Wireless Communications",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Modulator",
+            "Optical Wireless Communications",
+            "Article"
+        ]
+    },
+    {
+        "paperId": "69362b534a3d44132bc3801ef6f4d678c454627f",
+        "title": "Integrated lithium niobate electro-optic modulators operating at CMOS-compatible voltages",
+        "abstract": "",
+        "tag_version_1": [
+            "Modulator",
+            "Comprehensive/Application-Agnostic",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Modulator",
+            "Optical Wireless Communications",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "0dcda68beec4af657fb09f0603a7a42fa87d5d0c",
+        "title": "Highly linear ring modulator from hybrid silicon and lithium niobate.",
+        "abstract": "We present a highly linear ring modulator from the bonding of ion-sliced x-cut lithium niobate onto a silicon ring resonator. The third order intermodulation distortion spurious free dynamic range is measured to be 98.1 dB Hz(2/3) and 87.6 dB Hz(2/3) at 1 GHz and 10 GHz, respectively. The linearity is comparable to a reference lithium niobate Mach-Zehnder interferometer modulator operating at quadrature and over an order of magnitude greater than silicon ring modulators based on plasma dispersion effect. Compact modulators for analog optical links that exploit the second order susceptibility of lithium niobate on the silicon platform are envisioned.",
+        "tag_version_1": [
+            "Modulator",
+            "Optical Wireless Communications",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Modulator",
+            "Signal Processing & IFM",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "ea3c02accd2e7e8d118467bb313d7b83bf193b65",
+        "title": "Sources: The optoelectronic oscillator",
+        "abstract": "",
+        "tag_version_1": [
+            "Optoelectronic Oscillator (OEO)",
+            "Signal Generation",
+            "Pending"
+        ],
+        "tag_version_2": [
+            "Optoelectronic Oscillator (OEO)",
+            "Signal Generation",
+            "Review"
+        ]
+    },
+    {
+        "paperId": "3a2746e6f559cda514fcfa5068fbd6a96069192e",
+        "title": "Deep learning with coherent nanophotonic circuits",
+        "abstract": "Artificial neural networks are computational network models inspired by signal processing in the brain. These models have dramatically improved performance for many machine-learning tasks, including speech and image recognition. However, today's computing hardware is inefficient at implementing neural networks, in large part because much of it was designed for von Neumann computing schemes. Significant effort has been made towards developing electronic architectures tuned to implement artificial neural networks that exhibit improved computational speed and accuracy. Here, we propose a new architecture for a fully optical neural network that, in principle, could offer an enhancement in computational speed and power efficiency over state-of-the-art electronics for conventional inference tasks. We experimentally demonstrate the essential part of the concept using a programmable nanophotonic processor featuring a cascaded array of 56 programmable Mach–Zehnder interferometers in a silicon photonic integrated circuit and show its utility for vowel recognition. Programmable silicon nanophotonic processor empowers optical neural networks.",
+        "tag_version_1": [
+            "Photonic Integrated Chip",
+            "Emerging Computing",
+            "Article"
+        ],
+        "tag_version_2": [
+            "System Architecture Only",
+            "Emerging Computing",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "c2fa18dc259bd726a2eed205e7df516a1087397b",
+        "title": "On-chip photonic synapse",
+        "abstract": "An on-chip photonic device mimics the function of synaptic connections between neurons. The search for new “neuromorphic computing” architectures that mimic the brain’s approach to simultaneous processing and storage of information is intense. Because, in real brains, neuronal synapses outnumber neurons by many orders of magnitude, the realization of hardware devices mimicking the functionality of a synapse is a first and essential step in such a search. We report the development of such a hardware synapse, implemented entirely in the optical domain via a photonic integrated-circuit approach. Using purely optical means brings the benefits of ultrafast operation speed, virtually unlimited bandwidth, and no electrical interconnect power losses. Our synapse uses phase-change materials combined with integrated silicon nitride waveguides. Crucially, we can randomly set the synaptic weight simply by varying the number of optical pulses sent down the waveguide, delivering an incredibly simple yet powerful approach that heralds systems with a continuously variable synaptic plasticity resembling the true analog nature of biological synapses.",
+        "tag_version_1": [
+            "Photonic Integrated Chip",
+            "Emerging Computing",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Photonic Integrated Chip",
+            "Emerging Computing",
+            "Article"
+        ]
+    },
+    {
+        "paperId": "d2875f4f54e2be06a84c306be701d5ac8dc2b7f9",
+        "title": "Analog Optical Links: Theory and Practice",
+        "abstract": "Analog Optical Links presents the basis for the design of analog links. Following an introductory chapter, there is a chapter devoted to the development of the small signal models for common electro-optical components used in both direct and external modulation. However this is not a device book, so the theory of their operation is discussed only insofar as it is helpful in understanding the small signal models that result. These device models are then combined to form a complete link. With these analytical tools in place, a chapter is devoted to examining in detail each of the four primary link parameters; gain, bandwidth, noise figure and dynamic range. Of particular interest is the inter-relation between device and link parameters. A final chapter explores some of the trade offs among the primary link parameters",
+        "tag_version_1": [
+            "System Architecture Only",
+            "Foundational Theory",
+            "Article"
+        ],
+        "tag_version_2": [
+            "System Architecture Only",
+            "Optical Wireless Communications",
+            "Review"
+        ]
+    },
+    {
+        "paperId": "9488372708f0b6dbf055c2a73ddb1c082934afb6",
+        "title": "The Past, Present, and Future of Silicon Photonics",
+        "abstract": "The pace of the development of silicon photonics has quickened since 2004 due to investment by industry and government. Commercial state-of-the-art CMOS silicon-on-insulator (SOI) foundries are now being utilized in a crucial test of 1.55-mum monolithic optoelectronic (OE) integration, a test sponsored by the Defense Advanced Research Projects Agency (DARPA). The preliminary results indicate that the silicon photonics are truly CMOS compatible. R&D groups have now developed 10-100-Gb/s electro-optic modulators, ultrafast Ge-on-Si photodetectors, efficient fiber-to-waveguide couplers, and Si Raman lasers. Electrically pumped silicon lasers are under intense investigation, with several approaches being tried; however, lasing has not yet been attained. The new paradigm for the Si-based photonic and optoelectric integrated circuits is that these chip-scale networks, when suitably designed, will operate at a wavelength anywhere within the broad spectral range of 1.2-100 mum, with cryocooling needed in some cases",
+        "tag_version_1": [
+            "Photonic Integrated Chip",
+            "Comprehensive/Application-Agnostic",
+            "Review"
+        ],
+        "tag_version_2": [
+            "Comprehensive/Device-Agnostic",
+            "Comprehensive/Application-Agnostic",
+            "Review"
+        ]
+    },
+    {
+        "paperId": "f041a0523c75d1a375cc2c40ed456a6c840e0a31",
+        "title": "Integrated lithium niobate photonics",
+        "abstract": "Abstract Lithium niobate (LiNbO3) on insulator (LNOI) is a promising material platform for integrated photonics due to single crystal LiNbO3 film’s wide transparent window, high refractive index, and high second-order nonlinearity. Based on LNOI, the fast-developing ridge-waveguide fabrication techniques enabled various structures, devices, systems, and applications. We review the basic structures including waveguides, cavities, periodically poled LiNbO3, and couplers, along with their fabrication methods and optical properties. Treating those basic structures as building blocks, we review several integrated devices including electro-optic modulators, nonlinear optical devices, and optical frequency combs with each device’s operating mechanism, design principle and methodology, and performance metrics. Starting from these integrated devices, we review how integrated LNOI devices boost the performance of LiNbO3’s traditional applications in optical communications and data center, integrated microwave photonics, and quantum optics. Beyond those traditional applications, we also review integrated LNOI devices’ novel applications in metrology including ranging system and frequency comb spectroscopy. Finally, we envision integrated LNOI photonics’ potential in revolutionizing nonlinear and quantum optics, optical computing and signal processing, and devices in ultraviolet, visible, and mid-infrared regimes. Beyond this outlook, we discuss the challenges in integrated LNOI photonic",
+        "tag_version_1": [
+            "Photonic Integrated Chip",
+            "Comprehensive/Application-Agnostic",
+            "Review"
+        ],
+        "tag_version_2": [
+            "Comprehensive/Device-Agnostic",
+            "Comprehensive/Application-Agnostic",
+            "Review"
+        ]
+    },
+    {
+        "paperId": "c9de19dad5d2eea2c40e5884801df3ad2e6d6cfd",
+        "title": "Optical and electro-optical properties of submicrometer lithium niobate slab waveguides prepared by crystal ion slicing and wafer bonding",
+        "abstract": "LiNbO 3 thin film crystals have been produced using crystal ion slicing and wafer bonding. Films with a thickness of 680nm are produced on a thin layer of SiO2, which is deposited on a substrate with electrodes. The crystalline and optical qualities of the fabricated thin films are investigated and are comparable to bulk LiNbO3 single crystals. The effect of thermal annealing is studied using Rutherford backscattering. The refractive indices and the electro-optical (EO) coefficient of the fabricated films are measured using prism coupling dark line spectroscopy and modified attenuated total reflection. The EO coefficient is equal to r33=31pm∕V at λ=633nm.",
+        "tag_version_1": [
+            "Photonic Integrated Chip",
+            "Comprehensive/Application-Agnostic",
+            "Article"
+        ],
+        "tag_version_2": [
+            "Photonic Integrated Chip",
+            "Foundational Theory",
+            "Article"
+        ]
+    },
+    {
+        "paperId": "fe950747327e1bfbc9887c0e3bcb1356f699ccac",
+        "title": "Long Low-Loss-Litium Niobate on Insulator Waveguides with Sub-Nanometer Surface Roughness",
+        "abstract": "In this paper, we develop a technique for realizing multi-centimeter-long lithium niobate on insulator (LNOI) waveguides with a propagation loss as low as 0.027 dB/cm. Our technique relies on patterning a chromium thin film coated on the top surface of LNOI into a hard mask with a femtosecond laser followed by chemo-mechanical polishing for structuring the LNOI into the waveguides. The surface roughness on the waveguides was determined with an atomic force microscope to be 0.452 nm. The approach is compatible with other surface patterning technologies, such as optical and electron beam lithographies or laser direct writing, enabling high-throughput manufacturing of large-scale LNOI-based photonic integrated circuits.",
+        "tag_version_1": [
+            "Photonic Integrated Chip",
+            "Comprehensive/Application-Agnostic",
+            "Article"
+        ],
+        "tag_version_2": [
+            "Optical Filter & Delay Line",
+            "Foundational Theory",
+            "Article"
+        ]
+    },
+    {
+        "paperId": "2e688def26bbabe98fb0e4a024e994e143ae4ceb",
+        "title": "GHz-bandwidth optical filters based on high-order silicon ring resonators.",
+        "abstract": "Previously demonstrated high-order silicon ring filters typically have bandwidths larger than 100 GHz. Here we demonstrate 1-2 GHz-bandwidth filters with very high extinction ratios (~50 dB). The silicon waveguides employed to construct these filters have propagation losses of ~0.5 dB/cm. Each ring of a filter is thermally controlled by metal heaters situated on the top of the ring. With a power dissipation of ~72 mW, the ring resonance can be tuned by one free spectral range, resulting in wavelength-tunable optical filters. Both second-order and fifth-order ring resonators are presented, which can find ready application in microwave/radio frequency signal processing.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Article"
+        ]
+    },
+    {
+        "paperId": "94fd1e90ca05603c54bb6374ef4be7e53f4971fb",
+        "title": "Generation of very flat optical frequency combs from continuous-wave lasers using cascaded intensity and phase modulators driven by tailored radio frequency waveforms.",
+        "abstract": "We demonstrate a scheme based on a cascade of lithium niobate intensity and phase modulators driven by specially tailored RF waveforms to generate an optical frequency comb with very high spectral flatness. In this Letter, we demonstrate a 10 GHz comb with 38 comb lines within a spectral power variation below 1 dB. The number of comb lines that can be generated is limited by the power handling capability of the phase modulator, and this can be scaled without compromising the spectral flatness. Furthermore, the spectral phase of the generated combs in our scheme is almost purely quadratic, which, as we will demonstrate, allows for high-quality pulse compression using only single-mode fiber.",
+        "tag_version_1": [
+            "Modulator",
+            "Signal Generation",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Laser & Frequency Comb",
+            "Signal Generation",
+            "Letter/Express"
+        ]
+    },
+    {
+        "paperId": "4baf298d61c2a6cd1bfb320c483e416d419ecb30",
+        "title": "Integrated resonance-enhanced variable optical delay lines",
+        "abstract": "A wide-tuning-range optical delay line is demonstrated in high (2%) index contrast waveguides. This device integrates four-stage ring resonator all-pass filters (APFs) with cascaded fixed spiral-type delay waveguides; each fixed delay path varies in length by a factor of two from the previous stage. A 2/spl times/2 switch separates each fixed delay and the tunable parts of the delay line. The APF allows for continuous delay tuning. This device enables coherent switching and continuous tuning ranges up to 2.56 ns.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Article"
+        ]
+    },
+    {
+        "paperId": "9a288863ed18ea8894fd34559563bbcd03b333a1",
+        "title": "Wide-bandwidth continuously tunable optical delay line using silicon microring resonators.",
+        "abstract": "We demonstrate a distortion free tunable optical delay as long as 135 ps with a 10 GHz bandwidth using thermally tuned silicon microring resonators in the novel balanced configuration. The device is simple, easy to control and compact measuring only 30 µm wide by 250 µm long.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Letter/Express"
+        ],
+        "tag_version_2": [
+            "Optical Filter & Delay Line",
+            "Signal Processing & IFM",
+            "Article"
+        ]
+    },
+    {
+        "paperId": "6ce4afbdb763c24d3d8674d5a1368f67cd9d2b0d",
+        "title": "Novel Ring Resonator-Based Integrated Photonic Beamformer for Broadband Phased Array Receive Antennas—Part II: Experimental Prototype",
+        "abstract": "An experimental prototype is presented that illustrates the implementation aspects and feasibility of the novel ring resonator-based optical beamformer concept that has been developed and analyzed in Part I of this paper . This concept can be used for seamless control of the reception angle in broadband wireless receivers employing a large phased array antenna (PAA). The design, fabrication, and characterization of a dedicated chip are described, in which an 8 × 1 optical beamforming network, an optical sideband filter for single-sideband suppressed carrier modulation, and a carrier re-insertion coupler for balanced optical detection are integrated. The chip was designed for satellite television reception using a broadband PAA, and was realized in a low-loss, CMOS-compatible optical waveguide technology. Tuning is performed thermo-optically, with a switching time of 1 ms. Group delay response and power response measurements show the correct operation of the OBFN and OSBF, respectively. Measurements on a complete beamformer prototype (including the electro-optical and opto-electrical conversions) demonstrate an optical sideband suppression of 25 dB, RF-to-RF delay generation up to 0.63 ns with a phase accuracy better than ¿/10 radians, and coherent combining of four RF input signals, all in a frequency range of 1-2 GHz.",
+        "tag_version_1": [
+            "Optical Filter & Delay Line",
+            "Radar & Sensing",
+            "Article"
+        ],
+        "tag_version_2": [
+            "Photonic Integrated Chip",
+            "Radar & Sensing",
+            "Article"
+        ]
+    }
+]

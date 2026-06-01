@@ -1,0 +1,242 @@
+[
+    {
+        "paperId": "0145656ccbcbfdfb9928a47a4ec1f3e08882f088",
+        "title": "Discrete-time optical Processing of microwave signals",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Signal Processing & IFM",
+        "final_dim_c": "Review",
+        "judgement_reason": "论文明确聚焦于使用离散时间非相干处理的微波信号光子滤波（photonic filtering），这在硬件实现上高度依赖于光延迟线和光滤波器。因此，'Optical Filter & Delay Line' 比宽泛的 'Comprehensive/Device-Agnostic' 更能准确反映论文的核心技术手段。同时，'Signal Processing & IFM' 和 'Review' 准确涵盖了应用和文章类型。"
+    },
+    {
+        "paperId": "e987b93282099cf1174d4493fe658303b7dc906c",
+        "title": "Millimeter-wave arbitrary waveform generation with a direct space-to-time pulse shaper.",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Signal Generation",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "论文使用直接空时脉冲整形器(pulse shaper)生成毫米波任意波形。脉冲整形器本质上是通过空间掩膜或调制器对光谱进行相位和幅度滤波，属于'Optical Filter & Delay Line'范畴，而非仅仅是系统架构。因此Version 2的标签更准确。"
+    },
+    {
+        "paperId": "ab9f2c95f8f3e983b8294c3bcf017df1e097f5f8",
+        "title": "Adaptive RF-photonic arbitrary waveform generator",
+        "final_dim_a": "System Architecture Only",
+        "final_dim_b": "Signal Generation",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "该论文的核心是基于超连续谱光源和色散映射的任意波形发生器系统，重点在于系统架构与自适应控制，而非光源器件本身的创新，因此'System Architecture Only'比'Laser & Frequency Comb'更准确。功能明确为'Signal Generation'。从极简的摘要长度推断，该文大概率发表于快报类期刊（如IEEE PTL），因此'Letter/Express'更为合适。"
+    },
+    {
+        "paperId": "33d1ba9de7a97f55ffb60cc305471d1e07f2b79c",
+        "title": "Photonic synthesis of broadband microwave arbitrary waveforms applicable to ultra-wideband communication",
+        "final_dim_a": "System Architecture Only",
+        "final_dim_b": "Signal Generation",
+        "final_dim_c": "Article",
+        "judgement_reason": "论文主要提出了一种基于色散傅里叶变换光脉冲整形的宽带微波任意波形合成技术，属于系统架构层面的创新，应用方向明确为信号生成（Signal Generation）。由于未明确期刊类型，通常默认归类为Article。"
+    },
+    {
+        "paperId": "0d41d1d6ddb85100de80741c09404ef905f39b1f",
+        "title": "A tutorial on microwave photonic filters",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Signal Processing & IFM",
+        "final_dim_c": "Review",
+        "judgement_reason": "该论文是一篇关于微波光子滤波器的教程/综述文章。微波光子滤波器直接对应'Optical Filter & Delay Line'标签，且属于信号处理范畴，同时文章性质为综述，因此版本1的标签组合更为具体和准确。"
+    },
+    {
+        "paperId": "cf19262bbbce421baa5af932cf5058c897219200",
+        "title": "Novel tunable photonic microwave filter based on laser arrays and N/spl times/N AWG-based delay lines",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Signal Processing & IFM",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "论文明确提出了一种基于激光器阵列和AWG延迟线的可调谐微波光子滤波器，并进行了实验验证。因此，'Optical Filter & Delay Line'标签非常准确，而'System Architecture Only'不适用（因为有实验验证）。"
+    },
+    {
+        "paperId": "574ee7270031a878db0406523801287f700e8f8e",
+        "title": "Tunable all-optical negative multitap microwave filters based on uniform fiber Bragg gratings.",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Signal Processing & IFM",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "论文提出了一种基于均匀光纤布拉格光栅的微波光子滤波器，属于光滤波器和信号处理领域。摘要非常简短且强调新颖简单的技术，符合快报（Letter/Express）的特征（该文发表于Optics Letters），因此Version 1的标签更准确。"
+    },
+    {
+        "paperId": "17d6e998c8953a1582b387d0b5570b27bed93a0a",
+        "title": "Optically generated true-time delay in phased-array antennas",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Radar & Sensing",
+        "final_dim_c": "Review",
+        "judgement_reason": "该论文是一篇关于相控阵天线中光学真时间延迟（True-Time Delay）技术的综述。其核心探讨的器件和技术是光学延迟线，因此'Optical Filter & Delay Line'比宽泛的'Comprehensive/Device-Agnostic'更准确。相控阵天线主要应用于雷达系统，'Radar & Sensing'标签合适。'Review'标签准确反映了文章类型。"
+    },
+    {
+        "paperId": "f560c6a66b05b41f57ef7c276756551765db9e90",
+        "title": "Microwave photonics combines two worlds",
+        "final_dim_a": "Comprehensive/Device-Agnostic",
+        "final_dim_b": "Comprehensive/Application-Agnostic",
+        "final_dim_c": "Review",
+        "judgement_reason": "论文摘要为空，但从标题'Microwave photonics combines two worlds'可以推断这是一篇关于微波光子学领域的综述性或科普性文章，没有特指具体的器件或应用。因此，版本1的标签（综合/无特定器件、综合/无特定应用、综述）非常贴切。"
+    },
+    {
+        "paperId": "d5d86dc0703e4037d70d6f21a80217a6b69bbec2",
+        "title": "Integrated microwave photonics",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Comprehensive/Application-Agnostic",
+        "final_dim_c": "Review",
+        "judgement_reason": "摘要明确指出本文是一篇综述（Review），因此文章类型应为'Review'而非'Letter/Express'。同时，文章的核心主题是集成微波光子学（Integrated microwave photonics）和光子集成电路（PIC），因此在器件维度上'Photonic Integrated Chip'比'Comprehensive/Device-Agnostic'更准确。应用维度上两者一致，均为'Comprehensive/Application-Agnostic'。"
+    },
+    {
+        "paperId": "fcea412b462c3f2e7b511da71ca218ef3e80e104",
+        "title": "Photonic Generation of Ultrawideband Signals",
+        "final_dim_a": "Comprehensive/Device-Agnostic",
+        "final_dim_b": "Signal Generation",
+        "final_dim_c": "Review",
+        "judgement_reason": "The paper is a review discussing various techniques for photonic generation of UWB signals, including PM-IM conversion, microwave delay-line filters, and spectral shaping. It covers multiple methods and devices, making 'Comprehensive/Device-Agnostic' more accurate than 'System Architecture Only'. Both versions correctly identify 'Signal Generation' and 'Review'."
+    },
+    {
+        "paperId": "02cfa149a20d151c00180baaab0f482149ec4d49",
+        "title": "Comb-based radiofrequency photonic filters with rapid tunability and high selectivity",
+        "final_dim_a": "Laser & Frequency Comb",
+        "final_dim_b": "Optical Filter & Delay Line",
+        "final_dim_c": "Signal Processing & IFM",
+        "judgement_reason": "论文的核心是基于频率梳（Frequency Comb）实现的射频光子滤波器（Photonic Filter），因此同时涉及'Laser & Frequency Comb'和'Optical Filter & Delay Line'。应用属于微波光子信号处理（Signal Processing）。从摘要格式和篇幅来看，该文献为Nature Photonics的Article。"
+    },
+    {
+        "paperId": "2b82f2439813f1bedbc970ea770575a7fc0b0402",
+        "title": "All-optical signal processing platforms for CMOS compatible integrated nonlinear optics",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Signal Processing & IFM",
+        "final_dim_c": "Review",
+        "judgement_reason": "该论文明确指出是一篇综述（Review），主要探讨用于全光信号处理的CMOS兼容集成非线性光学平台，因此涵盖了光子集成芯片（Photonic Integrated Chip）和信号处理（Signal Processing & IFM）维度。结合两组标签的优点，将'Pending'修正为'Review'，并保留具体的应用标签'Signal Processing & IFM'更为准确。"
+    },
+    {
+        "paperId": "43034efa432f55931d0ae00fb6a4eda26ac87f1d",
+        "title": "Single-chip microprocessor that communicates directly using light",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Emerging Computing",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "论文标题表明这是一种使用光进行直接通信的单片微处理器，属于典型的光电集成芯片（Photonic Integrated Chip）在计算领域的应用（Emerging Computing），通常指片上光互连而非光无线通信（Optical Wireless Communications）。因此版本2的标签更准确。"
+    },
+    {
+        "paperId": "6282c9736237aac5d35a8120584ead00226534d6",
+        "title": "Nanophotonic lithium niobate electro-optic modulators.",
+        "final_dim_a": "Modulator",
+        "final_dim_b": "Optical Communications",
+        "final_dim_c": "Article",
+        "judgement_reason": "论文主要研究基于薄膜铌酸锂的电光调制器，应用于光纤通信（Optical Communications）而非光无线通信（Optical Wireless Communications）。该文献是Nature上的长篇研究论文，因此文献类型应为'Article'。"
+    },
+    {
+        "paperId": "69362b534a3d44132bc3801ef6f4d678c454627f",
+        "title": "Integrated lithium niobate electro-optic modulators operating at CMOS-compatible voltages",
+        "final_dim_a": "Modulator",
+        "final_dim_b": "Comprehensive/Application-Agnostic",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "论文标题表明研究重点是集成铌酸锂电光调制器及其CMOS兼容电压特性，属于底层器件研究，并未特指光无线通信（Optical Wireless Communications）应用。因此，'Comprehensive/Application-Agnostic'（综合/无特定应用）比特定应用标签更准确。"
+    },
+    {
+        "paperId": "0dcda68beec4af657fb09f0603a7a42fa87d5d0c",
+        "title": "Highly linear ring modulator from hybrid silicon and lithium niobate.",
+        "final_dim_a": "Modulator",
+        "final_dim_b": "Analog Link",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "该论文主要研究基于硅和铌酸锂混合集成的微环调制器，并测试了其在模拟光链路中的线性度（SFDR）。它不涉及信号处理或瞬时频率测量（IFM），也不直接涉及光无线通信（OWC），而是属于模拟光链路（Analog Link）或射频光纤传输（RoF）的基础器件。因此，保留'Modulator'，并建议将应用标签修改为'Analog Link'或'RoF'。"
+    },
+    {
+        "paperId": "ea3c02accd2e7e8d118467bb313d7b83bf193b65",
+        "title": "Sources: The optoelectronic oscillator",
+        "final_dim_a": "Optoelectronic Oscillator (OEO)",
+        "final_dim_b": "Signal Generation",
+        "final_dim_c": "Review",
+        "judgement_reason": "根据标题推测，该文献是一篇关于光电振荡器（OEO）的综述或书籍章节。'Review'标签比'Pending'更准确地反映了文献的类型。"
+    },
+    {
+        "paperId": "3a2746e6f559cda514fcfa5068fbd6a96069192e",
+        "title": "Deep learning with coherent nanophotonic circuits",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Emerging Computing",
+        "final_dim_c": "Article",
+        "judgement_reason": "摘要明确指出在硅基光子集成电路上进行了实验演示（experimentally demonstrate... in a silicon photonic integrated circuit），因此'Photonic Integrated Chip'比'System Architecture Only'更准确。此外，该工作是光计算领域的经典长文，属于'Article'。"
+    },
+    {
+        "paperId": "c2fa18dc259bd726a2eed205e7df516a1087397b",
+        "title": "On-chip photonic synapse",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Emerging Computing",
+        "final_dim_c": "Article",
+        "judgement_reason": "该论文（发表于Science Advances）属于完整的研究长文（Research Article），而非快报（Letter/Express），因此Version 2的文献类型标签更为准确。"
+    },
+    {
+        "paperId": "d2875f4f54e2be06a84c306be701d5ac8dc2b7f9",
+        "title": "Analog Optical Links: Theory and Practice",
+        "final_dim_a": "System Architecture Only",
+        "final_dim_b": "Foundational Theory",
+        "final_dim_c": "Book",
+        "judgement_reason": "摘要中多次提到“chapter”（如introductory chapter, final chapter），明确表明这是一本书籍（Book）而非普通的期刊文章（Article）或综述（Review）。在内容上，本书侧重于模拟光链路的基础理论、器件的小信号模型以及增益、带宽、噪声系数等基本链路参数的分析，因此“Foundational Theory”非常贴切，而文中并未提及“Optical Wireless Communications”。"
+    },
+    {
+        "paperId": "9488372708f0b6dbf055c2a73ddb1c082934afb6",
+        "title": "The Past, Present, and Future of Silicon Photonics",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Comprehensive/Application-Agnostic",
+        "final_dim_c": "Review",
+        "judgement_reason": "该论文是一篇关于硅光子学的全面综述，核心探讨了硅基光电集成电路（PIC）的发展、现状与未来。因此，在器件维度上标注为'Photonic Integrated Chip'比宽泛的'Comprehensive/Device-Agnostic'更准确地反映了文章的技术核心。"
+    },
+    {
+        "paperId": "f041a0523c75d1a375cc2c40ed456a6c840e0a31",
+        "title": "Integrated lithium niobate photonics",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Comprehensive/Device-Agnostic",
+        "final_dim_c": "Comprehensive/Application-Agnostic",
+        "judgement_reason": "该论文是一篇关于绝缘体上铌酸锂（LNOI）集成光子学平台的全面综述。它涵盖了多种基本结构和集成器件（如波导、调制器、光频梳等），以及多种应用领域（光通信、微波光子学、量子光学等）。因此，'Photonic Integrated Chip' 准确指出了其集成光子平台的属性，'Comprehensive/Device-Agnostic' 和 'Comprehensive/Application-Agnostic' 准确反映了其涵盖多种器件和应用的综述性质。"
+    },
+    {
+        "paperId": "c9de19dad5d2eea2c40e5884801df3ad2e6d6cfd",
+        "title": "Optical and electro-optical properties of submicrometer lithium niobate slab waveguides prepared by crystal ion slicing and wafer bonding",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Comprehensive/Application-Agnostic",
+        "final_dim_c": "Article",
+        "judgement_reason": "该论文主要研究铌酸锂薄膜波导的制备与光学/电光特性表征，属于光子集成芯片的基础材料与器件研究，并未针对特定应用场景，因此'Comprehensive/Application-Agnostic'比'Foundational Theory'（基础理论）更准确，因为这是一篇实验性而非纯理论性的文章。"
+    },
+    {
+        "paperId": "fe950747327e1bfbc9887c0e3bcb1356f699ccac",
+        "title": "Long Low-Loss-Litium Niobate on Insulator Waveguides with Sub-Nanometer Surface Roughness",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Comprehensive/Application-Agnostic",
+        "final_dim_c": "Article",
+        "judgement_reason": "论文主要介绍了一种用于制造低损耗铌酸锂绝缘体上（LNOI）波导的加工技术，旨在实现大规模光子集成电路（PIC）的高通量制造。因此，'Photonic Integrated Chip' 和 'Comprehensive/Application-Agnostic' 的标签非常准确。版本2中的 'Optical Filter & Delay Line' 和 'Foundational Theory' 不符合论文的实验制造和通用波导器件的主题。"
+    },
+    {
+        "paperId": "2e688def26bbabe98fb0e4a024e994e143ae4ceb",
+        "title": "GHz-bandwidth optical filters based on high-order silicon ring resonators.",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Signal Processing & IFM",
+        "final_dim_c": "Article",
+        "judgement_reason": "两组标签的主要分歧在于文章类型（Letter/Express vs Article）。在缺乏明确期刊信息的情况下，通常归类为常规的'Article'更为稳妥。论文核心内容明确为基于硅基微环谐振器的光学滤波器，并提及在微波/射频信号处理中的应用，因此'Optical Filter & Delay Line'和'Signal Processing & IFM'均准确。"
+    },
+    {
+        "paperId": "94fd1e90ca05603c54bb6374ef4be7e53f4971fb",
+        "title": "Generation of very flat optical frequency combs from continuous-wave lasers using cascaded intensity and phase modulators driven by tailored radio frequency waveforms.",
+        "final_dim_a": "Laser & Frequency Comb",
+        "final_dim_b": "Modulator",
+        "final_dim_c": "Signal Generation",
+        "judgement_reason": "论文的核心目标和主要贡献是生成高平坦度的光学频率梳（Optical Frequency Comb），虽然使用了调制器作为实现手段，但'Laser & Frequency Comb'更能准确概括其核心研究对象。同时，'Signal Generation'和'Letter/Express'准确反映了应用方向和文章类型。综合两者，将'Laser & Frequency Comb'和'Modulator'都纳入标签最为全面。"
+    },
+    {
+        "paperId": "4baf298d61c2a6cd1bfb320c483e416d419ecb30",
+        "title": "Integrated resonance-enhanced variable optical delay lines",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Signal Processing & IFM",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "该论文发表于IEEE Photonics Technology Letters (PTL)，属于快报类文献，因此Version 1中的'Letter/Express'标签更为准确。同时，论文核心内容为光学延迟线，属于'Optical Filter & Delay Line'和'Signal Processing & IFM'领域。"
+    },
+    {
+        "paperId": "9a288863ed18ea8894fd34559563bbcd03b333a1",
+        "title": "Wide-bandwidth continuously tunable optical delay line using silicon microring resonators.",
+        "final_dim_a": "Optical Filter & Delay Line",
+        "final_dim_b": "Signal Processing & IFM",
+        "final_dim_c": "Letter/Express",
+        "judgement_reason": "该论文主要展示了一种基于硅微环谐振器的可调谐光延迟线，属于光滤波器与延迟线以及信号处理领域。摘要非常简短且侧重于具体器件的实验验证，符合Letter/Express类文章的特征（该文实际发表于Optics Express）。因此Version 1的标签更为准确。"
+    },
+    {
+        "paperId": "6ce4afbdb763c24d3d8674d5a1368f67cd9d2b0d",
+        "title": "Novel Ring Resonator-Based Integrated Photonic Beamformer for Broadband Phased Array Receive Antennas—Part II: Experimental Prototype",
+        "final_dim_a": "Photonic Integrated Chip",
+        "final_dim_b": "Optical Filter & Delay Line",
+        "final_dim_c": "Wireless Communication",
+        "judgement_reason": "该论文详细描述了基于CMOS兼容光波导技术的光子集成芯片的设计与制造，芯片内部集成了光束形成网络（延迟线）和光边带滤波器，因此'Photonic Integrated Chip'和'Optical Filter & Delay Line'均适用。应用背景明确指出为卫星电视接收（宽带相控阵天线），属于'Wireless Communication'而非'Radar & Sensing'。"
+    }
+]

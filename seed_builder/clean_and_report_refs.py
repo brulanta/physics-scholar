@@ -11,7 +11,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("RefSanitizer")
 
-ROOT_DIR = Path(__file__).resolve().parent.parent
+ROOT_DIR = Path(__file__).resolve().parent
 RAW_REFS_PATH = ROOT_DIR / "data" / "raw_refs.json"
 BACKUP_PATH = ROOT_DIR / "data" / "raw_refs.json.clean_bak"
 
