@@ -20,6 +20,7 @@ data/pdfs/*
 !data/pdfs/.gitkeep
 data/chroma_db/*
 !data/chroma_db/.gitkeep
+cached_pdfs
 
 # ========= IDE =========
 .vscode/
