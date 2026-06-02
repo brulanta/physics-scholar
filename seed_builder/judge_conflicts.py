@@ -11,12 +11,38 @@ logging.basicConfig(
 )
 log = logging.getLogger("SupremeCourt")
 
-# ⚠️ 请在这里填入你专属的 System Prompt
+# ── [修复版] 注入严格标签白名单的 System Prompt ──
 SYSTEM_PROMPT = """你是微波光子学（Microwave Photonics, MWP）领域的顶尖学术专家。
 现在有两名标注员对同一篇论文的分类标签产生了分歧。
 请根据论文的标题和摘要，对比两组标签，判断哪一组更准确，或者给出修正后的终局标签。
-必须以严格的 JSON 格式输出，如：
-{"judgement_reason": "你的简短判断理由", "final_tags": ["Dim_A", "Dim_B", "Dim_C"]}
+
+⚠️ 【终局标签必须严格从以下合法的候选池中选择，严禁自行创造、修改任何字眼或符号】:
+
+1. [维度 A: 硬件/器件载体] 必须且只能是以下之一:
+   - Optical Filter & Delay Line
+   - Laser & Frequency Comb
+   - Modulator
+   - Photonic Integrated Chip
+   - Optoelectronic Oscillator (OEO)
+   - System Architecture Only
+   - Comprehensive/Device-Agnostic
+
+2. [维度 B: 应用/功能方向] 必须且只能是以下之一:
+   - Signal Generation
+   - Signal Processing & IFM
+   - Radar & Sensing
+   - Optical Wireless Communications
+   - Emerging Computing
+   - Foundational Theory
+   - Comprehensive/Application-Agnostic
+
+3. [维度 C: 论文类型] 必须且只能是以下之一:
+   - Article
+   - Letter/Express
+   - Review
+
+必须以严格的 JSON 格式输出，拒绝任何 Markdown 包装，格式如下：
+{"judgement_reason": "你的简短判断理由", "final_tags": ["选自维度A", "选自维度B", "选自维度C"]}
 """
 
 

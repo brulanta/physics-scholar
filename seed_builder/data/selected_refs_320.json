@@ -281,7 +281,7 @@
         "venue": "Optics Letters",
         "year": 2010,
         "authors": "R. Wu, V. Supradeepa, C. Long et al.",
-        "dim_a": "Modulator",
+        "dim_a": "Laser & Frequency Comb",
         "dim_b": "Signal Generation",
         "dim_c": "Letter/Express"
     },
@@ -309,7 +309,7 @@
         "authors": "J. Chou, Yan Han, B. Jalali",
         "dim_a": "System Architecture Only",
         "dim_b": "Signal Generation",
-        "dim_c": "Article"
+        "dim_c": "Letter/Express"
     },
     {
         "paperId": "6054f2d955fae7fa1686b821426e838fd155c515",
@@ -400,7 +400,7 @@
         "authors": "L. Maleki",
         "dim_a": "Optoelectronic Oscillator (OEO)",
         "dim_b": "Signal Generation",
-        "dim_c": "Pending"
+        "dim_c": "Review"
     },
     {
         "paperId": "e987b93282099cf1174d4493fe658303b7dc906c",
@@ -411,7 +411,7 @@
         "venue": "Optics Letters",
         "year": 2002,
         "authors": "J. McKinney, D. Leaird, A. Weiner",
-        "dim_a": "System Architecture Only",
+        "dim_a": "Optical Filter & Delay Line",
         "dim_b": "Signal Generation",
         "dim_c": "Letter/Express"
     },
@@ -463,7 +463,7 @@
         "venue": "IEEE Microwave and Wireless Components Letters",
         "year": 2005,
         "authors": "I. Lin, J. McKinney, A. Weiner",
-        "dim_a": "System Architecture Only",
+        "dim_a": "Optical Filter & Delay Line",
         "dim_b": "Signal Generation",
         "dim_c": "Article"
     },
@@ -754,6 +754,19 @@
         "dim_c": "Article"
     },
     {
+        "paperId": "43034efa432f55931d0ae00fb6a4eda26ac87f1d",
+        "title": "Single-chip microprocessor that communicates directly using light",
+        "citationCount": 1197,
+        "doi": "10.1038/nature16454",
+        "abstract": "",
+        "venue": "Nature",
+        "year": 2015,
+        "authors": "Chen Sun, M. Wade, Yunsup Lee et al.",
+        "dim_a": "Photonic Integrated Chip",
+        "dim_b": "Emerging Computing",
+        "dim_c": "Article"
+    },
+    {
         "paperId": "da52dec5e7372c91055fa567a411121b2c8fa963",
         "title": "Integrated all-photonic non-volatile multi-level memory",
         "citationCount": 1006,
@@ -921,19 +934,6 @@
         "dim_a": "Comprehensive/Device-Agnostic",
         "dim_b": "Emerging Computing",
         "dim_c": "Review"
-    },
-    {
-        "paperId": "c2fa18dc259bd726a2eed205e7df516a1087397b",
-        "title": "On-chip photonic synapse",
-        "citationCount": 487,
-        "doi": "10.1126/sciadv.1700160",
-        "abstract": "An on-chip photonic device mimics the function of synaptic connections between neurons. The search for new “neuromorphic computing” architectures that mimic the brain’s approach to simultaneous processing and storage of information is intense. Because, in real brains, neuronal synapses outnumber neurons by many orders of magnitude, the realization of hardware devices mimicking the functionality of a synapse is a first and essential step in such a search. We report the development of such a hardware synapse, implemented entirely in the optical domain via a photonic integrated-circuit approach. Using purely optical means brings the benefits of ultrafast operation speed, virtually unlimited bandwidth, and no electrical interconnect power losses. Our synapse uses phase-change materials combined with integrated silicon nitride waveguides. Crucially, we can randomly set the synaptic weight simply by varying the number of optical pulses sent down the waveguide, delivering an incredibly simple yet powerful approach that heralds systems with a continuously variable synaptic plasticity resembling the true analog nature of biological synapses.",
-        "venue": "Science Advances",
-        "year": 2017,
-        "authors": "Zengguang Cheng, C. Ríos, Wolfram H. P. Pernice et al.",
-        "dim_a": "Photonic Integrated Chip",
-        "dim_b": "Emerging Computing",
-        "dim_c": "Letter/Express"
     },
     {
         "paperId": "7f220f03b673734ac1e095d460f64a082dd9979c",
@@ -1830,7 +1830,7 @@
         "authors": "Cheng Wang, Mian Zhang, Xi Chen et al.",
         "dim_a": "Modulator",
         "dim_b": "Comprehensive/Application-Agnostic",
-        "dim_c": "Letter/Express"
+        "dim_c": "Article"
     },
     {
         "paperId": "9488372708f0b6dbf055c2a73ddb1c082934afb6",
@@ -2010,7 +2010,7 @@
         "venue": "",
         "year": 2012,
         "authors": "D. Marpaung, C. Roeloffzen, R. Heideman et al.",
-        "dim_a": "Comprehensive/Device-Agnostic",
+        "dim_a": "Photonic Integrated Chip",
         "dim_b": "Comprehensive/Application-Agnostic",
         "dim_c": "Review"
     },
@@ -2111,19 +2111,6 @@
         "citationCount": 384,
         "doi": "10.1364/oe.19.024090",
         "abstract": "We demonstrate a wafer-bonded silica-on-silicon planar waveguide platform with record low total propagation loss of (0.045 ± 0.04) dB/m near the free space wavelength of 1580 nm. Using coherent optical frequency domain reflectometry, we characterize the group index, fiber-to-chip coupling loss, critical bend radius, and propagation loss of these waveguides.",
-        "venue": "Optics Express",
-        "year": 2011,
-        "authors": "J. Bauters, M. Heck, D. John et al.",
-        "dim_a": "Photonic Integrated Chip",
-        "dim_b": "Comprehensive/Application-Agnostic",
-        "dim_c": "Letter/Express"
-    },
-    {
-        "paperId": "db5e8d1756681cb4f0e9bcf5e921130f57605da5",
-        "title": "Ultra-low-loss high-aspect-ratio Si3N4 waveguides.",
-        "citationCount": 370,
-        "doi": "10.1364/oe.19.003163",
-        "abstract": "We characterize an approach to make ultra-low-loss waveguides using stable and reproducible stoichiometric Si3N4 deposited with low-pressure chemical vapor deposition. Using a high-aspect-ratio core geometry, record low losses of 8-9 dB/m for a 0.5 mm bend radius down to 3 dB/m for a 2 mm bend radius are measured with ring resonator and optical frequency domain reflectometry techniques. From a waveguide loss model that agrees well with experimental results, we project that 0.1 dB/m total propagation loss is achievable at a 7 mm bend radius with this approach.",
         "venue": "Optics Express",
         "year": 2011,
         "authors": "J. Bauters, M. Heck, D. John et al.",
@@ -2392,6 +2379,19 @@
         "dim_c": "Review"
     },
     {
+        "paperId": "e9e07285bbda4a121c9917ea5026e490712590c6",
+        "title": "Multifunctional fiber-optic microwave links based on remote heterodyne detection",
+        "citationCount": 116,
+        "doi": "10.1109/22.668642",
+        "abstract": "The multifunctionality of microwave links based on remote heterodyne detection (RHD) of signals from a dual-frequency laser transmitter is discussed and experimentally demonstrated in this paper. Typically, direct detection (DD) in conjunction with optical intensity modulation is used to implement fiber-optic microwave links. The resulting links are inherently transparent. As opposed to DD links, RHD links can perform radio-system functionalities such as modulation and frequency conversion in addition to transparency. All of these three functionalities are presented and experimentally demonstrated with an RHD link based on a dual-frequency laser transmitter with two offset phase-locked semiconductor lasers. In the modulating link, a 1-Gb/s baseband signal is QPSK modulated onto a 9-GHz RF carrier. The frequency converting link demonstrates up-conversion of a 100-Mb/s PSK signal from a 2-GHz carrier to a 9-GHz carrier with penalty-free transmission over 25 km of optical fiber. Finally, the transparent link transmits a standard FM video 7.6-GHz radio-link signal over 25 km of optical fiber without measurable distortion.",
+        "venue": "",
+        "year": 1998,
+        "authors": "",
+        "dim_a": "Laser & Frequency Comb",
+        "dim_b": "Comprehensive/Application-Agnostic",
+        "dim_c": "Article"
+    },
+    {
         "paperId": "f76d00da3a825dcd78c261c5bde2dc13eb9aeb23",
         "title": "Silicon optical modulators",
         "citationCount": 2404,
@@ -2416,19 +2416,6 @@
         "dim_a": "Modulator",
         "dim_b": "Optical Wireless Communications",
         "dim_c": "Review"
-    },
-    {
-        "paperId": "43034efa432f55931d0ae00fb6a4eda26ac87f1d",
-        "title": "Single-chip microprocessor that communicates directly using light",
-        "citationCount": 1197,
-        "doi": "10.1038/nature16454",
-        "abstract": "",
-        "venue": "Nature",
-        "year": 2015,
-        "authors": "Chen Sun, M. Wade, Yunsup Lee et al.",
-        "dim_a": "Photonic Integrated Chip",
-        "dim_b": "Optical Wireless Communications",
-        "dim_c": "Letter/Express"
     },
     {
         "paperId": "563ca7fa7741efc072025528bd8e5c7d0dbfd6b0",
@@ -2509,19 +2496,6 @@
         "dim_c": "Review"
     },
     {
-        "paperId": "6282c9736237aac5d35a8120584ead00226534d6",
-        "title": "Nanophotonic lithium niobate electro-optic modulators.",
-        "citationCount": 500,
-        "doi": "10.1364/oe.26.001547",
-        "abstract": "Since the emergence of optical fiber communications, lithium niobate (LN) has been the material of choice for electro-optic modulators, featuring high data bandwidth and excellent signal fidelity. Conventional LN modulators however are bulky, expensive and power hungry, and cannot meet the growing demand in modern optical data links. Chip-scale, highly integrated, LN modulators could offer solutions to this problem, yet the fabrication of low-loss devices in LN thin films has been challenging. Here we overcome this hurdle and demonstrate monolithically integrated LN electro-optic modulators that are significantly smaller and more efficient than traditional bulk LN devices, while preserving LN's excellent material properties. Our compact LN electro-optic platform consists of low-loss nanoscale LN waveguides, micro-ring resonators and miniaturized Mach-Zehnder interferometers, fabricated by directly shaping LN thin films into sub-wavelength structures. The efficient confinement of both optical and microwave fields at the nanoscale dramatically improves the device performances featuring a half-wave electro-optic modulation efficiency of 1.8 V∙cm while operating at data rates up to 40 Gbps. Our monolithic LN nanophotonic platform enables dense integration of high-performance active components, opening new avenues for future high-speed, low power and cost-effective communication networks.",
-        "venue": "Optics Express",
-        "year": 2017,
-        "authors": "Cheng Wang, Mian Zhang, B. Stern et al.",
-        "dim_a": "Modulator",
-        "dim_b": "Optical Wireless Communications",
-        "dim_c": "Letter/Express"
-    },
-    {
         "paperId": "c94a4f52615f58c7f97ebb63d6a357922ee9b656",
         "title": "Optical millimeter-wave generation or up-conversion using external modulators",
         "citationCount": 521,
@@ -2530,6 +2504,19 @@
         "venue": "IEEE Photonics Technology Letters",
         "year": 2006,
         "authors": "",
+        "dim_a": "Modulator",
+        "dim_b": "Optical Wireless Communications",
+        "dim_c": "Article"
+    },
+    {
+        "paperId": "6282c9736237aac5d35a8120584ead00226534d6",
+        "title": "Nanophotonic lithium niobate electro-optic modulators.",
+        "citationCount": 500,
+        "doi": "10.1364/oe.26.001547",
+        "abstract": "Since the emergence of optical fiber communications, lithium niobate (LN) has been the material of choice for electro-optic modulators, featuring high data bandwidth and excellent signal fidelity. Conventional LN modulators however are bulky, expensive and power hungry, and cannot meet the growing demand in modern optical data links. Chip-scale, highly integrated, LN modulators could offer solutions to this problem, yet the fabrication of low-loss devices in LN thin films has been challenging. Here we overcome this hurdle and demonstrate monolithically integrated LN electro-optic modulators that are significantly smaller and more efficient than traditional bulk LN devices, while preserving LN's excellent material properties. Our compact LN electro-optic platform consists of low-loss nanoscale LN waveguides, micro-ring resonators and miniaturized Mach-Zehnder interferometers, fabricated by directly shaping LN thin films into sub-wavelength structures. The efficient confinement of both optical and microwave fields at the nanoscale dramatically improves the device performances featuring a half-wave electro-optic modulation efficiency of 1.8 V∙cm while operating at data rates up to 40 Gbps. Our monolithic LN nanophotonic platform enables dense integration of high-performance active components, opening new avenues for future high-speed, low power and cost-effective communication networks.",
+        "venue": "Optics Express",
+        "year": 2017,
+        "authors": "Cheng Wang, Mian Zhang, B. Stern et al.",
         "dim_a": "Modulator",
         "dim_b": "Optical Wireless Communications",
         "dim_c": "Article"
@@ -2977,6 +2964,19 @@
         "dim_c": "Letter/Express"
     },
     {
+        "paperId": "6ac977bbadf03b8c92f7e47d9a0d9c2e4caa8e75",
+        "title": "30-GHz bandwidth 1.55-μm strain-compensated InGaAlAs-InGaAsP MQW laser",
+        "citationCount": 107,
+        "doi": "10.1109/68.554159",
+        "abstract": "High-speed 1.55 μm laser diodes with a 3-dB modulation bandwidths of 30 GHz were fabricated by using short-cavity mushroom structures with undoped, strain-compensated InGaAlAs-InGaAsP twenty-quantum-well active regions. The bandwidths were achieved at low bias current of 100 mA. The laser exhibited a high differential gain of 1.54×10/sup -15/ cm <sup xmlns:mml=\"http://www.w3.org/1998/Math/MathML\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">2</sup> and a small K factor of 0.135 ns. These results were achieved by using an In/sub 0.386/Ga/sub 0.465/AlAs barrier with 0.83% tensile strain to reduce the thermal emission time of holes from wells and hence the hole transport time.",
+        "venue": "IEEE Photonics Technology Letters",
+        "year": 1997,
+        "authors": "Y. Matsui, Hitoshi Murai, S. Arahira, S. Kutsuzawa, Yoh Ogawa",
+        "dim_a": "Laser & Frequency Comb",
+        "dim_b": "Optical Wireless Communications",
+        "dim_c": "Letter/Express"
+    },
+    {
         "paperId": "7533fb6d6ea0efb56e1410ba20fd6d14df64f610",
         "title": "Fourier Transform Infrared Spectrometry",
         "citationCount": 2305,
@@ -3094,19 +3094,6 @@
         "dim_c": "Letter/Express"
     },
     {
-        "paperId": "6ce4afbdb763c24d3d8674d5a1368f67cd9d2b0d",
-        "title": "Novel Ring Resonator-Based Integrated Photonic Beamformer for Broadband Phased Array Receive Antennas—Part II: Experimental Prototype",
-        "citationCount": 180,
-        "doi": "10.1109/jlt.2009.2032137",
-        "abstract": "An experimental prototype is presented that illustrates the implementation aspects and feasibility of the novel ring resonator-based optical beamformer concept that has been developed and analyzed in Part I of this paper . This concept can be used for seamless control of the reception angle in broadband wireless receivers employing a large phased array antenna (PAA). The design, fabrication, and characterization of a dedicated chip are described, in which an 8 × 1 optical beamforming network, an optical sideband filter for single-sideband suppressed carrier modulation, and a carrier re-insertion coupler for balanced optical detection are integrated. The chip was designed for satellite television reception using a broadband PAA, and was realized in a low-loss, CMOS-compatible optical waveguide technology. Tuning is performed thermo-optically, with a switching time of 1 ms. Group delay response and power response measurements show the correct operation of the OBFN and OSBF, respectively. Measurements on a complete beamformer prototype (including the electro-optical and opto-electrical conversions) demonstrate an optical sideband suppression of 25 dB, RF-to-RF delay generation up to 0.63 ns with a phase accuracy better than ¿/10 radians, and coherent combining of four RF input signals, all in a frequency range of 1-2 GHz.",
-        "venue": "Journal of Lightwave Technology",
-        "year": 2010,
-        "authors": "L. Zhuang, C. Roeloffzen, A. Meijerink et al.",
-        "dim_a": "Optical Filter & Delay Line",
-        "dim_b": "Radar & Sensing",
-        "dim_c": "Article"
-    },
-    {
         "paperId": "962bc6794099aa147802237bc70b50bc19c435f1",
         "title": "Novel Ring Resonator-Based Integrated Photonic Beamformer for Broadband Phased Array Receive Antennas—Part I: Design and Performance Analysis",
         "citationCount": 205,
@@ -3142,6 +3129,19 @@
         "year": 2016,
         "authors": "M. Yan, Pei-Ling Luo, K. Iwakuni et al.",
         "dim_a": "Modulator",
+        "dim_b": "Radar & Sensing",
+        "dim_c": "Article"
+    },
+    {
+        "paperId": "6ce4afbdb763c24d3d8674d5a1368f67cd9d2b0d",
+        "title": "Novel Ring Resonator-Based Integrated Photonic Beamformer for Broadband Phased Array Receive Antennas—Part II: Experimental Prototype",
+        "citationCount": 180,
+        "doi": "10.1109/jlt.2009.2032137",
+        "abstract": "An experimental prototype is presented that illustrates the implementation aspects and feasibility of the novel ring resonator-based optical beamformer concept that has been developed and analyzed in Part I of this paper . This concept can be used for seamless control of the reception angle in broadband wireless receivers employing a large phased array antenna (PAA). The design, fabrication, and characterization of a dedicated chip are described, in which an 8 × 1 optical beamforming network, an optical sideband filter for single-sideband suppressed carrier modulation, and a carrier re-insertion coupler for balanced optical detection are integrated. The chip was designed for satellite television reception using a broadband PAA, and was realized in a low-loss, CMOS-compatible optical waveguide technology. Tuning is performed thermo-optically, with a switching time of 1 ms. Group delay response and power response measurements show the correct operation of the OBFN and OSBF, respectively. Measurements on a complete beamformer prototype (including the electro-optical and opto-electrical conversions) demonstrate an optical sideband suppression of 25 dB, RF-to-RF delay generation up to 0.63 ns with a phase accuracy better than ¿/10 radians, and coherent combining of four RF input signals, all in a frequency range of 1-2 GHz.",
+        "venue": "Journal of Lightwave Technology",
+        "year": 2010,
+        "authors": "L. Zhuang, C. Roeloffzen, A. Meijerink et al.",
+        "dim_a": "Photonic Integrated Chip",
         "dim_b": "Radar & Sensing",
         "dim_c": "Article"
     },
@@ -3778,7 +3778,7 @@
         "venue": "Nature Photonics",
         "year": 2011,
         "authors": "V. Supradeepa, C. Long, R. Wu et al.",
-        "dim_a": "Optical Filter & Delay Line",
+        "dim_a": "Laser & Frequency Comb",
         "dim_b": "Signal Processing & IFM",
         "dim_c": "Article"
     },
@@ -3991,19 +3991,6 @@
         "dim_c": "Letter/Express"
     },
     {
-        "paperId": "2e688def26bbabe98fb0e4a024e994e143ae4ceb",
-        "title": "GHz-bandwidth optical filters based on high-order silicon ring resonators.",
-        "citationCount": 180,
-        "doi": "10.1364/oe.18.023784",
-        "abstract": "Previously demonstrated high-order silicon ring filters typically have bandwidths larger than 100 GHz. Here we demonstrate 1-2 GHz-bandwidth filters with very high extinction ratios (~50 dB). The silicon waveguides employed to construct these filters have propagation losses of ~0.5 dB/cm. Each ring of a filter is thermally controlled by metal heaters situated on the top of the ring. With a power dissipation of ~72 mW, the ring resonance can be tuned by one free spectral range, resulting in wavelength-tunable optical filters. Both second-order and fifth-order ring resonators are presented, which can find ready application in microwave/radio frequency signal processing.",
-        "venue": "Optics Express",
-        "year": 2010,
-        "authors": "P. Dong, N. Feng, D. Feng et al.",
-        "dim_a": "Optical Filter & Delay Line",
-        "dim_b": "Signal Processing & IFM",
-        "dim_c": "Letter/Express"
-    },
-    {
         "paperId": "7d1cc9df09957d3d928199d6decb38cb1c726ea2",
         "title": "Electrically driven acousto-optics and broadband non-reciprocity in silicon photonics",
         "citationCount": 195,
@@ -4039,6 +4026,19 @@
         "year": 2014,
         "authors": "",
         "dim_a": "Laser & Frequency Comb",
+        "dim_b": "Signal Processing & IFM",
+        "dim_c": "Article"
+    },
+    {
+        "paperId": "c497322d6cb40be406e650d900deec944a2e01f0",
+        "title": "Compact optical temporal differentiator based on silicon microring resonator.",
+        "citationCount": 189,
+        "doi": "10.1364/oe.16.015880",
+        "abstract": "We propose and experimentally demonstrate a temporal differentiator in optical field based on a silicon microring resonator with a radius of 40 microm. The microring resonator operates near the critical coupling region, and can take the first order derivative of the optical field. It features compact size thus is suitable for integration with silicon-on-insulator (SOI) based optical and electronic devices. The performance of this optical differentiator is tested using signals with typical shapes such as Gaussian, sinusoidal and square-like pulses at data rates of 10 Gb/s and 5 Gb/s.",
+        "venue": "Optics Express",
+        "year": 2008,
+        "authors": "Fangfei Liu, Tao Wang, L. Qiang et al.",
+        "dim_a": "Optical Filter & Delay Line",
         "dim_b": "Signal Processing & IFM",
         "dim_c": "Article"
     },

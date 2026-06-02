@@ -309,7 +309,7 @@
         "authors": "Cheng Wang, Mian Zhang, Xi Chen et al.",
         "dim_a": "Modulator",
         "dim_b": "Comprehensive/Application-Agnostic",
-        "dim_c": "Article"
+        "dim_c": "Letter/Express"
     },
     {
         "paperId": "7a981fb4f03c3c1f119b3dccfc4595e52b6f10a2",
@@ -517,7 +517,7 @@
         "authors": "Chen Sun, M. Wade, Yunsup Lee et al.",
         "dim_a": "Photonic Integrated Chip",
         "dim_b": "Emerging Computing",
-        "dim_c": "Article"
+        "dim_c": "Letter/Express"
     },
     {
         "paperId": "6a4aa7f06277600e66caaa6fb5a89da21b186bfb",
@@ -1101,7 +1101,7 @@
         "year": 2017,
         "authors": "Cheng Wang, Mian Zhang, B. Stern et al.",
         "dim_a": "Modulator",
-        "dim_b": "Optical Wireless Communications",
+        "dim_b": "Optical Communications",
         "dim_c": "Article"
     },
     {
@@ -1400,8 +1400,8 @@
         "year": 2010,
         "authors": "R. Wu, V. Supradeepa, C. Long et al.",
         "dim_a": "Laser & Frequency Comb",
-        "dim_b": "Signal Generation",
-        "dim_c": "Letter/Express"
+        "dim_b": "Modulator",
+        "dim_c": "Signal Generation"
     },
     {
         "paperId": "572fe6ddd96d111a86b7169dd4489a50bfea1e67",
@@ -1700,7 +1700,7 @@
         "authors": "C. Cox",
         "dim_a": "System Architecture Only",
         "dim_b": "Foundational Theory",
-        "dim_c": "Article"
+        "dim_c": "Book"
     },
     {
         "paperId": "a47d036ecd28f8acc866987c3dec67ff795e79c4",
@@ -1829,8 +1829,8 @@
         "year": 2011,
         "authors": "V. Supradeepa, C. Long, R. Wu et al.",
         "dim_a": "Laser & Frequency Comb",
-        "dim_b": "Signal Processing & IFM",
-        "dim_c": "Article"
+        "dim_b": "Optical Filter & Delay Line",
+        "dim_c": "Signal Processing & IFM"
     },
     {
         "paperId": "7c299ec87b9c0e1484fef5c8847b79004088d465",
@@ -2037,8 +2037,8 @@
         "year": 2020,
         "authors": "Y. Qi, Yang Li",
         "dim_a": "Photonic Integrated Chip",
-        "dim_b": "Comprehensive/Application-Agnostic",
-        "dim_c": "Review"
+        "dim_b": "Comprehensive/Device-Agnostic",
+        "dim_c": "Comprehensive/Application-Agnostic"
     },
     {
         "paperId": "4bc802be4aaffa462495e7d64340df8acc9745b0",
@@ -2257,7 +2257,7 @@
         "venue": "IEEE Microwave and Wireless Components Letters",
         "year": 2005,
         "authors": "I. Lin, J. McKinney, A. Weiner",
-        "dim_a": "Optical Filter & Delay Line",
+        "dim_a": "System Architecture Only",
         "dim_b": "Signal Generation",
         "dim_c": "Article"
     },
@@ -3129,8 +3129,8 @@
         "year": 2010,
         "authors": "L. Zhuang, C. Roeloffzen, A. Meijerink et al.",
         "dim_a": "Photonic Integrated Chip",
-        "dim_b": "Radar & Sensing",
-        "dim_c": "Article"
+        "dim_b": "Optical Filter & Delay Line",
+        "dim_c": "Wireless Communication"
     },
     {
         "paperId": "4ef8f44ffdb3221e22a713a123bbcf5b9d92d5de",
@@ -3533,7 +3533,7 @@
         "authors": "J. Cardenas, M. Foster, N. Sherwood-Droz et al.",
         "dim_a": "Optical Filter & Delay Line",
         "dim_b": "Signal Processing & IFM",
-        "dim_c": "Article"
+        "dim_c": "Letter/Express"
     },
     {
         "paperId": "26fa3267b666d59249248f38835878358127186a",
@@ -5612,7 +5612,7 @@
         "year": 2015,
         "authors": "Li Chen, Jiahong Chen, J. Nagy et al.",
         "dim_a": "Modulator",
-        "dim_b": "Comprehensive/Application-Agnostic",
+        "dim_b": "Analog Link",
         "dim_c": "Letter/Express"
     },
     {

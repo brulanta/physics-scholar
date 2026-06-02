@@ -348,7 +348,7 @@
         "authors": "Cheng Wang, Mian Zhang, Xi Chen et al.",
         "dim_a": "Modulator",
         "dim_b": "Comprehensive/Application-Agnostic",
-        "dim_c": "Letter/Express"
+        "dim_c": "Article"
     },
     {
         "paperId": "9488372708f0b6dbf055c2a73ddb1c082934afb6",
@@ -442,19 +442,6 @@
         "dim_c": "Review"
     },
     {
-        "paperId": "43034efa432f55931d0ae00fb6a4eda26ac87f1d",
-        "title": "Single-chip microprocessor that communicates directly using light",
-        "citationCount": 1197,
-        "doi": "10.1038/nature16454",
-        "abstract": "",
-        "venue": "Nature",
-        "year": 2015,
-        "authors": "Chen Sun, M. Wade, Yunsup Lee et al.",
-        "dim_a": "Photonic Integrated Chip",
-        "dim_b": "Optical Wireless Communications",
-        "dim_c": "Letter/Express"
-    },
-    {
         "paperId": "563ca7fa7741efc072025528bd8e5c7d0dbfd6b0",
         "title": "Microresonator-based solitons for massively parallel coherent optical communications",
         "citationCount": 1158,
@@ -518,6 +505,19 @@
         "dim_a": "Modulator",
         "dim_b": "Optical Wireless Communications",
         "dim_c": "Letter/Express"
+    },
+    {
+        "paperId": "c0a91100b9c170f77008b45291e8695e26714e52",
+        "title": "III‐V/silicon photonics for on‐chip and intra‐chip optical interconnects",
+        "citationCount": 571,
+        "doi": "10.1002/lpor.200900033",
+        "abstract": "Abstract In this paper III‐V on silicon‐on‐insulator (SOI) heterogeneous integration is reviewed for the realization of near infrared light sources on a silicon waveguide platform, suitable for inter‐chip and intra‐chip optical interconnects. Two bonding technologies are used to realize the III‐V/SOI integration: one based on molecular wafer bonding and the other based on DVS‐BCB adhesive wafer bonding. The realization of micro‐disk lasers, Fabry‐Perot lasers, DFB lasers, DBR lasers and mode‐locked lasers on the III‐V/SOI material platform is discussed.",
+        "venue": "",
+        "year": 2010,
+        "authors": "G. Roelkens, Liu Liu, D. Liang et al.",
+        "dim_a": "Photonic Integrated Chip",
+        "dim_b": "Optical Wireless Communications",
+        "dim_c": "Review"
     },
     {
         "paperId": "7533fb6d6ea0efb56e1410ba20fd6d14df64f610",

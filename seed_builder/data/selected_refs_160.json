@@ -281,7 +281,7 @@
         "venue": "Optics Letters",
         "year": 2010,
         "authors": "R. Wu, V. Supradeepa, C. Long et al.",
-        "dim_a": "Modulator",
+        "dim_a": "Laser & Frequency Comb",
         "dim_b": "Signal Generation",
         "dim_c": "Letter/Express"
     },
@@ -442,6 +442,19 @@
         "dim_c": "Article"
     },
     {
+        "paperId": "43034efa432f55931d0ae00fb6a4eda26ac87f1d",
+        "title": "Single-chip microprocessor that communicates directly using light",
+        "citationCount": 1197,
+        "doi": "10.1038/nature16454",
+        "abstract": "",
+        "venue": "Nature",
+        "year": 2015,
+        "authors": "Chen Sun, M. Wade, Yunsup Lee et al.",
+        "dim_a": "Photonic Integrated Chip",
+        "dim_b": "Emerging Computing",
+        "dim_c": "Article"
+    },
+    {
         "paperId": "da52dec5e7372c91055fa567a411121b2c8fa963",
         "title": "Integrated all-photonic non-volatile multi-level memory",
         "citationCount": 1006,
@@ -466,19 +479,6 @@
         "dim_a": "System Architecture Only",
         "dim_b": "Emerging Computing",
         "dim_c": "Review"
-    },
-    {
-        "paperId": "009e98d679ea67ae8b7a71f0ccd62b9b0eaae3ef",
-        "title": "Universal linear optics",
-        "citationCount": 1050,
-        "doi": "10.1126/science.aab3642",
-        "abstract": "Complex quantum optical circuitry Encoding and manipulating information in the states of single photons provides a potential platform for quantum computing and communication. Carolan et al. developed a reconfigurable integrated waveguide device fabricated in a glass chip (see the Perspective by Rohde and Dowling). The device allowed for universal linear optics transformations on six wave-guides using 15 integrated Mach-Zehnder interferometers, each of which was individually programmable. Functional performance in a number of applications in optics and quantum optics demonstrates the versatility of the device's reprogrammable architecture. Science, this issue p. 711; see also p. 696 A reconfigurable optical circuit provides a platform for a photonically-based quantum computer. [Also see Perspective by Rohde and Dowling] Linear optics underpins fundamental tests of quantum mechanics and quantum technologies. We demonstrate a single reprogrammable optical circuit that is sufficient to implement all possible linear optical protocols up to the size of that circuit. Our six-mode universal system consists of a cascade of 15 Mach-Zehnder interferometers with 30 thermo-optic phase shifters integrated into a single photonic chip that is electrically and optically interfaced for arbitrary setting of all phase shifters, input of up to six photons, and their measurement with a 12-single-photon detector system. We programmed this system to implement heralded quantum logic and entangling ga",
-        "venue": "Science",
-        "year": 2015,
-        "authors": "J. Carolan, C. Harrold, Chris Sparrow et al.",
-        "dim_a": "Photonic Integrated Chip",
-        "dim_b": "Emerging Computing",
-        "dim_c": "Article"
     },
     {
         "paperId": "3a2345fcb4d2e2fe4572123a438bc8f30a8d93ae",
@@ -894,7 +894,7 @@
         "authors": "Cheng Wang, Mian Zhang, Xi Chen et al.",
         "dim_a": "Modulator",
         "dim_b": "Comprehensive/Application-Agnostic",
-        "dim_c": "Letter/Express"
+        "dim_c": "Article"
     },
     {
         "paperId": "9488372708f0b6dbf055c2a73ddb1c082934afb6",
@@ -1066,19 +1066,6 @@
         "dim_c": "Review"
     },
     {
-        "paperId": "d5d86dc0703e4037d70d6f21a80217a6b69bbec2",
-        "title": "Integrated microwave photonics",
-        "citationCount": 551,
-        "doi": "10.1002/lpor.201200032",
-        "abstract": "Microwave photonics (MWP) is an emerging field in which radio frequency (RF) signals are generated, distributed, processed and analyzed using the strength of photonic techniques. It is a technology that enables various functionalities which are not feasible to achieve only in the microwave domain. A particular aspect that recently gains significant interests is the use of photonic integrated circuit (PIC) technology in the MWP field for enhanced functionalities and robustness as well as the reduction of size, weight, cost and power consumption. This article reviews the recent advances in this emerging field which is dubbed as integrated microwave photonics. Key integrated MWP technologies are reviewed and the prospective of the field is discussed.",
-        "venue": "",
-        "year": 2012,
-        "authors": "D. Marpaung, C. Roeloffzen, R. Heideman et al.",
-        "dim_a": "Comprehensive/Device-Agnostic",
-        "dim_b": "Comprehensive/Application-Agnostic",
-        "dim_c": "Review"
-    },
-    {
         "paperId": "af8f93e28a69e51e1ea327e676b7a1da58119003",
         "title": "On-chip light sources for silicon photonics",
         "citationCount": 505,
@@ -1144,6 +1131,19 @@
         "dim_c": "Review"
     },
     {
+        "paperId": "00c1ba280dc711524bc4df95133fc272efe3986b",
+        "title": "Development of ion-implanted optical waveguides in optical materials: A review",
+        "citationCount": 316,
+        "doi": "10.1016/j.optmat.2006.08.001",
+        "abstract": "",
+        "venue": "",
+        "year": 2007,
+        "authors": "Feng Chen, Xue-Lin Wang, Ke-ming Wang",
+        "dim_a": "Optical Filter & Delay Line",
+        "dim_b": "Comprehensive/Application-Agnostic",
+        "dim_c": "Review"
+    },
+    {
         "paperId": "f76d00da3a825dcd78c261c5bde2dc13eb9aeb23",
         "title": "Silicon optical modulators",
         "citationCount": 2404,
@@ -1168,19 +1168,6 @@
         "dim_a": "Modulator",
         "dim_b": "Optical Wireless Communications",
         "dim_c": "Review"
-    },
-    {
-        "paperId": "43034efa432f55931d0ae00fb6a4eda26ac87f1d",
-        "title": "Single-chip microprocessor that communicates directly using light",
-        "citationCount": 1197,
-        "doi": "10.1038/nature16454",
-        "abstract": "",
-        "venue": "Nature",
-        "year": 2015,
-        "authors": "Chen Sun, M. Wade, Yunsup Lee et al.",
-        "dim_a": "Photonic Integrated Chip",
-        "dim_b": "Optical Wireless Communications",
-        "dim_c": "Letter/Express"
     },
     {
         "paperId": "563ca7fa7741efc072025528bd8e5c7d0dbfd6b0",
@@ -1261,19 +1248,6 @@
         "dim_c": "Review"
     },
     {
-        "paperId": "6282c9736237aac5d35a8120584ead00226534d6",
-        "title": "Nanophotonic lithium niobate electro-optic modulators.",
-        "citationCount": 500,
-        "doi": "10.1364/oe.26.001547",
-        "abstract": "Since the emergence of optical fiber communications, lithium niobate (LN) has been the material of choice for electro-optic modulators, featuring high data bandwidth and excellent signal fidelity. Conventional LN modulators however are bulky, expensive and power hungry, and cannot meet the growing demand in modern optical data links. Chip-scale, highly integrated, LN modulators could offer solutions to this problem, yet the fabrication of low-loss devices in LN thin films has been challenging. Here we overcome this hurdle and demonstrate monolithically integrated LN electro-optic modulators that are significantly smaller and more efficient than traditional bulk LN devices, while preserving LN's excellent material properties. Our compact LN electro-optic platform consists of low-loss nanoscale LN waveguides, micro-ring resonators and miniaturized Mach-Zehnder interferometers, fabricated by directly shaping LN thin films into sub-wavelength structures. The efficient confinement of both optical and microwave fields at the nanoscale dramatically improves the device performances featuring a half-wave electro-optic modulation efficiency of 1.8 V∙cm while operating at data rates up to 40 Gbps. Our monolithic LN nanophotonic platform enables dense integration of high-performance active components, opening new avenues for future high-speed, low power and cost-effective communication networks.",
-        "venue": "Optics Express",
-        "year": 2017,
-        "authors": "Cheng Wang, Mian Zhang, B. Stern et al.",
-        "dim_a": "Modulator",
-        "dim_b": "Optical Wireless Communications",
-        "dim_c": "Letter/Express"
-    },
-    {
         "paperId": "c94a4f52615f58c7f97ebb63d6a357922ee9b656",
         "title": "Optical millimeter-wave generation or up-conversion using external modulators",
         "citationCount": 521,
@@ -1282,6 +1256,19 @@
         "venue": "IEEE Photonics Technology Letters",
         "year": 2006,
         "authors": "",
+        "dim_a": "Modulator",
+        "dim_b": "Optical Wireless Communications",
+        "dim_c": "Article"
+    },
+    {
+        "paperId": "6282c9736237aac5d35a8120584ead00226534d6",
+        "title": "Nanophotonic lithium niobate electro-optic modulators.",
+        "citationCount": 500,
+        "doi": "10.1364/oe.26.001547",
+        "abstract": "Since the emergence of optical fiber communications, lithium niobate (LN) has been the material of choice for electro-optic modulators, featuring high data bandwidth and excellent signal fidelity. Conventional LN modulators however are bulky, expensive and power hungry, and cannot meet the growing demand in modern optical data links. Chip-scale, highly integrated, LN modulators could offer solutions to this problem, yet the fabrication of low-loss devices in LN thin films has been challenging. Here we overcome this hurdle and demonstrate monolithically integrated LN electro-optic modulators that are significantly smaller and more efficient than traditional bulk LN devices, while preserving LN's excellent material properties. Our compact LN electro-optic platform consists of low-loss nanoscale LN waveguides, micro-ring resonators and miniaturized Mach-Zehnder interferometers, fabricated by directly shaping LN thin films into sub-wavelength structures. The efficient confinement of both optical and microwave fields at the nanoscale dramatically improves the device performances featuring a half-wave electro-optic modulation efficiency of 1.8 V∙cm while operating at data rates up to 40 Gbps. Our monolithic LN nanophotonic platform enables dense integration of high-performance active components, opening new avenues for future high-speed, low power and cost-effective communication networks.",
+        "venue": "Optics Express",
+        "year": 2017,
+        "authors": "Cheng Wang, Mian Zhang, B. Stern et al.",
         "dim_a": "Modulator",
         "dim_b": "Optical Wireless Communications",
         "dim_c": "Article"
@@ -1417,6 +1404,19 @@
         "dim_c": "Letter/Express"
     },
     {
+        "paperId": "60427fe0f69fa4b7733a87ad3de817ffb7051606",
+        "title": "A 128 Gb/s PAM4 Silicon Microring Modulator With Integrated Thermo-Optic Resonance Tuning",
+        "citationCount": 212,
+        "doi": "10.1109/jlt.2018.2878327",
+        "abstract": "We report the first demonstration of a silicon photonic microring modulator with modulation data rate up to 128 Gb/s (64 Gbaud PAM4). The microring modulator exhibits an electro-optic phase efficiency of V<inline-formula><tex-math notation=\"LaTeX\">$_\\pi \\cdot$</tex-math></inline-formula> L = 0.52 V<inline-formula><tex-math notation=\"LaTeX\">$\\cdot$</tex-math></inline-formula>cm, an electro-optic bandwidth of 50 GHz, and a measured transmitter dispersion eye closure quaternary of 3.0 dB at this data rate. In addition, the resonant wavelength of the microring modulator can be tuned across a full free spectral range using an integrated heater with a thermo-optic phase efficiency of 19.5 mW<inline-formula><tex-math notation=\"LaTeX\">$/\\pi$</tex-math></inline-formula>-phase shift.",
+        "venue": "Journal of Lightwave Technology",
+        "year": 2019,
+        "authors": "Jie Sun, Ranjeet Kumar, M. Sakib et al.",
+        "dim_a": "Modulator",
+        "dim_b": "Optical Wireless Communications",
+        "dim_c": "Letter/Express"
+    },
+    {
         "paperId": "7533fb6d6ea0efb56e1410ba20fd6d14df64f610",
         "title": "Fourier Transform Infrared Spectrometry",
         "citationCount": 2305,
@@ -1534,19 +1534,6 @@
         "dim_c": "Letter/Express"
     },
     {
-        "paperId": "6ce4afbdb763c24d3d8674d5a1368f67cd9d2b0d",
-        "title": "Novel Ring Resonator-Based Integrated Photonic Beamformer for Broadband Phased Array Receive Antennas—Part II: Experimental Prototype",
-        "citationCount": 180,
-        "doi": "10.1109/jlt.2009.2032137",
-        "abstract": "An experimental prototype is presented that illustrates the implementation aspects and feasibility of the novel ring resonator-based optical beamformer concept that has been developed and analyzed in Part I of this paper . This concept can be used for seamless control of the reception angle in broadband wireless receivers employing a large phased array antenna (PAA). The design, fabrication, and characterization of a dedicated chip are described, in which an 8 × 1 optical beamforming network, an optical sideband filter for single-sideband suppressed carrier modulation, and a carrier re-insertion coupler for balanced optical detection are integrated. The chip was designed for satellite television reception using a broadband PAA, and was realized in a low-loss, CMOS-compatible optical waveguide technology. Tuning is performed thermo-optically, with a switching time of 1 ms. Group delay response and power response measurements show the correct operation of the OBFN and OSBF, respectively. Measurements on a complete beamformer prototype (including the electro-optical and opto-electrical conversions) demonstrate an optical sideband suppression of 25 dB, RF-to-RF delay generation up to 0.63 ns with a phase accuracy better than ¿/10 radians, and coherent combining of four RF input signals, all in a frequency range of 1-2 GHz.",
-        "venue": "Journal of Lightwave Technology",
-        "year": 2010,
-        "authors": "L. Zhuang, C. Roeloffzen, A. Meijerink et al.",
-        "dim_a": "Optical Filter & Delay Line",
-        "dim_b": "Radar & Sensing",
-        "dim_c": "Article"
-    },
-    {
         "paperId": "962bc6794099aa147802237bc70b50bc19c435f1",
         "title": "Novel Ring Resonator-Based Integrated Photonic Beamformer for Broadband Phased Array Receive Antennas—Part I: Design and Performance Analysis",
         "citationCount": 205,
@@ -1582,6 +1569,19 @@
         "year": 2016,
         "authors": "M. Yan, Pei-Ling Luo, K. Iwakuni et al.",
         "dim_a": "Modulator",
+        "dim_b": "Radar & Sensing",
+        "dim_c": "Article"
+    },
+    {
+        "paperId": "6ce4afbdb763c24d3d8674d5a1368f67cd9d2b0d",
+        "title": "Novel Ring Resonator-Based Integrated Photonic Beamformer for Broadband Phased Array Receive Antennas—Part II: Experimental Prototype",
+        "citationCount": 180,
+        "doi": "10.1109/jlt.2009.2032137",
+        "abstract": "An experimental prototype is presented that illustrates the implementation aspects and feasibility of the novel ring resonator-based optical beamformer concept that has been developed and analyzed in Part I of this paper . This concept can be used for seamless control of the reception angle in broadband wireless receivers employing a large phased array antenna (PAA). The design, fabrication, and characterization of a dedicated chip are described, in which an 8 × 1 optical beamforming network, an optical sideband filter for single-sideband suppressed carrier modulation, and a carrier re-insertion coupler for balanced optical detection are integrated. The chip was designed for satellite television reception using a broadband PAA, and was realized in a low-loss, CMOS-compatible optical waveguide technology. Tuning is performed thermo-optically, with a switching time of 1 ms. Group delay response and power response measurements show the correct operation of the OBFN and OSBF, respectively. Measurements on a complete beamformer prototype (including the electro-optical and opto-electrical conversions) demonstrate an optical sideband suppression of 25 dB, RF-to-RF delay generation up to 0.63 ns with a phase accuracy better than ¿/10 radians, and coherent combining of four RF input signals, all in a frequency range of 1-2 GHz.",
+        "venue": "Journal of Lightwave Technology",
+        "year": 2010,
+        "authors": "L. Zhuang, C. Roeloffzen, A. Meijerink et al.",
+        "dim_a": "Photonic Integrated Chip",
         "dim_b": "Radar & Sensing",
         "dim_c": "Article"
     },
