@@ -18,8 +18,9 @@ def get_vectorstore():
         # 1️⃣ 初始化 embeddings（只做一次）
         if _embeddings is None:
             _embeddings = HuggingFaceEmbeddings(
-                model_name="paraphrase-multilingual-MiniLM-L12-v2"
-            )
+                model_name="paraphrase-multilingual-MiniLM-L12-v2",
+                cache_folder="./models",
+            )  # model_name="BAAI/bge-m3",
 
         # 2️⃣ 初始化 vectorstore
         _vectorstore = Chroma(
