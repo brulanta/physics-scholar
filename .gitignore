@@ -21,6 +21,7 @@ data/pdfs/*
 data/chroma_db/*
 !data/chroma_db/.gitkeep
 cached_pdfs
+models/
 
 # ========= IDE =========
 .vscode/
