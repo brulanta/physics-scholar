@@ -27,11 +27,6 @@ app.add_middleware(
 app.include_router(router, prefix="/api")
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "version": "0.1.0"}
-
-
 # 所有API路由注册完之后，最后挂载静态文件
 dist_path = Path(__file__).resolve().parent.parent / "dist"
 if dist_path.exists():

@@ -37,10 +37,17 @@ a = Analysis(
     datas=[
         (str(ROOT / 'dist'), 'dist'),
         (str(ROOT / 'config'), 'config'),
-        (str(ROOT / 'src'), 'src'),  # 整个src强制打包
+        (str(ROOT / 'src'), 'src'),
         (str(ROOT / 'src' / 'rag' / 'prompts' / 'profiles'), 'src/rag/prompts/profiles'),
+        (str(ROOT / 'frontend' / 'public' / 'favicon.ico'), 'assets'),  # 打包到_internal/assets/下
     ],
     hiddenimports=[
+        # 系统托盘
+        'pystray',
+        'pystray._win32',
+        'PIL',
+        'PIL.Image',
+        'PIL.IcoImagePlugin',
         # FastAPI / Starlette
         'uvicorn.logging',
         'uvicorn.loops',
@@ -171,8 +178,8 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,   # 先保留控制台窗口，方便调试，确认没问题后改False
-    icon=None,      # 有icon文件的话填路径
+    console=False,   # 先保留控制台窗口，方便调试，确认没问题后改False
+    icon=str(ROOT / 'frontend' / 'public' / 'favicon.ico'),
 )
 
 coll = COLLECT(

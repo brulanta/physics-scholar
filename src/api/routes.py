@@ -20,6 +20,12 @@ router = APIRouter()
 logger = get_logger(__name__)
 
 
+# src/api/routes.py里加
+@router.get("/health")
+def health():
+    return {"status": "ok", "version": "0.1.0"}
+
+
 # ── 全局配置 ─────────────────────────────────────────────────
 
 
