@@ -33,3 +33,17 @@ models/
 # ========= OS =========
 .DS_Store
 Thumbs.db
+
+# ========= Build =========
+
+build/
+dist/
+
+# ========= Frontend =========
+
+frontend/node_modules/
+frontend/dist/
+
+# ========= User Config =========
+
+config/user_config.yaml
