@@ -3,11 +3,24 @@
     <!-- header固定不动 -->
     <div class="drawer-header">
       <span class="drawer-title">设置 &amp; 论文库</span>
-      <button class="icon-btn" @click="$emit('close')">
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-          <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
-        </svg>
-      </button>
+      <div class="header-actions">
+        <!-- ✨ 新增：配置按钮 -->
+        <button class="icon-btn config-entry-btn" @click="showConfig = true" title="系统配置">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round" stroke-linejoin="round" />
+            <path
+              d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+              stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+
+        <button class="icon-btn" @click="$emit('close')">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />
+          </svg>
+        </button>
+      </div>
     </div>
 
     <!-- 可整体滚动的内容区 -->
@@ -133,6 +146,10 @@
         </div>
       </div>
     </Teleport>
+    <!-- ✨ 新增：ConfigModal -->
+    <Teleport to="body">
+      <ConfigModal v-if="showConfig" @close="showConfig = false" />
+    </Teleport>
   </div>
 </template>
 
@@ -142,6 +159,9 @@ import { settings, applyTheme, applyFont, FONTS } from '../../store/app.js'
 import { listPapers, confirmPaper, deletePaper } from '../../api/paper.js'
 import MultiUploadPanel from '../Paper/MultiUploadPanel.vue'
 import Toggle from './Toggle.vue'
+import ConfigModal from './ConfigModal.vue'   // ✨ 新增
+
+const showConfig = ref(false)   // ✨ 新增
 
 defineEmits(['close'])
 
@@ -671,5 +691,20 @@ async function doDelete(p) {
 
 .delete-btn:hover {
   color: var(--red);
+}
+
+/* 原有样式不变，新增以下 */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.config-entry-btn {
+  color: var(--text-3);
+}
+
+.config-entry-btn:hover {
+  color: var(--accent);
 }
 </style>
