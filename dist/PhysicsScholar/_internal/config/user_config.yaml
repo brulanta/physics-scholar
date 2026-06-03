@@ -1,0 +1,14 @@
+main_llm:
+  api_key: ""
+  base_url: ""
+  model: ""
+sub_llm:
+  api_key: ""
+  base_url: ""
+  model: ""
+embedding:
+  api_key: ""
+tools:
+  jina_api_key: ""
+  s2_api_key: ""
+  openalex_email: ""
