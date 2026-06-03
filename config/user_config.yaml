@@ -1,16 +1,13 @@
-# ── 主 LLM（必填）───────────────────────────────────────
 main_llm:
   api_key: ""
-  base_url: "https://api.deepseek.com"
-  model: "deepseek-chat"
-
-# ── 副 LLM（选填，处理打分/信息提取等结构化任务，留空则自动复用主 LLM）────────────────
+  base_url: ""
+  model: ""
 sub_llm:
   api_key: ""
   base_url: ""
   model: ""
-
-# ── 第三方工具（选填）──────────────────────────────────
+embedding:
+  api_key: ""
 tools:
   jina_api_key: ""
   s2_api_key: ""
