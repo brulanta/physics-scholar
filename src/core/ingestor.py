@@ -6,6 +6,8 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from src.config import CHROMA_DIR, PDF_DIR
 from langchain_core.documents import Document
 from src.core.registry import load_registry, remove_paper
+from langchain_openai import OpenAIEmbeddings
+from src.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
 
 _embeddings = None
 _vectorstore = None
@@ -15,14 +17,13 @@ def get_vectorstore():
     global _vectorstore, _embeddings
 
     if _vectorstore is None:
-        # 1️⃣ 初始化 embeddings（只做一次）
         if _embeddings is None:
-            _embeddings = HuggingFaceEmbeddings(
-                model_name="paraphrase-multilingual-MiniLM-L12-v2",
-                cache_folder="./models",
-            )  # model_name="BAAI/bge-m3",
+            _embeddings = OpenAIEmbeddings(
+                api_key=EMBEDDING_API_KEY,
+                base_url=EMBEDDING_BASE_URL,
+                model=EMBEDDING_MODEL,
+            )
 
-        # 2️⃣ 初始化 vectorstore
         _vectorstore = Chroma(
             embedding_function=_embeddings,
             persist_directory=str(CHROMA_DIR),

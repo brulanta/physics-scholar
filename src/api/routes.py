@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Response
 from pydantic import BaseModel, Field
-from src.config import PDF_DIR
+from src.config import PDF_DIR, get_config_dict, save_config_dict
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index, delete_paper
 from src.rag.chain import ask
@@ -14,9 +14,88 @@ from typing import Literal
 from src.rag.memory import ConversationMemory, MessageRepo, ConversationRepo
 from src.utils.logger import get_logger
 import httpx
+import sys, os, subprocess, asyncio
 
 router = APIRouter()
 logger = get_logger(__name__)
+
+
+# ── 全局配置 ─────────────────────────────────────────────────
+
+
+class LLMConfig(BaseModel):
+    api_key: str = ""
+    base_url: str = ""
+    model: str = ""
+
+
+class ToolsConfig(BaseModel):
+    jina_api_key: str = ""
+    s2_api_key: str = ""
+    openalex_email: str = ""
+
+
+class EmbeddingConfig(BaseModel):
+    api_key: str = ""
+
+
+class UserConfig(BaseModel):
+    main_llm: LLMConfig = LLMConfig()
+    sub_llm: LLMConfig = LLMConfig()
+    embedding: EmbeddingConfig = EmbeddingConfig()
+    tools: ToolsConfig = ToolsConfig()
+
+
+@router.get("/config")
+async def get_config():
+    return get_config_dict()
+
+
+@router.post("/config")
+async def update_config(data: UserConfig):
+    save_config_dict(data.model_dump())
+    return {"success": True, "message": "配置已保存"}
+
+
+class FetchModelsRequest(BaseModel):
+    base_url: str
+    api_key: str
+
+
+@router.post("/config/fetch-models")  # 斜杠补上
+async def fetch_models(data: FetchModelsRequest):
+    url = data.base_url.rstrip("/") + "/models"
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {data.api_key}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=8) as client:
+            r = await client.get(url=url, headers=headers)
+            r.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"上游错误：{e.response.status_code}",
+        )
+    except httpx.RequestError:
+        raise HTTPException(status_code=502, detail=f"无法连接到 {data.base_url}")
+
+    model_ids = [m["id"] for m in r.json().get("data", [])]
+    return {"models": model_ids}
+
+
+@router.post("/config/restart")
+async def restart_app():
+    async def _do_restart():
+        await asyncio.sleep(0.5)  # 等前端收到200响应
+        exe = sys.executable
+
+        subprocess.Popen([exe], cwd=os.path.dirname(exe))
+
+        os._exit(0)
+
+    asyncio.create_task(_do_restart())
+    return {"message": "正在重启，请稍候..."}
+
 
 # ── 防 CORS，轻量 ─────────────────────────────────────────────────
 
