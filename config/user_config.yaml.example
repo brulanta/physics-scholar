@@ -1,0 +1,21 @@
+# ── 主 LLM（必填）
+main_llm:
+  api_key: ""
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+
+# ── 副 LLM（选填，留空则复用主 LLM）
+sub_llm:
+  api_key: ""
+  base_url: ""
+  model: ""
+
+# ── Embedding
+embedding:
+  api_key: ""
+
+# ── 第三方工具（选填）
+tools:
+  jina_api_key: ""
+  s2_api_key: ""
+  openalex_email: ""
