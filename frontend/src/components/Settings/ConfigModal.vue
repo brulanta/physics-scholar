@@ -108,8 +108,7 @@
                   <option v-for="m in subModels" :key="m" :value="m">{{ m }}</option>
                 </select>
                 <button class="fetch-btn" :class="{ loading: fetching.sub }"
-                  :disabled="fetching.sub || !form.sub_llm.base_url || !form.sub_llm.api_key"
-                  @click="fetchModels('sub')">
+                  :disabled="fetching.sub || !form.sub_llm.base_url || !form.sub_llm.api_key" @click="fetchModels('sub')">
                   <span v-if="fetching.sub" class="spin">⟳</span>
                   <span v-else>获取模型</span>
                 </button>
@@ -229,7 +228,6 @@
             <span v-else>立即重启</span>
           </button>
         </div>
-        <div v-if="restarting" class="restart-hint">正在重启，请稍候…</div>
       </div>
     </div>
   </Teleport>
@@ -237,6 +235,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { serviceState } from '../../store/service.js'
 
 const emit = defineEmits(['close'])
 
@@ -261,7 +260,6 @@ const fetchError = reactive({ llm: '', sub: '' })
 const saving = ref(false)
 const loadError = ref(false)
 const savedDialog = ref(false)
-const restarting = ref(false)
 
 // 是否可保存：主LLM三项必填
 const canSave = computed(() =>
@@ -363,25 +361,15 @@ async function doSave() {
 
 // ── 重启流程 ──
 async function doRestart() {
-  restarting.value = true
   try {
     await fetch('/api/config/restart', { method: 'POST' })
-  } catch (_) { /* 重启中断连接是正常的 */ }
-
-  // 轮询 health
-  const poll = setInterval(async () => {
-    try {
-      const r = await fetch('/api/health')
-      if (r.ok) {
-        clearInterval(poll)
-        location.reload()
-      }
-    } catch (_) { /* 还没起来，继续等 */ }
-  }, 1000)
+  } catch (_) { /* 正常 */ }
+  serviceState.state = 'restarting'  // ✨ 交给全局组件接管
+  savedDialog.value = false           // 关掉保存成功弹窗
 }
 
 function close() {
-  if (!restarting.value) emit('close')
+  emit('close')
 }
 </script>
 
