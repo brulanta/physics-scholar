@@ -7,8 +7,8 @@
         <!-- ✨ 新增：配置按钮 -->
         <button class="icon-btn config-entry-btn" @click="showConfig = true" title="系统配置">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
-            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6"
-              stroke-linecap="round" stroke-linejoin="round" />
+            <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"
+              stroke-linejoin="round" />
             <path
               d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
               stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
@@ -39,8 +39,8 @@
         <div class="setting-row">
           <span class="setting-label">字体</span>
           <div class="btn-group">
-            <button v-for="(f, key) in FONTS" :key="key" class="seg-btn"
-              :class="{ active: settings.fontFamily === key }" @click="setFont(key)">{{ f.label }}</button>
+            <button v-for="(f, key) in FONTS" :key="key" class="seg-btn" :class="{ active: settings.fontFamily === key }"
+              @click="setFont(key)">{{ f.label }}</button>
           </div>
         </div>
       </section>
@@ -91,6 +91,21 @@
               <span v-if="p.author" class="meta-text">{{ truncate(p.author, 24) }}</span>
               <span v-if="p.year" class="meta-text">{{ p.year }}</span>
               <span class="status-badge" :class="p.status">{{ statusLabel(p.status) }}</span>
+              <!-- ✨ 新增 -->
+              <span class="doc-id-chip" :class="{ copied: copiedId === p.doc_id }" @click="copyDocId(p.doc_id)"
+                :title="p.doc_id">
+                <template v-if="copiedId === p.doc_id">
+                  ✓ 已复制
+                </template>
+                <template v-else>
+                  {{ p.doc_id.slice(0, 8) }}…
+                  <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+                    <rect x="4" y="4" width="8" height="8" rx="1.5" stroke="currentColor" stroke-width="1.3" />
+                    <path d="M2 10V2h8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"
+                      stroke-linejoin="round" />
+                  </svg>
+                </template>
+              </span>
             </div>
           </div>
           <div class="paper-actions">
@@ -266,6 +281,26 @@ async function doDelete(p) {
     console.error('删除失败', e)
   } finally {
     deleting.value = null
+  }
+}
+
+const copiedId = ref(null)
+
+async function copyDocId(id) {
+  try {
+    await navigator.clipboard.writeText(id)
+    copiedId.value = id
+    setTimeout(() => copiedId.value = null, 1500)
+  } catch (_) {
+    // 降级方案
+    const el = document.createElement('textarea')
+    el.value = id
+    document.body.appendChild(el)
+    el.select()
+    document.execCommand('copy')
+    document.body.removeChild(el)
+    copiedId.value = id
+    setTimeout(() => copiedId.value = null, 1500)
   }
 }
 </script>
@@ -706,5 +741,32 @@ async function doDelete(p) {
 
 .config-entry-btn:hover {
   color: var(--accent);
+}
+
+.doc-id-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.7em;
+  font-family: monospace;
+  color: var(--text-3);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.doc-id-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent-dim, var(--accent));
+}
+
+.doc-id-chip.copied {
+  color: var(--green);
+  border-color: var(--green);
+  background: rgba(74, 222, 128, 0.08);
 }
 </style>
