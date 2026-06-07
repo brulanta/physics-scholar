@@ -1,6 +1,10 @@
+English | [中文](README.md)
+
 # PhysicsScholar
 
 > A local academic agent for microwave photonics researchers — RAG Q&A · Literature Search · Academic Discussion · Offline-ready
+
+> 📖 Non-technical users please directly refer to the [User Manual](docs/用户手册.md)
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green)](https://fastapi.tiangolo.com/)
@@ -284,6 +288,7 @@ PhysicsScholar/
 ```
 
 On launch, a system tray icon appears and the default browser opens `http://localhost:57321`.
+For first-time use, please refer to the [User Manual](docs/用户手册.md) to complete the configuration.
 
 ---
 

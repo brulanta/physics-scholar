@@ -1,6 +1,10 @@
+[English](README_en.md) | 中文
+
 # PhysicsScholar
 
 > 面向微波光子学研究者的本地学术 Agent —— 论文问答 · 在线检索 · 学术讨论 · 离线运行
+
+> 📖 非技术用户请直接查看 [用户手册](docs/用户手册.md)
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-green)](https://fastapi.tiangolo.com/)
@@ -285,6 +289,7 @@ PhysicsScholar/
 ```
 
 启动后系统托盘出现图标，默认浏览器自动打开 `http://localhost:57321`。
+首次使用请参阅 [用户手册](docs/用户手册.md) 完成配置。
 
 ---
 
