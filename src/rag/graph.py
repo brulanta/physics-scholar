@@ -188,7 +188,7 @@ def final_answer(state: AgentState) -> dict:
             )
     final_prefill = build_final_prefill()
     invoke_messages = messages + [AIMessage(content=final_prefill)]
-    response = llm.invoke(invoke_messages)
+    response = invoke_with_retry(llm, invoke_messages)
 
     return {"messages": [response]}
 
