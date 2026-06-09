@@ -108,7 +108,8 @@
                   <option v-for="m in subModels" :key="m" :value="m">{{ m }}</option>
                 </select>
                 <button class="fetch-btn" :class="{ loading: fetching.sub }"
-                  :disabled="fetching.sub || !form.sub_llm.base_url || !form.sub_llm.api_key" @click="fetchModels('sub')">
+                  :disabled="fetching.sub || !form.sub_llm.base_url || !form.sub_llm.api_key"
+                  @click="fetchModels('sub')">
                   <span v-if="fetching.sub" class="spin">⟳</span>
                   <span v-else>获取模型</span>
                 </button>
@@ -184,6 +185,24 @@
                 </button>
               </div>
             </div>
+            <div class="field-row">
+              <label>OpenAlex API Key</label>
+              <div class="input-with-eye">
+                <input v-model="form.tools.openalex_api_key" :type="show.openalex ? 'text' : 'password'"
+                  class="cfg-input" placeholder="推荐，提升稳定性和调用额度" autocomplete="off" />
+                <button class="eye-btn" @click="show.openalex = !show.openalex" tabindex="-1">
+                  <svg v-if="!show.openalex" width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <path d="M1 8s2.5-5 7-5 7 5 7 5-2.5 5-7 5-7-5-7-5z" stroke="currentColor" stroke-width="1.4" />
+                    <circle cx="8" cy="8" r="2" stroke="currentColor" stroke-width="1.4" />
+                  </svg>
+                  <svg v-else width="14" height="14" viewBox="0 0 16 16" fill="none">
+                    <path
+                      d="M2 2l12 12M6.5 6.6A2 2 0 0 0 9.4 9.5M4.2 4.3C2.6 5.3 1.5 7 1.5 7S4 12 12 12c1.2 0 2.3-.3 3.2-.9M7 3.1C7.3 3 7.7 3 8 3c4 0 6.5 5 6.5 5s-.6 1.1-1.6 2.2"
+                      stroke="currentColor" stroke-width="1.4" stroke-linecap="round" />
+                  </svg>
+                </button>
+              </div>
+            </div>
 
             <div class="field-row">
               <label>OpenAlex Email</label>
@@ -244,11 +263,11 @@ const form = reactive({
   llm: { api_key: '', base_url: '', model: '' },
   sub_llm: { api_key: '', base_url: '', model: '' },
   embedding: { api_key: '' },   // ✨ 新增
-  tools: { jina_api_key: '', s2_api_key: '', openalex_email: '' }
+  tools: { jina_api_key: '', s2_api_key: '', openalex_api_key: '', openalex_email: '' }
 })
 
 // 密码显示切换
-const show = reactive({ llm_key: false, sub_key: false, jina: false, s2: false, embedding: false })  // ✨ 加 embedding
+const show = reactive({ llm_key: false, sub_key: false, jina: false, s2: false, embedding: false, openalex: false })
 
 // 模型列表
 const llmModels = ref([])
@@ -292,6 +311,7 @@ onMounted(async () => {
       form.tools.jina_api_key = data.tools.jina_api_key || ''
       form.tools.s2_api_key = data.tools.s2_api_key || ''
       form.tools.openalex_email = data.tools.openalex_email || ''
+      form.tools.openalex_api_key = data.tools.openalex_api_key || ''
     }
   } catch (e) {
     loadError.value = true

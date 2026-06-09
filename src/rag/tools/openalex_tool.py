@@ -16,9 +16,7 @@ s2_search_tool 的下位补全工具，专注解决 S2 缺失摘要的问题。
   - 全文阅读（用 jina_tool）
 
 ## 认证方式
-OpenAlex 使用 polite pool 机制，无传统 API Key。
-配置邮箱后进入更稳定的服务器池，速率更高。
-未配置时降级为匿名池。
+Rate: $1/day free usage with key, $0.01/day without
 
 ## 速率限制
   polite pool（有邮箱）: 工具取 0.5s/次
@@ -38,7 +36,7 @@ import requests
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 
-from src.config import OPENALEX_EMAIL
+from src.config import OPENALEX_EMAIL, OPENALEX_API_KEY
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -52,8 +50,10 @@ _OA_LOCK = Lock()
 _LAST_OA_CALL: float = 0.0
 _OA_BLOCK_UNTIL: float = 0.0
 
-_INTERVAL_WITH_EMAIL = 0.5  # polite pool
-_INTERVAL_WITHOUT_EMAIL = 1.5  # 匿名池：10 req/s，取 1.5s 留余量
+_INTERVAL_AUTHENTICATED = 0.5  # 认证，一秒一百次
+_INTERVAL_UNAUTHENTICATED = (
+    1.5  # 未认证，遵循过去匿名池的处理：10 req/s，取 1.5s 留余量
+)
 
 MAX_RETRIES = 2
 _SESSION = requests.Session()
@@ -63,7 +63,8 @@ FAILED_TTL = 120
 
 
 def _oa_interval() -> float:
-    return _INTERVAL_WITH_EMAIL if OPENALEX_EMAIL else _INTERVAL_WITHOUT_EMAIL
+    # key 存在视为已认证，走更快的间隔
+    return _INTERVAL_AUTHENTICATED if OPENALEX_API_KEY else _INTERVAL_UNAUTHENTICATED
 
 
 def _wait_for_oa_rate_limit() -> None:
@@ -168,8 +169,10 @@ _SELECT_FIELDS = ",".join(
 
 
 def _base_params(extra: dict | None = None) -> dict:
-    """构造基础请求参数，polite pool 邮箱自动注入。"""
+    """构造基础请求参数，polite pool 邮箱 + key 自动注入。"""
     p: dict = {"select": _SELECT_FIELDS}
+    if OPENALEX_API_KEY:
+        p["api_key"] = OPENALEX_API_KEY
     if OPENALEX_EMAIL:
         p["mailto"] = OPENALEX_EMAIL
     if extra:
@@ -387,7 +390,6 @@ def openalex_tool(
         {
             "success": true,
             "count": 返回论文数,
-            "has_polite_pool": 是否配置了邮箱（影响速率）,
             "mode": "doi_lookup" | "batch_doi_lookup" | "keyword_search",
             "missing_dois": 未在 OpenAlex 找到的 DOI 列表（batch_doi_lookup 模式专有）,
             "papers": [
@@ -484,7 +486,6 @@ def openalex_tool(
             {
                 "success": True,
                 "count": len(papers),
-                "has_polite_pool": bool(OPENALEX_EMAIL),
                 "mode": "batch_doi_lookup",
                 "missing_dois": missing,
                 "papers": papers,
@@ -530,7 +531,6 @@ def openalex_tool(
             {
                 "success": True,
                 "count": 1,
-                "has_polite_pool": bool(OPENALEX_EMAIL),
                 "mode": "doi_lookup",
                 "papers": [paper],
                 "agent_hint": hint,
@@ -580,7 +580,6 @@ def openalex_tool(
         {
             "success": True,
             "count": len(papers),
-            "has_polite_pool": bool(OPENALEX_EMAIL),
             "mode": "keyword_search",
             "papers": papers,
             "agent_hint": (f"关键词检索返回 {len(papers)} 篇（仅有摘要的论文）。"),

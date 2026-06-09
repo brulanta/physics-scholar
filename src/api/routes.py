@@ -39,6 +39,7 @@ class ToolsConfig(BaseModel):
     jina_api_key: str = ""
     s2_api_key: str = ""
     openalex_email: str = ""
+    openalex_key: str = ""
 
 
 class EmbeddingConfig(BaseModel):

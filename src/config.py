@@ -57,6 +57,7 @@ SUB_LLM_MODEL = _get("SUB_MODEL", "sub_llm", "model") or MAIN_LLM_MODEL
 JINA_API_KEY = _get("JINA_API_KEY", "tools", "jina_api_key")
 S2_API_KEY = _get("S2_API_KEY", "tools", "s2_api_key")
 OPENALEX_EMAIL = _get("OPENALEX_EMAIL", "tools", "openalex_email")
+OPENALEX_API_KEY = _get("OPENALEX_API_KEY", "tools", "openalex_api_key")  # 新增
 
 DEEPSEEK_EXTRA_BODY: dict = {
     "thinking": {"type": "disabled"},

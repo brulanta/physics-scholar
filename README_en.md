@@ -49,7 +49,7 @@ The agent decides which tools to call each turn based on CoT reasoning (hard lim
 | **Local RAG Retrieval**   | Primary                     | Vector-searches user-indexed papers; supports both full-library and single-paper targeted retrieval                                            |
 | **Local Paper ID Lookup** | Pre-step                    | Resolves fuzzy paper descriptions (partial title, author, year) to exact doc_id for targeted RAG                                               |
 | **Semantic Scholar**      | Primary search              | Default for external retrieval; provides citation count, venue, tldr, and rich metadata                                                        |
-| **OpenAlex**              | Abstract fill-in / fallback | Batch-completes missing S2 abstracts; upgrades to primary search when S2 is unavailable                                                        |
+| **OpenAlex**              | Abstract fill-in / fallback | Batch-completes missing S2 abstracts; upgrades to primary search when S2 is unavailable (requires a free API key)                              |
 | **arXiv**                 | Final fallback / preprints  | Last-resort retrieval; dedicated channel for latest preprints (S2/OpenAlex have multi-week indexing lag)                                       |
 | **Jina Full-text Reader** | Deep reading                | Reads full PDF when abstracts are insufficient; two modes: head truncation (no secondary LLM) and full-text chunk scoring with targeted recall |
 
@@ -254,16 +254,17 @@ npm run build
 
 All configuration is done through the in-app **Settings** panel. Changes take effect after restarting the program.
 
-| Field           | Description                                                                   | Required |
-| --------------- | ----------------------------------------------------------------------------- | -------- |
-| LLM API Key     | Key for any OpenAI-compatible provider                                        | ✅       |
-| LLM Base URL    | Provider endpoint, e.g. `https://api.deepseek.com`                            | ✅       |
-| LLM Model       | Click "Fetch Models", then select from dropdown                               | ✅       |
-| Secondary LLM   | Used for Jina full-text chunk scoring; choose a low-cost, large-context model | ❌       |
-| SiliconFlow Key | For embedding; free tier covers bge-m3                                        | ✅       |
-| Jina Key        | Raises Jina RPM limit; works without it at 20 RPM                             | ❌       |
-| S2 Key          | Raises Semantic Scholar rate limit; without it, uses shared pool              | ❌       |
-| OpenAlex Email  | Providing an email improves OpenAlex request speed                            | ❌       |
+| Field           | Description                                                                                  | Required      |
+| --------------- | -------------------------------------------------------------------------------------------- | ------------- |
+| LLM API Key     | Key for any OpenAI-compatible provider                                                       | ✅            |
+| LLM Base URL    | Provider endpoint, e.g. `https://api.deepseek.com`                                           | ✅            |
+| LLM Model       | Click "Fetch Models", then select from dropdown                                              | ✅            |
+| Secondary LLM   | Used for Jina full-text chunk scoring; choose a low-cost, large-context model                | ❌            |
+| SiliconFlow Key | For embedding; free tier covers bge-m3                                                       | ✅            |
+| Jina Key        | Raises Jina RPM limit; works without it at 20 RPM                                            | ❌            |
+| S2 Key          | Raises Semantic Scholar rate limit; without it, uses shared pool                             | ❌            |
+| OpenAlex Key    | Free OpenAlex API Key; recommended configuration for the new official version                | 💡Recommended |
+| OpenAlex Email  | Used in the old version to join the "polite pool" and improve speed; optional for normal use | ❌            |
 
 > ⚠️ **Changing the embedding model invalidates the entire vector store** — all papers must be re-uploaded. The current version locks the model to BAAI/bge-m3 to prevent accidental data loss.
 

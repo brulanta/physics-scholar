@@ -1,8 +1,8 @@
 # ── 主 LLM（必填）
 main_llm:
   api_key: ""
-  base_url: "https://api.deepseek.com"
-  model: "deepseek-chat"
+  base_url: ""
+  model: ""
 
 # ── 副 LLM（选填，留空则复用主 LLM）
 sub_llm:
@@ -18,4 +18,5 @@ embedding:
 tools:
   jina_api_key: ""
   s2_api_key: ""
-  openalex_email: ""
+  openalex_email: ""      # 可选，补充标识
+  openalex_api_key: ""    # 必填，2026年2月13日起 OpenAlex 要求
