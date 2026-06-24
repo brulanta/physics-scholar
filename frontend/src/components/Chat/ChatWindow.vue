@@ -7,9 +7,11 @@
           :content="msg.content" :liked="msg.liked" :created-at="msg.createdAt"
           :prev-user-content="getPrevUserContent(msg)" @regenerate="$emit('regenerate', $event)"
           @edit-branch="$emit('edit-branch', $event)" />
-        <!-- streaming 占位 -->
-        <MessageItem v-if="streamingSessionId !== null && streamingSessionId === currentSessionId" role="assistant"
-          :content="streamingContent" />
+        <!-- streaming 占位：思考/工具时间轴 + 正文（正文有内容才渲染气泡）-->
+        <div v-if="streamingSessionId !== null && streamingSessionId === currentSessionId" class="streaming-block">
+          <ThinkingTimeline :phase="streamingPhase" :tools="streamingTools" />
+          <MessageItem v-if="streamingContent" role="assistant" :content="streamingContent" />
+        </div>
       </div>
     </div>
     <Transition name="scroll-btn">
@@ -26,11 +28,14 @@
 <script setup>
 import { ref, watch, nextTick } from 'vue'
 import MessageItem from './MessageItem.vue'
+import ThinkingTimeline from './ThinkingTimeline.vue'
 
 const props = defineProps({
   messages: Array,
   streamingSessionId: { default: null },
   streamingContent: { type: String, default: '' },
+  streamingPhase: { type: String, default: 'idle' },
+  streamingTools: { type: Array, default: () => [] },
   currentSessionId: { type: String, default: '' }
 })
 
