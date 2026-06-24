@@ -96,6 +96,11 @@
 - **空回答/漂移**：`done` 带权威 `answer`，前端覆盖累计文本。
 - DB 零迁移（时间轴不持久化）。
 
+> **发现（thinking 尾标签"最后一个"在流式下不可前瞻）**：非流式 `trim_thinking` 对全文取**最后一个** `</thinking>` 做切割；流式下"最后"是未来量。`_consume_events` 只能取**当前 buf 内**最后一个尾标签 + `marker==DONE` 即切入正文，且 `answer_open` 后不再回看。对「DONE 后惯性吐一次 `</thinking>` → 再续若干 phase → 真正合法 `</thinking>` → 正文」这类输出，会在**早闭标签处误判**，把后续 phase 当 `answer_delta` 短暂泄漏到正文区。
+> **现状兜底**：落库用图根 `on_chain_end` 的权威全文走非流式 last-close-wins，`done.answer` 始终正确并覆盖前端累计文本 —— 误判只造成**瞬时视觉闪烁，不写错库、不留错误结果**；良性单尾标签输出（prompt 加固后的常态）下 first==last，无差异。
+> **可选硬化**：`answer_open` 后继续累积 buf 并每片重跑 `_rfind_close_think`，若出现更靠后的尾标签则发 `answer_reset` 事件让前端清空已累计正文、按新切割点重流。代价是前端累计逻辑加分支。
+> **暂不做**：源头已用 prompt 压低触发概率，`done` 覆盖保证正确性下限，投入产出比低；真要做更适合等步骤 6 前端累计逻辑成型后顺手加 `answer_reset`，不空悬协议字段。
+
 ## 实施顺序
 1. graph.py 异步化 + 最小脚本验证 token 流 & `langgraph_node`。
 2. llm.py `main_llm streaming=True`（回归旧 invoke：tool_calls 聚合/裁剪正常）。
