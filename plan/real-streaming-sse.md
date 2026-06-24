@@ -102,14 +102,16 @@
 > **暂不做**：源头已用 prompt 压低触发概率，`done` 覆盖保证正确性下限，投入产出比低；真要做更适合等步骤 6 前端累计逻辑成型后顺手加 `answer_reset`，不空悬协议字段。
 
 ## 实施顺序
-1. graph.py 异步化 + 最小脚本验证 token 流 & `langgraph_node`。
-2. llm.py `main_llm streaming=True`（回归旧 invoke：tool_calls 聚合/裁剪正常）。
-3. graph.py `_consume_events` + `chat_stream`/`regenerate_stream` + 辅助函数。
-4. routes.py StreamingResponse + 断连检测。
-5. chat.js `streamChat`/`consumeSSE`。
-6. ChatPage.vue 改造 + 新 state。
-7. ThinkingTimeline.vue + ChatWindow 透传。
-8. 打磨：断连不落库、done 带 answer、可选心跳。
+- [x] 1. graph.py 异步化 + 最小脚本验证 token 流 & `langgraph_node`。（A/B 实跑通过）
+- [x] 2. llm.py `main_llm streaming=True`（随步骤1 B 项验证覆盖：asyncio.run(ainvoke) 下 tool_calls 聚合/裁剪正常）。
+- [x] 3. graph.py `_consume_events` + `chat_stream`/`regenerate_stream` + 辅助函数。（四场景单测通过）
+- [x] 4. routes.py StreamingResponse + 断连检测。（纯问答端到端实跑通过：帧序列正确、流式==权威 done.answer、已落库）
+- [x] 5. chat.js `streamChat`/`consumeSSE`。
+- [x] 6. ChatPage.vue 改造 + 新 state。
+- [x] 7. ThinkingTimeline.vue + ChatWindow 透传。
+- [ ] 8. 打磨：断连不落库、done 带 answer 已在 3–6 实现；**剩余**：可选 ~15s 心跳 `: ping\n\n`（长工具链防反代断连）。
+
+**剩余的端到端人工验收**（步骤1–7 已实装，待浏览器肉眼过）：① 纯问答流式 ② 工具 chip 时间轴 ③ regenerate 分支 ④ 中途切会话后端 `async for` 立即停。环境无 Playwright，由开发者手动跑 `uvicorn`(:8000)+`npm run dev` 验证。
 
 ## 验证
 - **单元/脚本**：`astream_events` 验证脚本（确认 `on_chat_model_stream` + `langgraph_node`）；构造 DONE/PENDING/无标记/final_answer 四种输出，单测 `_consume_events` 的事件序列；`pytest`（含现有非流式 invoke 回归）。
