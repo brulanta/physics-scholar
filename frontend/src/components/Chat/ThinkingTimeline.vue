@@ -1,28 +1,27 @@
 <template>
   <div v-if="phase !== 'idle'" class="timeline">
-    <!-- 思考 / 工具进行中 -->
-    <template v-if="phase !== 'answer'">
-      <div v-if="phase === 'thinking'" class="tl-row">
-        <span class="spinner" />
-        <span class="tl-label">思考中…</span>
-        <span class="tl-time">{{ fmt(elapsed) }}</span>
+    <!-- 进行中：竖向时间轴（思考节点 + 各工具节点，节点间竖线连接）-->
+    <div v-if="phase !== 'answer'" class="steps">
+      <div v-for="s in steps" :key="s.key" class="step" :class="{ last: s.last }">
+        <div class="rail">
+          <span class="node" :class="s.status">
+            <span v-if="s.spinning" class="spinner" />
+            <span v-else-if="s.status === 'done'" class="ic ok">✓</span>
+            <span v-else-if="s.status === 'error'" class="ic err">✕</span>
+            <span v-else class="node-dot" />
+          </span>
+        </div>
+        <div class="step-body">
+          <span class="step-name">{{ s.label }}</span>
+          <span class="step-time">{{ fmt(s.dur) }}</span>
+        </div>
       </div>
-
-      <div v-if="tools.length" class="tl-tools">
-        <span v-for="t in tools" :key="t.tool_id" class="chip" :class="t.status">
-          <span v-if="t.status === 'running'" class="spinner sm" />
-          <span v-else-if="t.status === 'done'" class="ic ok">✓</span>
-          <span v-else class="ic err">✕</span>
-          <span class="chip-name">{{ toolName(t.name) }}</span>
-          <span class="chip-time">{{ fmt(toolDur(t)) }}</span>
-        </span>
-      </div>
-    </template>
+    </div>
 
     <!-- answer 阶段：折叠为一行摘要，正文由下方 MessageItem 承接 -->
-    <div v-else class="tl-row summary">
+    <div v-else class="summary">
       <span class="ic ok">✓</span>
-      <span class="tl-label">{{ summaryText }}</span>
+      <span class="summary-text">{{ summaryText }}</span>
     </div>
   </div>
 </template>
@@ -83,6 +82,28 @@ function fmt(ms) {
   return `${m}m${Math.round(s % 60)}s`
 }
 
+// 时间轴节点：头节点=思考，其后每个工具一个节点
+const steps = computed(() => {
+  const list = [
+    {
+      key: 'think',
+      status: props.phase === 'thinking' ? 'active' : 'done',
+      spinning: props.phase === 'thinking',
+      label: props.phase === 'thinking' ? '思考中…' : '已思考',
+      dur: elapsed.value,
+    },
+    ...props.tools.map(t => ({
+      key: t.tool_id,
+      status: t.status, // running | done | error
+      spinning: t.status === 'running',
+      label: toolName(t.name),
+      dur: toolDur(t),
+    })),
+  ]
+  list.forEach((s, i) => { s.last = i === list.length - 1 })
+  return list
+})
+
 const summaryText = computed(() => {
   const parts = ['已深度思考']
   if (props.tools.length) parts.push(`调用 ${props.tools.length} 个工具`)
@@ -93,66 +114,82 @@ const summaryText = computed(() => {
 
 <style scoped>
 .timeline {
-  margin: 4px 0 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  margin: 4px 0 12px;
   font-size: 0.82em;
   color: var(--text-2);
 }
 
-.tl-row {
+/* ── 竖向时间轴 ── */
+.steps {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
 }
 
-.tl-label {
-  color: var(--text-2);
-}
-
-.tl-time,
-.chip-time {
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-  font-size: 0.92em;
-}
-
-.tl-row.summary .tl-label {
-  color: var(--text-3);
-}
-
-.tl-tools {
+.step {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 30px;
 }
 
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 9px;
-  border-radius: 12px;
+.rail {
+  position: relative;
+  width: 16px;
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+}
+
+/* 连接竖线：从本节点中心向下延伸至下一节点中心（最后一个节点不画）*/
+.step:not(.last) .rail::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  top: 9px;
+  height: 100%;
+  width: 2px;
+  background: var(--border);
+  z-index: 0;
+}
+
+.node {
+  position: relative;
+  z-index: 1;
+  margin-top: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
   background: var(--bg-2);
-  border: 1px solid var(--border);
-  white-space: nowrap;
+  border: 1.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 }
 
-.chip.running {
-  border-color: var(--accent);
+.node.done {
+  border-color: #2e9e5b;
 }
 
-.chip.error {
+.node.error {
   border-color: #c0392b;
 }
 
-.chip-name {
-  color: var(--text);
+.node.active {
+  border-color: var(--accent);
+}
+
+.node-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-3);
 }
 
 .ic {
-  font-size: 0.9em;
+  font-size: 0.78em;
   line-height: 1;
 }
 
@@ -164,22 +201,44 @@ const summaryText = computed(() => {
   color: #c0392b;
 }
 
-/* 旋转 spinner */
+.step-body {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 3px;
+  padding-bottom: 8px;
+}
+
+.step-name {
+  color: var(--text);
+}
+
+.step-time {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92em;
+}
+
+/* ── answer 折叠摘要 ── */
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.summary-text {
+  color: var(--text-3);
+}
+
+/* 旋转 spinner（思考/工具进行中）*/
 .spinner {
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--border-light, #555);
+  width: 9px;
+  height: 9px;
+  border: 1.6px solid var(--border-light, #555);
   border-top-color: var(--accent);
   border-radius: 50%;
   display: inline-block;
   animation: tl-spin 0.7s linear infinite;
-  flex-shrink: 0;
-}
-
-.spinner.sm {
-  width: 10px;
-  height: 10px;
-  border-width: 1.6px;
 }
 
 @keyframes tl-spin {
