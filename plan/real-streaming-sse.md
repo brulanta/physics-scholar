@@ -28,6 +28,12 @@
 
 **`call_llm` / `final_answer` 节点内的 LLM 调用必须异步化**（与上面 API 选型无关，三种方案都需要）。仅设 `streaming=True` 但节点内仍用同步 `.invoke()`，在 `astream_events` 下拿不到稳定的 token 级 `on_chat_model_stream`（同步节点被丢线程池，callback 不冒泡）。实现第一步先写个最小脚本验证：`async for ev in agent.astream_events(state, version="v2")` 能否拿到 `on_chat_model_stream` 且事件带 `ev["metadata"]["langgraph_node"]`。环境：py3.11 / langgraph 1.1.3 / langchain-core 1.2.23，均支持 v2 + langgraph_node。
 
+**第一步验证已完成（2026-06-24，实跑通过）**：A 项 PASS —— `astream_events(v2)` 拿到逐 token `on_chat_model_stream`、事件带 `metadata.langgraph_node`（`{'call_llm': N}`），同一条流里含完整 `<thinking>…</thinking>` 边界 + 正文，可被状态机切分。脚本：`scripts/verify_astream.py`（临时，收尾可删）。实跑环境 langchain-core 实际为 1.2.20（仍支持 v2 + langgraph_node）。
+
+> **发现**：节点改 async-only 后，旧的同步 `agent.invoke()` 直接抛 `TypeError: No synchronous function provided to "call_llm"`，导致 `chat()`/`regenerate()` 的非流式兜底路径失效——本 plan 原假设"旧 invoke 路径可直接保留"不成立。
+> **决策（选项1）**：`chat()`/`regenerate()` 内部把 `agent.invoke(...)` 改为 `asyncio.run(agent.ainvoke(...))`，保持函数同步签名不变（仅供测试/脚本兜底，不被 async 路由调用，无嵌套事件循环问题）。
+> **理由**：这是过渡态兜底，不值得为它投入更多开发（如把整条链改 async 并波及所有调用方）；改动最小、回归测试可继续跑（B 项验证 PASS）。后续步骤 3 抽 `_prepare` 时这两处自然会再被触及。
+
 ## SSE 事件契约
 
 每帧 `data: <json>\n\n`，`media_type=text/event-stream`，json 必含 `type`：

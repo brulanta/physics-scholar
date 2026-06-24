@@ -31,6 +31,7 @@ from src.rag.prompts import (
 )
 from src.core.trim_thinking import process_llm_output
 from src.utils.logger import get_logger
+import asyncio
 import logging
 from tenacity import (
     retry,
@@ -70,6 +71,26 @@ logger = get_logger(__name__)
 )
 def invoke_with_retry(llm, messages):
     return llm.invoke(messages)
+
+
+@retry(
+    retry=retry_if_exception_type(
+        (
+            APITimeoutError,
+            APIConnectionError,
+            InternalServerError,
+            RateLimitError,
+        )
+    ),
+    wait=wait_exponential(multiplier=1, min=2, max=20),
+    stop=stop_after_attempt(5),
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+    reraise=True,
+)
+async def ainvoke_with_retry(llm, messages):
+    # 异步版：astream_events(v2) 下节点内必须 await ainvoke，
+    # 否则同步 .invoke() 被丢线程池、callback 不冒泡，拿不到 token 级 on_chat_model_stream。
+    return await llm.ainvoke(messages)
 
 
 class AgentState(TypedDict):
@@ -174,7 +195,7 @@ def after_guard(state: AgentState) -> str:
     return END
 
 
-def final_answer(state: AgentState) -> dict:
+async def final_answer(state: AgentState) -> dict:
     messages = list(state["messages"])
     last_msg = messages[-1]
 
@@ -188,7 +209,7 @@ def final_answer(state: AgentState) -> dict:
             )
     final_prefill = build_final_prefill()
     invoke_messages = messages + [AIMessage(content=final_prefill)]
-    response = invoke_with_retry(llm, invoke_messages)
+    response = await ainvoke_with_retry(llm, invoke_messages)
 
     return {"messages": [response]}
 
@@ -292,7 +313,7 @@ def build_agent(user_id: str):
     tool_node = ToolNode(tools)
 
     # 把llm_with_tools和tool_node闭包进节点函数
-    def call_llm(state):
+    async def call_llm(state):
         messages = list(state["messages"])
         last_msg = messages[-1]
         is_after_tool = isinstance(last_msg, ToolMessage) or state.get(
@@ -320,7 +341,7 @@ def build_agent(user_id: str):
         else:
             invoke_messages = messages + [AIMessage(content=prefill)]
 
-        response = invoke_with_retry(llm_with_tools, invoke_messages)
+        response = await ainvoke_with_retry(llm_with_tools, invoke_messages)
 
         # 检查 reasoning_content 是否有内容
         reasoning = getattr(response, "additional_kwargs", {}).get(
@@ -415,18 +436,22 @@ def chat(
         # 2. call agent
         agent = build_agent(user_id)
 
-        result = agent.invoke(
-            {
-                "messages": [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=user_message),
-                ],
-                "conv_id": conv_id,
-                "user_id": user_id,
-                "translation": translation,
-                "remaining_calls": 6,
-                "next_prefill": None,
-            }
+        # 节点已异步化（call_llm/final_answer 为 async），同步 invoke 不再可用；
+        # 这是非流式兜底/测试路径，用 asyncio.run 包一层 ainvoke 保持同步签名（过渡态）。
+        result = asyncio.run(
+            agent.ainvoke(
+                {
+                    "messages": [
+                        SystemMessage(content=system_prompt),
+                        HumanMessage(content=user_message),
+                    ],
+                    "conv_id": conv_id,
+                    "user_id": user_id,
+                    "translation": translation,
+                    "remaining_calls": 6,
+                    "next_prefill": None,
+                }
+            )
         )
 
         # 3. 处理result，写入memory
@@ -504,18 +529,21 @@ def regenerate(
 
         agent = build_agent(user_id)
 
-        result = agent.invoke(
-            {
-                "messages": [
-                    SystemMessage(content=system_prompt),
-                    HumanMessage(content=user_message),
-                ],
-                "conv_id": conv_id,
-                "user_id": user_id,
-                "translation": translation,
-                "remaining_calls": 6,
-                "next_prefill": None,
-            }
+        # 同 chat()：异步节点下用 asyncio.run 包 ainvoke 保持同步兜底签名（过渡态）。
+        result = asyncio.run(
+            agent.ainvoke(
+                {
+                    "messages": [
+                        SystemMessage(content=system_prompt),
+                        HumanMessage(content=user_message),
+                    ],
+                    "conv_id": conv_id,
+                    "user_id": user_id,
+                    "translation": translation,
+                    "remaining_calls": 6,
+                    "next_prefill": None,
+                }
+            )
         )
 
         # 3
