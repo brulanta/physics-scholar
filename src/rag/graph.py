@@ -29,9 +29,11 @@ from src.rag.prompts import (
     CITATION_DEFAULT,
     CITATION_TRANSLATION,
 )
-from src.core.trim_thinking import process_llm_output
+from src.core.trim_thinking import process_llm_output, THINK_TAG_PATTERN
 from src.utils.logger import get_logger
 import asyncio
+import json
+import re
 import logging
 from tenacity import (
     retry,
@@ -91,6 +93,44 @@ async def ainvoke_with_retry(llm, messages):
     # 异步版：astream_events(v2) 下节点内必须 await ainvoke，
     # 否则同步 .invoke() 被丢线程池、callback 不冒泡，拿不到 token 级 on_chat_model_stream。
     return await llm.ainvoke(messages)
+
+
+# ============================================================
+# 流式 SSE 辅助（真流式：astream_events v2 → 三态状态机 → SSE 帧）
+# ============================================================
+
+_CLOSE_THINK_RE = re.compile(rf"</{THINK_TAG_PATTERN}>", re.IGNORECASE)
+# 工具循环标记：DONE=不调用工具直接进入正文；PENDING=闭合 thinking 等待工具执行
+_MARKER_RE = re.compile(r"\[TOOL_LOOP:\s*(DONE|PENDING)\]", re.IGNORECASE)
+
+
+def _rfind_close_think(buf: str) -> int:
+    """返回 buf 中最后一个 </thinking|think> 的结束下标（end），无则 -1。"""
+    matches = list(_CLOSE_THINK_RE.finditer(buf))
+    return matches[-1].end() if matches else -1
+
+
+def _detect_marker(buf: str):
+    """全 buf 扫描 [TOOL_LOOP: DONE/PENDING]，返回最后一个标记（大写）或 None。"""
+    found = _MARKER_RE.findall(buf)
+    return found[-1].upper() if found else None
+
+
+def _tool_ok(output) -> bool:
+    """从 on_tool_end 的 output（ToolMessage）判定工具是否成功执行。"""
+    status = getattr(output, "status", None)
+    if status is not None:
+        return status != "error"
+    return True
+
+
+def _format_sse(event_type: str, **payload) -> str:
+    """组装一帧 SSE：data: <json>\\n\\n，json 必含 type。"""
+    return (
+        "data: "
+        + json.dumps({"type": event_type, **payload}, ensure_ascii=False)
+        + "\n\n"
+    )
 
 
 class AgentState(TypedDict):
@@ -412,6 +452,40 @@ def build_agent(user_id: str):
     return graph.compile()
 
 
+def _prepare(
+    memory: ConversationMemory,
+    user_message: str,
+    conv_id: str,
+    user_id: str,
+    translation: bool,
+    mode: str,
+    parent_id: int,
+):
+    """共享构建：system_prompt + history + agent + initial_state。
+    供 chat()/regenerate()（非流式兜底）与 chat_stream()/regenerate_stream()（流式）复用。
+    """
+    history = format_history(memory.get(leaf_message_id=parent_id, explicit=True))
+    system_prompt = build_prompt(
+        mode="normal" if mode == "normal" else "discuss",
+        history=history,
+        citation_plugin=CITATION_TRANSLATION if translation else CITATION_DEFAULT,
+        debug=False,
+    )
+    agent = build_agent(user_id)
+    initial_state = {
+        "messages": [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ],
+        "conv_id": conv_id,
+        "user_id": user_id,
+        "translation": translation,
+        "remaining_calls": 6,
+        "next_prefill": None,
+    }
+    return agent, initial_state
+
+
 def chat(
     user_message: str,
     conv_id: str,
@@ -424,35 +498,14 @@ def chat(
     conversation_id = f"{user_id}_{conv_id}"
     memory = ConversationMemory(conversation_id)
     try:
-        history = format_history(memory.get(leaf_message_id=parent_id, explicit=True))
-
-        system_prompt = build_prompt(
-            mode="normal" if mode == "normal" else "discuss",
-            history=history,
-            citation_plugin=CITATION_TRANSLATION if translation else CITATION_DEFAULT,
-            debug=False,
-        )
-
         # 2. call agent
-        agent = build_agent(user_id)
+        agent, initial_state = _prepare(
+            memory, user_message, conv_id, user_id, translation, mode, parent_id
+        )
 
         # 节点已异步化（call_llm/final_answer 为 async），同步 invoke 不再可用；
         # 这是非流式兜底/测试路径，用 asyncio.run 包一层 ainvoke 保持同步签名（过渡态）。
-        result = asyncio.run(
-            agent.ainvoke(
-                {
-                    "messages": [
-                        SystemMessage(content=system_prompt),
-                        HumanMessage(content=user_message),
-                    ],
-                    "conv_id": conv_id,
-                    "user_id": user_id,
-                    "translation": translation,
-                    "remaining_calls": 6,
-                    "next_prefill": None,
-                }
-            )
-        )
+        result = asyncio.run(agent.ainvoke(initial_state))
 
         # 3. 处理result，写入memory
         agent_msg_pure = process_llm_output(
@@ -520,31 +573,12 @@ def regenerate(
         version = regen_res.get("version")
 
         # 2
-        history = format_history(memory.get(leaf_message_id=parent_id, explicit=True))
-        system_prompt = build_prompt(
-            mode="normal" if mode == "normal" else "discuss",
-            history=history,
-            citation_plugin=CITATION_TRANSLATION if translation else CITATION_DEFAULT,
+        agent, initial_state = _prepare(
+            memory, user_message, conv_id, user_id, translation, mode, parent_id
         )
-
-        agent = build_agent(user_id)
 
         # 同 chat()：异步节点下用 asyncio.run 包 ainvoke 保持同步兜底签名（过渡态）。
-        result = asyncio.run(
-            agent.ainvoke(
-                {
-                    "messages": [
-                        SystemMessage(content=system_prompt),
-                        HumanMessage(content=user_message),
-                    ],
-                    "conv_id": conv_id,
-                    "user_id": user_id,
-                    "translation": translation,
-                    "remaining_calls": 6,
-                    "next_prefill": None,
-                }
-            )
-        )
+        result = asyncio.run(agent.ainvoke(initial_state))
 
         # 3
         agent_msg_pure = process_llm_output(
@@ -574,5 +608,243 @@ def regenerate(
             "agent_msg_id": agent_res["message_id"],
             "warning": warning,
         }
+    finally:
+        memory.close()
+
+
+# ============================================================
+# 流式入口（真流式）：chat_stream / regenerate_stream，共用 _consume_events
+# ============================================================
+
+_EMPTY_ANSWER_TEXT = "⚠️ 本次回答为空，可能是模型输出异常。可以点击重新生成再试一次。"
+
+
+async def _consume_events(agent, initial_state, request, result: dict):
+    """核心三态状态机：消费 astream_events(v2)，逐帧产出 SSE 字符串。
+
+    状态：is_thinking / answer_open / buf / cur_node / root_run_id。
+    正常跑完时把权威 final_content 写入 result['final_content']，供调用方落库；
+    断连/中断则不写——调用方据此跳过落库（本轮丢弃）。
+    """
+    is_thinking = False
+    answer_open = False
+    buf = ""
+    cur_node = None
+    root_run_id = None
+
+    async for ev in agent.astream_events(initial_state, version="v2"):
+        # 每个事件前检查断连，断连即停止消费（不落库）
+        if request is not None and await request.is_disconnected():
+            logger.info("客户端断连，停止消费事件流")
+            return
+
+        etype = ev["event"]
+        metadata = ev.get("metadata") or {}
+
+        # 图根 run_id：第一个无 langgraph_node 的 on_chain_start（根 runnable）
+        if (
+            root_run_id is None
+            and etype == "on_chain_start"
+            and not metadata.get("langgraph_node")
+        ):
+            root_run_id = ev["run_id"]
+
+        if etype == "on_chat_model_start":
+            cur_node = metadata.get("langgraph_node")
+            buf = ""
+            answer_open = False
+            # 一条回答只发一次 thinking_start；guard 反刍回的 call_llm 不重发
+            if not is_thinking:
+                is_thinking = True
+                yield _format_sse("thinking_start")
+
+        elif etype == "on_chat_model_stream":
+            chunk = ev["data"].get("chunk")
+            piece = getattr(chunk, "content", "") if chunk else ""
+            if not piece:
+                continue  # 空 piece（reasoning_content 等）跳过
+            if answer_open:
+                yield _format_sse("answer_delta", text=piece)
+                continue
+            buf += piece
+            close_end = _rfind_close_think(buf)
+            if close_end == -1:
+                continue  # 尚未出现 </thinking>，继续累积
+            marker = _detect_marker(buf)
+            # final_answer 节点必进正文；call_llm 仅在 DONE 标记时进正文
+            # （PENDING=工具调用将至 / None=继续思考，均静默等待）
+            if cur_node == "final_answer" or marker == "DONE":
+                yield _format_sse("thinking_end")
+                yield _format_sse("answer_start")
+                answer_open = True
+                tail = buf[close_end:]
+                if tail:
+                    yield _format_sse("answer_delta", text=tail)
+
+        elif etype == "on_chat_model_end":
+            # 兜底：answer 未开且无工具调用，说明流式期间漏判 marker，
+            # 用权威 output.content（非 buf，避免 reasoning_content 污染）补发正文
+            if not answer_open:
+                output = ev["data"].get("output")
+                tool_calls = getattr(output, "tool_calls", None)
+                if not tool_calls:
+                    content = getattr(output, "content", "") or ""
+                    close_end = _rfind_close_think(content)
+                    tail = content[close_end:] if close_end != -1 else content
+                    if tail.strip():
+                        yield _format_sse("thinking_end")
+                        yield _format_sse("answer_start")
+                        answer_open = True
+                        yield _format_sse("answer_delta", text=tail)
+
+        elif etype == "on_tool_start":
+            # 真实工具执行（guard 伪造的 ToolMessage 不经工具节点，不触发）
+            yield _format_sse("thinking_end")
+            yield _format_sse(
+                "tool_start", name=ev.get("name", ""), tool_id=ev.get("run_id", "")
+            )
+
+        elif etype == "on_tool_end":
+            ok = _tool_ok(ev["data"].get("output"))
+            is_thinking = False  # 工具打断后重置，下一轮 call_llm 会重发 thinking_start
+            yield _format_sse(
+                "tool_end",
+                name=ev.get("name", ""),
+                tool_id=ev.get("run_id", ""),
+                ok=ok,
+            )
+
+        elif etype == "on_chain_end" and ev["run_id"] == root_run_id:
+            # 图根结束：取末条消息作权威 final_content，发 answer_end 收尾
+            output = ev["data"].get("output")
+            final_content = ""
+            if isinstance(output, dict) and output.get("messages"):
+                final_content = output["messages"][-1].content or ""
+            result["final_content"] = final_content
+            yield _format_sse("answer_end")
+
+
+async def chat_stream(
+    user_message: str,
+    conv_id: str,
+    request,
+    user_id: str = "default",
+    translation: bool = False,
+    mode: str = "normal",
+    parent_id: int = None,
+):
+    """流式问答生成器：边推理边推 SSE，跑完后落库并发 done。"""
+    conversation_id = f"{user_id}_{conv_id}"
+    memory = ConversationMemory(conversation_id)
+    result: dict = {}
+    try:
+        agent, initial_state = _prepare(
+            memory, user_message, conv_id, user_id, translation, mode, parent_id
+        )
+
+        async for frame in _consume_events(agent, initial_state, request, result):
+            yield frame
+
+        # 断连/中断未拿到权威内容 → 不落库（本轮丢弃）
+        if "final_content" not in result:
+            logger.info("[%s] 未拿到权威 final_content，跳过落库", conversation_id)
+            return
+
+        agent_msg_pure = process_llm_output(result["final_content"], conversation_id)
+        if not agent_msg_pure:
+            agent_msg_pure = _EMPTY_ANSWER_TEXT
+            logger.warning("[%s] 写入空回答占位文本", conversation_id)
+
+        # 确保 conversations 表有这条对话的记录
+        conv_repo = ConversationRepo()
+        try:
+            conv_repo.ensure_exists(conversation_id, user_id, user_message)
+        finally:
+            conv_repo.close()
+
+        user_res = memory.add(HumanMessage(content=user_message), parent_id=parent_id)
+        agent_res = memory.add(
+            AIMessage(content=agent_msg_pure), parent_id=user_res["message_id"]
+        )
+        warning = (
+            f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
+            if agent_res.get("warning")
+            else None
+        )
+        yield _format_sse(
+            "done",
+            user_msg_id=user_res["message_id"],
+            agent_msg_id=agent_res["message_id"],
+            warning=warning,
+            answer=agent_msg_pure,  # 权威文本，前端覆盖累计的流式文本
+        )
+    except asyncio.CancelledError:
+        # 客户端断连引发的取消：直接抛出，不落库
+        raise
+    except Exception as e:
+        logger.exception("[%s] 流式问答异常", conversation_id)
+        yield _format_sse("error", message=str(e))
+    finally:
+        memory.close()
+
+
+async def regenerate_stream(
+    user_message: str,
+    conv_id: str,
+    request,
+    user_id: str = "default",
+    translation: bool = False,
+    mode: str = "normal",
+    parent_id: int = None,
+    old_agent_msg_id: int = None,
+):
+    """流式重生成生成器：标旧消息+取 version 推迟到落库时与 add 一起做，
+    断连不留悬挂。done.user_msg_id 固定为 parent_id。"""
+    conversation_id = f"{user_id}_{conv_id}"
+    memory = ConversationMemory(conversation_id)
+    result: dict = {}
+    try:
+        agent, initial_state = _prepare(
+            memory, user_message, conv_id, user_id, translation, mode, parent_id
+        )
+
+        async for frame in _consume_events(agent, initial_state, request, result):
+            yield frame
+
+        if "final_content" not in result:
+            logger.info("[%s] 未拿到权威 final_content，跳过落库", conversation_id)
+            return
+
+        agent_msg_pure = process_llm_output(result["final_content"], conversation_id)
+        if not agent_msg_pure:
+            agent_msg_pure = _EMPTY_ANSWER_TEXT
+            logger.warning("[%s] 写入空回答占位文本", conversation_id)
+
+        # 推迟到落库时：标旧消息 regenerated + 取新 version，再与 add 一起做
+        regen_res = memory.regenerate(old_agent_msg_id, parent_id)
+        if not regen_res.get("success"):
+            raise Exception(f"标记旧消息失败: {regen_res.get('detail')}")
+        version = regen_res.get("version")
+
+        agent_res = memory.add(
+            AIMessage(content=agent_msg_pure), parent_id=parent_id, version=version
+        )
+        warning = (
+            f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
+            if agent_res.get("warning")
+            else None
+        )
+        yield _format_sse(
+            "done",
+            user_msg_id=parent_id,
+            agent_msg_id=agent_res["message_id"],
+            warning=warning,
+            answer=agent_msg_pure,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:
+        logger.exception("[%s] 流式重生成异常", conversation_id)
+        yield _format_sse("error", message=str(e))
     finally:
         memory.close()
