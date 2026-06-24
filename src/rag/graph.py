@@ -32,6 +32,7 @@ from src.rag.prompts import (
 from src.core.trim_thinking import process_llm_output, THINK_TAG_PATTERN
 from src.utils.logger import get_logger
 import asyncio
+import contextlib
 import json
 import re
 import logging
@@ -619,12 +620,20 @@ def regenerate(
 _EMPTY_ANSWER_TEXT = "⚠️ 本次回答为空，可能是模型输出异常。可以点击重新生成再试一次。"
 
 
+HEARTBEAT_INTERVAL = 15  # 秒：长工具链（含外接 MCP）静默期保活，防反代/客户端掐断
+_HEARTBEAT = ": ping\n\n"  # SSE 注释帧，客户端忽略
+
+
 async def _consume_events(agent, initial_state, request, result: dict):
     """核心三态状态机：消费 astream_events(v2)，逐帧产出 SSE 字符串。
 
     状态：is_thinking / answer_open / buf / cur_node / root_run_id。
     正常跑完时把权威 final_content 写入 result['final_content']，供调用方落库；
     断连/中断则不写——调用方据此跳过落库（本轮丢弃）。
+
+    心跳：用单个 pending __anext__ future 与超时竞速。asyncio.wait(timeout) 超时
+    不取消该 future（区别于 wait_for），故不会把 astream_events 迭代器在某一步中途
+    取消、损坏流；静默 HEARTBEAT_INTERVAL 秒即发一帧 ": ping" 保活并唤醒断连检查。
     """
     is_thinking = False
     answer_open = False
@@ -632,96 +641,122 @@ async def _consume_events(agent, initial_state, request, result: dict):
     cur_node = None
     root_run_id = None
 
-    async for ev in agent.astream_events(initial_state, version="v2"):
-        # 每个事件前检查断连，断连即停止消费（不落库）
-        if request is not None and await request.is_disconnected():
-            logger.info("客户端断连，停止消费事件流")
-            return
+    aiter = agent.astream_events(initial_state, version="v2").__aiter__()
+    pending = None
+    try:
+        while True:
+            # 每轮（含心跳唤醒）检查断连，断连即停止消费（不落库）
+            if request is not None and await request.is_disconnected():
+                logger.info("客户端断连，停止消费事件流")
+                return
 
-        etype = ev["event"]
-        metadata = ev.get("metadata") or {}
-
-        # 图根 run_id：第一个无 langgraph_node 的 on_chain_start（根 runnable）
-        if (
-            root_run_id is None
-            and etype == "on_chain_start"
-            and not metadata.get("langgraph_node")
-        ):
-            root_run_id = ev["run_id"]
-
-        if etype == "on_chat_model_start":
-            cur_node = metadata.get("langgraph_node")
-            buf = ""
-            answer_open = False
-            # 一条回答只发一次 thinking_start；guard 反刍回的 call_llm 不重发
-            if not is_thinking:
-                is_thinking = True
-                yield _format_sse("thinking_start")
-
-        elif etype == "on_chat_model_stream":
-            chunk = ev["data"].get("chunk")
-            piece = getattr(chunk, "content", "") if chunk else ""
-            if not piece:
-                continue  # 空 piece（reasoning_content 等）跳过
-            if answer_open:
-                yield _format_sse("answer_delta", text=piece)
+            if pending is None:
+                pending = asyncio.ensure_future(aiter.__anext__())
+            done, _ = await asyncio.wait({pending}, timeout=HEARTBEAT_INTERVAL)
+            if not done:
+                yield _HEARTBEAT  # 静默超时：发心跳保活，不取消 pending
                 continue
-            buf += piece
-            close_end = _rfind_close_think(buf)
-            if close_end == -1:
-                continue  # 尚未出现 </thinking>，继续累积
-            marker = _detect_marker(buf)
-            # final_answer 节点必进正文；call_llm 仅在 DONE 标记时进正文
-            # （PENDING=工具调用将至 / None=继续思考，均静默等待）
-            if cur_node == "final_answer" or marker == "DONE":
-                yield _format_sse("thinking_end")
-                yield _format_sse("answer_start")
-                answer_open = True
-                tail = buf[close_end:]
-                if tail:
-                    yield _format_sse("answer_delta", text=tail)
+            try:
+                ev = pending.result()
+            except StopAsyncIteration:
+                break
+            pending = None
 
-        elif etype == "on_chat_model_end":
-            # 兜底：answer 未开且无工具调用，说明流式期间漏判 marker，
-            # 用权威 output.content（非 buf，避免 reasoning_content 污染）补发正文
-            if not answer_open:
-                output = ev["data"].get("output")
-                tool_calls = getattr(output, "tool_calls", None)
-                if not tool_calls:
-                    content = getattr(output, "content", "") or ""
-                    close_end = _rfind_close_think(content)
-                    tail = content[close_end:] if close_end != -1 else content
-                    if tail.strip():
-                        yield _format_sse("thinking_end")
-                        yield _format_sse("answer_start")
-                        answer_open = True
+            etype = ev["event"]
+            metadata = ev.get("metadata") or {}
+
+            # 图根 run_id：第一个无 langgraph_node 的 on_chain_start（根 runnable）
+            if (
+                root_run_id is None
+                and etype == "on_chain_start"
+                and not metadata.get("langgraph_node")
+            ):
+                root_run_id = ev["run_id"]
+
+            if etype == "on_chat_model_start":
+                cur_node = metadata.get("langgraph_node")
+                buf = ""
+                answer_open = False
+                # 一条回答只发一次 thinking_start；guard 反刍回的 call_llm 不重发
+                if not is_thinking:
+                    is_thinking = True
+                    yield _format_sse("thinking_start")
+
+            elif etype == "on_chat_model_stream":
+                chunk = ev["data"].get("chunk")
+                piece = getattr(chunk, "content", "") if chunk else ""
+                if not piece:
+                    continue  # 空 piece（reasoning_content 等）跳过
+                if answer_open:
+                    yield _format_sse("answer_delta", text=piece)
+                    continue
+                buf += piece
+                close_end = _rfind_close_think(buf)
+                if close_end == -1:
+                    continue  # 尚未出现 </thinking>，继续累积
+                marker = _detect_marker(buf)
+                # final_answer 节点必进正文；call_llm 仅在 DONE 标记时进正文
+                # （PENDING=工具调用将至 / None=继续思考，均静默等待）
+                if cur_node == "final_answer" or marker == "DONE":
+                    yield _format_sse("thinking_end")
+                    yield _format_sse("answer_start")
+                    answer_open = True
+                    tail = buf[close_end:]
+                    if tail:
                         yield _format_sse("answer_delta", text=tail)
 
-        elif etype == "on_tool_start":
-            # 真实工具执行（guard 伪造的 ToolMessage 不经工具节点，不触发）
-            yield _format_sse("thinking_end")
-            yield _format_sse(
-                "tool_start", name=ev.get("name", ""), tool_id=ev.get("run_id", "")
-            )
+            elif etype == "on_chat_model_end":
+                # 兜底：answer 未开且无工具调用，说明流式期间漏判 marker，
+                # 用权威 output.content（非 buf，避免 reasoning_content 污染）补发正文
+                if not answer_open:
+                    output = ev["data"].get("output")
+                    tool_calls = getattr(output, "tool_calls", None)
+                    if not tool_calls:
+                        content = getattr(output, "content", "") or ""
+                        close_end = _rfind_close_think(content)
+                        tail = content[close_end:] if close_end != -1 else content
+                        if tail.strip():
+                            yield _format_sse("thinking_end")
+                            yield _format_sse("answer_start")
+                            answer_open = True
+                            yield _format_sse("answer_delta", text=tail)
 
-        elif etype == "on_tool_end":
-            ok = _tool_ok(ev["data"].get("output"))
-            is_thinking = False  # 工具打断后重置，下一轮 call_llm 会重发 thinking_start
-            yield _format_sse(
-                "tool_end",
-                name=ev.get("name", ""),
-                tool_id=ev.get("run_id", ""),
-                ok=ok,
-            )
+            elif etype == "on_tool_start":
+                # 真实工具执行（guard 伪造的 ToolMessage 不经工具节点，不触发）
+                yield _format_sse("thinking_end")
+                yield _format_sse(
+                    "tool_start", name=ev.get("name", ""), tool_id=ev.get("run_id", "")
+                )
 
-        elif etype == "on_chain_end" and ev["run_id"] == root_run_id:
-            # 图根结束：取末条消息作权威 final_content，发 answer_end 收尾
-            output = ev["data"].get("output")
-            final_content = ""
-            if isinstance(output, dict) and output.get("messages"):
-                final_content = output["messages"][-1].content or ""
-            result["final_content"] = final_content
-            yield _format_sse("answer_end")
+            elif etype == "on_tool_end":
+                ok = _tool_ok(ev["data"].get("output"))
+                is_thinking = (
+                    False  # 工具打断后重置，下一轮 call_llm 会重发 thinking_start
+                )
+                yield _format_sse(
+                    "tool_end",
+                    name=ev.get("name", ""),
+                    tool_id=ev.get("run_id", ""),
+                    ok=ok,
+                )
+
+            elif etype == "on_chain_end" and ev["run_id"] == root_run_id:
+                # 图根结束：取末条消息作权威 final_content，发 answer_end 收尾
+                output = ev["data"].get("output")
+                final_content = ""
+                if isinstance(output, dict) and output.get("messages"):
+                    final_content = output["messages"][-1].content or ""
+                result["final_content"] = final_content
+                yield _format_sse("answer_end")
+    finally:
+        # 先取消并等待在途 __anext__（否则 aiter 仍“运行中”，aclose 会报错），
+        # 取消会把 CancelledError 注入 astream_events 生成器 → 停止图执行/工具调用。
+        if pending is not None:
+            pending.cancel()
+            with contextlib.suppress(BaseException):
+                await pending
+        with contextlib.suppress(BaseException):
+            await aiter.aclose()
 
 
 async def chat_stream(

@@ -263,3 +263,48 @@ def test_tool_error_sets_ok_false():
     _, parsed, _ = run_consume(events)
     te = next(p for p in parsed if p["type"] == "tool_end")
     assert te["ok"] is False
+
+
+def test_heartbeat_on_silent_gap():
+    """静默超过心跳间隔时发 ': ping' 注释帧，且不打断后续真实事件。"""
+    import src.rag.graph as graph_mod
+
+    class SlowAgent:
+        async def astream_events(self, state, version=None):
+            await asyncio.sleep(0.18)  # > 心跳间隔，触发若干次 ping
+            yield ev_chain_start_root()
+            yield ev_model_start("call_llm")
+            yield ev_stream("<thinking>\nx\n[TOOL_LOOP: DONE]\n</thinking>")
+            yield ev_stream("答案。")
+            yield ev_chain_end_root("答案。")
+
+    old = graph_mod.HEARTBEAT_INTERVAL
+    graph_mod.HEARTBEAT_INTERVAL = 0.05
+    frames = []
+    result = {}
+    try:
+
+        async def _drive():
+            async for f in graph_mod._consume_events(
+                SlowAgent(), {}, FakeRequest(), result
+            ):
+                frames.append(f)
+
+        asyncio.run(_drive())
+    finally:
+        graph_mod.HEARTBEAT_INTERVAL = old
+
+    # 至少出现一次心跳注释帧
+    assert any(f.strip().startswith(":") for f in frames)
+    # 真实事件未受影响：data 帧序列仍完整
+    types = [
+        json.loads(f[len("data: ") :])["type"] for f in frames if f.startswith("data:")
+    ]
+    assert types == [
+        "thinking_start",
+        "thinking_end",
+        "answer_start",
+        "answer_delta",
+        "answer_end",
+    ]
+    assert result["final_content"] == "答案。"
