@@ -109,7 +109,7 @@
 - [x] 5. chat.js `streamChat`/`consumeSSE`。
 - [x] 6. ChatPage.vue 改造 + 新 state。
 - [x] 7. ThinkingTimeline.vue + ChatWindow 透传。
-- [ ] 8. 打磨：断连不落库、done 带 answer 已在 3–6 实现；**剩余**：可选 ~15s 心跳 `: ping\n\n`（长工具链防反代断连）。
+- [x] 8. 打磨：断连不落库、done 带 answer（3–6 实现）；~15s 心跳 `: ping\n\n` 已加（单 pending __anext__ + asyncio.wait 超时竞速，为外接 MCP 长工具链/反代保活，前端已忽略注释帧）。
 
 **剩余的端到端人工验收**（步骤1–7 已实装，待浏览器肉眼过）：① 纯问答流式 ② 工具 chip 时间轴 ③ regenerate 分支 ④ 中途切会话后端 `async for` 立即停。环境无 Playwright，由开发者手动跑 `uvicorn`(:8000)+`npm run dev` 验证。
 
