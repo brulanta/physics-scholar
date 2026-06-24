@@ -1,5 +1,16 @@
 # 真流式（SSE）传输实装
 
+## 完成状态（2026-06-25）
+流式实装全部完成（步骤 1–8），浏览器端 ①纯问答 ②工具时间轴 ③regenerate ④切会话中止 均人工验收通过。核心结论：
+- **选型 `astream_events(version="v2")`**：同一条流给 token + `metadata.langgraph_node` + 工具边界（`on_tool_start` 在工具执行前触发，满足"检索中"实时 spinner）；v3 beta 的 reasoning 自动分离对"已禁用原生 thinking、思考写进正文"的我们无效，不取。
+- **节点必须异步化**：`call_llm`/`final_answer` 改 `async`+`await ainvoke`，否则 callback 不冒泡拿不到 token 级事件。副作用：同步 `agent.invoke()` 失效，`chat()`/`regenerate()` 非流式兜底改用 `asyncio.run(ainvoke)`（过渡态）。
+- **三态状态机 `_consume_events`**：thinking/tool/answer，`</thinking>`+`[TOOL_LOOP:DONE]`/`final_answer` 判定进正文；`done` 带权威 `answer`（全文 last-close-wins）覆盖前端累计文本消除漂移。断连即 `return`/`CancelledError`→不落库。
+- **前端**：fetch+ReadableStream 消费 SSE，竖向时间轴（O──[A]──[B]，进 answer 折叠），AbortController 切会话/卸载中止后端流。
+- **心跳**：单 pending `__anext__`+`asyncio.wait` 超时竞速发 `: ping`，为外接 MCP 长工具链/反代保活。
+- **已知边界**：流式无法前瞻"最后一个 `</thinking>`"，DONE 后惯性早闭标签会致瞬时闪烁（done 覆盖保正确性，不写错库）；可选 `answer_reset` 硬化暂不做。详见下文「风险与边界」。
+
+验证：`_consume_events` 6 离线单测 + 真实后端流式回归 + 浏览器人工验收。DB 零迁移。
+
 ## Context
 
 当前 PhysicsScholar 的回答是"假流式"：后端 `agent.invoke()` 一次性算完整个 LangGraph 回合，前端 axios 拿到完整 `answer` 后用 8ms `setInterval` 逐字符做打字机动画。用户在工具检索（arXiv/S2/Jina）期间只能干等，且看不到 agent 在"思考还是在调工具"。
