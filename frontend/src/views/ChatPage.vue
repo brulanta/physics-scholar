@@ -36,7 +36,8 @@
       <WelcomePage v-if="sessions.currentId === ''" @send="handleWelcomeSend" />
       <template v-else>
         <ChatWindow ref="chatWindowRef" :messages="treeMessages" :streaming-session-id="streamingSessionId"
-          :streaming-content="streamingContent" :current-session-id="sessions.currentId" @regenerate="handleRegenerate"
+          :streaming-content="streamingContent" :streaming-phase="streamingPhase" :streaming-tools="streamingTools"
+          :current-session-id="sessions.currentId" @regenerate="handleRegenerate"
           @edit-branch="handleEditBranch" />
         <InputBox ref="inputBoxRef" :loading="loading" :mode="currentMode"
           :draft="sessionDrafts[sessions.currentId] || ''" :edit-mode="editMode" @send="sendMessage"
@@ -75,7 +76,7 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, onMounted, provide, nextTick, watch } from 'vue'
+import { ref, computed, reactive, onMounted, onBeforeUnmount, provide, nextTick, watch } from 'vue'
 import {
   sessions, settings,
   createSession, getSession,
@@ -84,8 +85,8 @@ import {
   applyTheme, applyFont
 } from '../store/app.js'
 import {
-  sendChatMessage,
-  regenerateMessage,
+  streamChat,
+  streamRegenerate,
   getConversationTree,
   deleteConversation,
   listConversations,
@@ -134,8 +135,46 @@ function ensureCache(convId) {
 
 // streaming
 const streamingSessionId = ref(null)
-const streamingContent = ref('')
+const streamingContent = ref('')        // 仅 answer_delta 累加
+const streamingPhase = ref('idle')      // 'idle' | 'thinking' | 'tool' | 'answer'
+const streamingTools = ref([])          // [{ tool_id, name, status:'running'|'done'|'error', startedAt, endedAt }]
 let streamingCounter = 0
+let currentAbort = null                 // 当前流的 AbortController，用于切会话/卸载时中止
+
+function resetStreaming() {
+  streamingSessionId.value = null
+  streamingContent.value = ''
+  streamingPhase.value = 'idle'
+  streamingTools.value = []
+}
+
+// 构造一轮流式的事件 handlers；用 myCount 防串话（被新一轮接管后静默丢弃）。
+// 返回 state.done（done 事件 payload）/ state.error（错误文案）供流结束后判定落库。
+function makeStreamHandlers(myCount) {
+  const state = { done: null, error: null }
+  const owns = () => streamingCounter === myCount
+  const handlers = {
+    thinking_start: () => { if (owns()) streamingPhase.value = 'thinking' },
+    tool_start: (e) => {
+      if (!owns()) return
+      streamingPhase.value = 'tool'
+      streamingTools.value.push({
+        tool_id: e.tool_id, name: e.name,
+        status: 'running', startedAt: Date.now(), endedAt: null,
+      })
+    },
+    tool_end: (e) => {
+      if (!owns()) return
+      const t = streamingTools.value.find(t => t.tool_id === e.tool_id)
+      if (t) { t.status = e.ok ? 'done' : 'error'; t.endedAt = Date.now() }
+    },
+    answer_start: () => { if (owns()) streamingPhase.value = 'answer' },
+    answer_delta: (e) => { if (owns()) streamingContent.value += e.text },
+    done: (e) => { state.done = e },
+    error: (e) => { state.error = e?.message || '生成出错' },
+  }
+  return { handlers, state }
+}
 
 // 草稿：{ [sessionId]: string }
 const sessionDrafts = ref({})
@@ -175,7 +214,12 @@ const freshSessionId = ref(null)  // 标记刚创建、无需从后端拉取的 
 const chatWindowRef = ref(null)
 const inputBoxRef = ref(null)
 
-watch(() => sessions.currentId, async (id) => {
+watch(() => sessions.currentId, async (id, oldId) => {
+  // 切走正在流式的会话 → 中止后端流（freshSessionId 是欢迎页新建当前轮，不在此列）
+  if (loading.value && streamingSessionId.value && streamingSessionId.value === oldId && id !== oldId) {
+    currentAbort?.abort()
+  }
+
   if (!id) return
   if (freshSessionId.value === id) {
     freshSessionId.value = null
@@ -362,6 +406,10 @@ onMounted(async () => {
   await loadSessionList()
 })
 
+onBeforeUnmount(() => {
+  currentAbort?.abort()  // 卸载时中止在途流，避免悬挂连接
+})
+
 async function loadSessionList() {
   try {
     const res = await listConversations('default')
@@ -492,33 +540,55 @@ async function _doSend(convId, text, overrideParentId = undefined) {
   sessionCache[convId].messages.push(tempUserMsg)
 
   const myCount = ++streamingCounter
+  const ac = new AbortController()
+  currentAbort = ac
   streamingSessionId.value = convId
   streamingContent.value = ''
+  streamingPhase.value = 'thinking'
+  streamingTools.value = []
+
+  const { handlers, state } = makeStreamHandlers(myCount)
 
   try {
-    const res = await sendChatMessage(text, convId, {
-      parentId,
-      translation: settings.translation,
-      mode: sessionModes.value[convId] || 'normal',
-    })
+    await streamChat(
+      {
+        question: text,
+        conv_id: convId,
+        parent_id: parentId,
+        translation: settings.translation,
+        mode: sessionModes.value[convId] || 'normal',
+      },
+      handlers,
+      ac.signal,
+    )
 
-    const { answer, user_msg_id, agent_msg_id } = res.data
-    const fullText = answer || '（无回复）'
+    // 已被新一轮接管：不提交，交由新一轮管理全局流式状态
+    if (streamingCounter !== myCount) return
+
+    if (state.error) {
+      // 后端报错/网络中断：丢弃临时消息、回填草稿、提示
+      const idx = sessionCache[convId].messages.indexOf(tempUserMsg)
+      if (idx !== -1) sessionCache[convId].messages.splice(idx, 1)
+      sessionDrafts.value[convId] = text
+      showToast(state.error)
+      resetStreaming()
+      return
+    }
+
+    if (!state.done) {
+      // 主动中断（切会话/关页面）：后端未落库，丢弃临时消息，不提示
+      const idx = sessionCache[convId].messages.indexOf(tempUserMsg)
+      if (idx !== -1) sessionCache[convId].messages.splice(idx, 1)
+      resetStreaming()
+      return
+    }
+
+    // ── 正常完成：以权威 done 落库（answer 覆盖流式累计文本，消除漂移）──
+    const { user_msg_id, agent_msg_id, warning } = state.done
+    const fullText = state.done.answer || '（无回复）'
     tempUserMsg.id = user_msg_id
 
-    let i = 0
-    await new Promise(resolve => {
-      const timer = setInterval(() => {
-        if (streamingCounter !== myCount) { clearInterval(timer); resolve(); return }
-        if (i < fullText.length) {
-          streamingContent.value += fullText[i++]
-        } else {
-          clearInterval(timer); resolve()
-        }
-      }, 8)
-    })
-
-    if (streamingCounter === myCount) {
+    {
       // ── 先同步树结构 ──
       const userNode = {
         id: user_msg_id, parent_id: parentId, role: 'user',
@@ -559,19 +629,20 @@ async function _doSend(convId, text, overrideParentId = undefined) {
         siblings: getSiblings(sessionCache[convId].tree, agentNode),
       })
       sessionCache[convId].activeMessageId = agent_msg_id
-      streamingSessionId.value = null
-      streamingContent.value = ''
     }
+
+    resetStreaming()
+    if (warning) showToast(warning)
   } catch (err) {
     console.error('[_doSend catch]', err)
     const idx = sessionCache[convId].messages.indexOf(tempUserMsg)
     if (idx !== -1) sessionCache[convId].messages.splice(idx, 1)
     sessionDrafts.value[convId] = text
     showToast('请求失败，请检查后端是否运行')
-    streamingSessionId.value = null
-    streamingContent.value = ''
+    resetStreaming()
   } finally {
     loading.value = false
+    if (currentAbort === ac) currentAbort = null
   }
 }
 
@@ -590,42 +661,45 @@ async function handleRegenerate({ msgId, parentId, question }) {
   if (idx !== -1) sessionCache[convId].messages = messages.slice(0, idx)
 
   const myCount = ++streamingCounter
+  const ac = new AbortController()
+  currentAbort = ac
   streamingSessionId.value = convId
   streamingContent.value = ''
+  streamingPhase.value = 'thinking'
+  streamingTools.value = []
+
+  const { handlers, state } = makeStreamHandlers(myCount)
 
   try {
-    const res = await regenerateMessage({
-      question,
-      conv_id: convId,
-      parent_id: Number(parentId),
-      old_agent_msg_id: Number(msgId),
-      translation: settings.translation,
-      mode: sessionModes.value[convId] || 'normal',
-    })
+    await streamRegenerate(
+      {
+        question,
+        conv_id: convId,
+        parent_id: Number(parentId),
+        old_agent_msg_id: Number(msgId),
+        translation: settings.translation,
+        mode: sessionModes.value[convId] || 'normal',
+      },
+      handlers,
+      ac.signal,
+    )
 
-    const { answer, agent_msg_id } = res.data
-    const fullText = answer || '（无回复）'
+    if (streamingCounter !== myCount) return
 
-    // 2️⃣ 打字机效果
-    let i = 0
-    await new Promise(resolve => {
-      const timer = setInterval(() => {
-        if (streamingCounter !== myCount) {
-          clearInterval(timer)
-          resolve()
-          return
-        }
-        if (i < fullText.length) {
-          streamingContent.value += fullText[i++]
-        } else {
-          clearInterval(timer)
-          resolve()
-        }
-      }, 8)
-    })
+    // 错误或主动中断：后端未落库（标旧消息+取 version 推迟到落库时），
+    // 重新拉取后端真相以恢复被乐观移除的旧消息，避免缓存与库不一致。
+    if (state.error || !state.done) {
+      resetStreaming()
+      await loadConversationTree(convId)
+      if (state.error) showToast(state.error)
+      return
+    }
 
-    // 3️⃣ 写回缓存（而不是 treeMessages）
-    if (streamingCounter === myCount) {
+    const { agent_msg_id, warning } = state.done
+    const fullText = state.done.answer || '（无回复）'
+
+    // 写回缓存（而不是 treeMessages）
+    {
       const cache = sessionCache[sessions.currentId]
 
       // ── 同步树结构 ──
@@ -667,17 +741,17 @@ async function handleRegenerate({ msgId, parentId, question }) {
       }
 
       cache.activeMessageId = agent_msg_id
-      streamingSessionId.value = null
-      streamingContent.value = ''
     }
 
+    resetStreaming()
+    if (warning) showToast(warning)
   } catch {
     showToast('重新生成失败，请重试')
-    streamingSessionId.value = null
-    streamingContent.value = ''
-
+    resetStreaming()
+    await loadConversationTree(convId)
   } finally {
     loading.value = false
+    if (currentAbort === ac) currentAbort = null
   }
 }
 
