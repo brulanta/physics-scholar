@@ -2,13 +2,13 @@
 import uuid
 import shutil
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Response
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Response, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from src.config import PDF_DIR, get_config_dict, save_config_dict
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index, delete_paper
-from src.rag.chain import ask
-from src.rag.graph import regenerate
+from src.rag.graph import chat_stream, regenerate_stream
 import requests
 from typing import Literal
 from src.rag.memory import ConversationMemory, MessageRepo, ConversationRepo
@@ -317,6 +317,13 @@ def delete_paper_route(doc_id: str, user_id: str = "default"):
 
 # ── 问答 ─────────────────────────────────────────────────
 
+# SSE 响应头：禁缓存 + 关闭反代缓冲（Nginx/PyInstaller 直连均需），保持长连接
+SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
+
 
 class AskRequest(BaseModel):
     question: str
@@ -328,19 +335,22 @@ class AskRequest(BaseModel):
 
 
 @router.post("/ask")
-def ask_question(req: AskRequest):
+async def ask_question(req: AskRequest, request: Request):
+    # 真流式：返回 SSE 流，事件契约见 graph._consume_events。
+    # 非流式兜底仍在 chain.ask()（供测试/脚本），此路由不再走它。
     logger.debug(
-        "[API] /ask get translation = %r | mode = %r", req.translation, req.mode
+        "[API] /ask(stream) translation = %r | mode = %r", req.translation, req.mode
     )
-    result = ask(
-        question=req.question,
+    gen = chat_stream(
+        user_message=req.question,
         conv_id=req.conv_id,
+        request=request,
         user_id=req.user_id,
         translation=req.translation,
         mode=req.mode,
         parent_id=req.parent_id,
     )
-    return result
+    return StreamingResponse(gen, media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 class RegenerateRequest(BaseModel):
@@ -354,20 +364,24 @@ class RegenerateRequest(BaseModel):
 
 
 @router.post("/regenerate")
-def ask_question_regenerate(req: RegenerateRequest):
+async def ask_question_regenerate(req: RegenerateRequest, request: Request):
+    # 真流式重生成；非流式兜底仍在 graph.regenerate()（供测试/脚本）。
     logger.debug(
-        "[API] /regenerate get translation = %r | mode = %r", req.translation, req.mode
+        "[API] /regenerate(stream) translation = %r | mode = %r",
+        req.translation,
+        req.mode,
     )
-    result = regenerate(
+    gen = regenerate_stream(
         user_message=req.question,
         conv_id=req.conv_id,
+        request=request,
         user_id=req.user_id,
         translation=req.translation,
         mode=req.mode,
         parent_id=req.parent_id,
         old_agent_msg_id=req.old_agent_msg_id,
     )
-    return result
+    return StreamingResponse(gen, media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # ── 赞踩 ─────────────────────────────────────────────────
