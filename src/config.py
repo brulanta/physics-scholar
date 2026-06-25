@@ -112,10 +112,11 @@ CHUNK_OVERLAP_EN = _get_typed("CHUNK_OVERLAP_EN", fallback=76, cast=int)
 # 校准系数：当前为经验占位（中文≈1.05 token/字、英文≈1.3 token/词），非真实校准。
 # 打包分发前须跑 scripts/calibrate_tokenizer.py 用真实论文样本拟合，把结果硬编码到此处
 # 出厂默认值并将 CHUNK_CALIBRATED fallback 改为 True（不写 yaml，不做前端 UI）。
-CHUNK_CALIB_A = _get_typed("CHUNK_CALIB_A", fallback=1.05, cast=float)
-CHUNK_CALIB_B = _get_typed("CHUNK_CALIB_B", fallback=1.30, cast=float)
-CHUNK_CALIB_C = _get_typed("CHUNK_CALIB_C", fallback=0.0, cast=float)
-CHUNK_CALIBRATED = _get_typed("CHUNK_CALIBRATED", fallback=False, cast=bool)
+CHUNK_CALIB_A = _get_typed("CHUNK_CALIB_A", fallback=0.9491, cast=float)
+CHUNK_CALIB_B = _get_typed("CHUNK_CALIB_B", fallback=1.6108, cast=float)
+CHUNK_CALIB_C = _get_typed("CHUNK_CALIB_C", fallback=3.1937, cast=float)
+CHUNK_CALIBRATED = _get_typed("CHUNK_CALIBRATED", fallback=True, cast=bool)
+## 这套系数是基于4篇中文+4篇英文、共200个样本拟合得到的,R²=0.9698（此点可以补入plan）
 
 
 # ── 热重载 ────────────────────────────────────────────────
@@ -124,7 +125,7 @@ def reload_config() -> None:
     global _cfg
     global MAIN_LLM_API_KEY, MAIN_LLM_BASE_URL, MAIN_LLM_MODEL
     global SUB_LLM_API_KEY, SUB_LLM_BASE_URL, SUB_LLM_MODEL
-    global JINA_API_KEY, S2_API_KEY, OPENALEX_EMAIL
+    global JINA_API_KEY, S2_API_KEY, OPENALEX_EMAIL, OPENALEX_API_KEY
     global EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
     # 注：chunker.* 为纯开发态配置（只读 .env > 硬编码默认），不进 yaml，
     # 故无需在 reload_config（yaml 热重载）中重读。
@@ -142,6 +143,7 @@ def reload_config() -> None:
     JINA_API_KEY = _get("JINA_API_KEY", "tools", "jina_api_key")
     S2_API_KEY = _get("S2_API_KEY", "tools", "s2_api_key")
     OPENALEX_EMAIL = _get("OPENALEX_EMAIL", "tools", "openalex_email")
+    OPENALEX_API_KEY = _get("OPENALEX_API_KEY", "tools", "openalex_api_key")  # 新增
 
     EMBEDDING_API_KEY = _get("EMBEDDING_API_KEY", "embedding", "api_key")
     EMBEDDING_BASE_URL = (
