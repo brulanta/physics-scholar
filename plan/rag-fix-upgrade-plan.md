@@ -234,11 +234,35 @@ def _rerank(query, docs, top_n):
 
 ## 进度 / 状态（截至当前会话，便于上下文压缩后续接）
 
-- **Part 1 切片修复**：✅ 已实现并提交 `4107baf`；计划文档对齐提交 `14f34f5`。`chunker.py`/`config.py`/`calibrate_tokenizer.py`/测试均已落地，`CHUNK_CALIBRATED` 仍为 `False`（待打包前跑校准脚本拟合后硬编码）。
+- **Part 1 切片修复**：✅ 已实现并提交 `4107baf`；计划文档对齐提交 `14f34f5`。`chunker.py`/`config.py`/`calibrate_tokenizer.py`/测试均已落地。**校准已完成**：`calibrate_tokenizer.py` 用 4 篇中文+4 篇英文、共 200 个样本拟合，**R²=0.9698**（>0.95 目标达标），系数已硬编码进 `config.py` 出厂默认（`CHUNK_CALIB_A=0.9491 / B=1.6108 / C=3.1937`），`CHUNK_CALIBRATED` fallback 改为 `True`。
 - **Part 4 评测脚手架（baseline/A）**：✅ 已实现并提交 `847caf2`（`scripts/eval_retrieval.py`，双 collection + LLM 合成测试集 + Recall@K/MRR）。用户正在本机配好凭证后跑 baseline/A 取数。
 - **Part 2 多路召回**：🚧 进行中。**已做（未提交）**：`.gitignore` 加 `.claude/`；`requirements.txt`（UTF-16）加 `rank_bm25==0.2.2`。**待做**：`physics_scholar.spec` 的 `hiddenimports` 加 `'rank_bm25'`；`config.py` 加 `RAG_HYBRID_ENABLED`/`RAG_FETCH_MULTIPLIER`；`rag_tool.py` 加 `hybrid_search`/`_rrf_merge`/`_bm25_tokenize`、`vs` 改惰性、按开关回退；`eval_retrieval.py` 接入 `B` 层（复用生产 `hybrid_search`）；装 `rank_bm25` 后离线验证 RRF/分词；提交。
 - **Part 3 重排**：⬜ 未开始（契约与配置定位已在上文敲定）。
 - **注意**：`src/config.py` 有用户本地未提交改动（在 `reload_config` 补了 `OPENALEX_API_KEY`），属用户有意改动，勿回退；在其基础上叠加 Part 2 常量即可。
+
+---
+
+## 发现与决策（baseline vs A 评测排查，2026-06-25）
+
+首轮 baseline/A 分层评测出现**反直觉负面结果**：A（新 384-token 切片）的 Recall@K / MRR 全面、大幅低于 baseline（旧 350-字符切片）。深入排查（含只读抽检 `--debug-cases`）定位三个叠加问题，按重要性排序：
+
+- **P1（主因，真实效应）**：384 token 的 chunk 偏大，embedding 语义被"平均化"，检索反而变差。已用具体 case 验证（Q3 "microwave photonics 由哪两个领域结合"）：baseline 命中 gold，A 在 top-10 内根本未检回 gold——是**真的没检到**，非 metric 误判。
+- **P2（放大效应）**：测试集 gold 选取退化——`_collect_gold_chunks` 的 round-robin 几乎只取到各篇 "chunk 0"（标题+作者+单位+摘要首句），语义被人名/单位主导，与提问内容关联弱，污染判定公平性。
+- **P3（次要，本轮未实质误判，但须修）**：旧命中判定 `inter/min(集合)` 对小 chunk 有虚高倾向（小集合+常见词易凑高重叠），留着会污染未来 case。
+
+**方法论（重要）**：plan 原假设"token 归一的更大语义块 → 召回更好"，实测在 384 档**不成立**；但此反直觉结果**不能直接采信**，必须先证伪评测工具本身（gold 质量、metric 算法）的可信度，再相信结果——遵循"先验证测量工具、再相信测量结果"的排查顺序。
+
+**修复决策（零成本优先，暂缓花费嵌入额度的部分）**：
+1. **修 gold**：出题 LLM 同时摘录"最小答案句"存为 `gold_text`；`_collect_gold_chunks` 跳过开头块（`SKIP_HEAD_CHUNKS`）、改采文档中段、避开元数据密集片；新增逐字摘录校验（`SPAN_VERBATIM_MIN`）防 LLM 改写/翻译导致 token 重叠失真。
+2. **修 metric**：`is_relevant` 改为按 gold 答案句归一的覆盖率 `inter/|gold_tokens| ≥ 阈值`（`OVERLAP_THRESHOLD=0.6`），对大小 chunk 对称公平。
+3. **暂缓**：扫多档 chunk size（256/200 等）重新入库——需消耗嵌入 API 额度。先完成 1、2，用现有 384 数据**零成本重测一次**，确认"修完评测后 A 是否依旧 ≤ baseline"，再决定是否花钱扫 size。
+
+> 状态（2026-06-25 收尾）：
+> - 1、2 已落地（`eval_retrieval.py` 答案句口径重写）。
+> - 阻断性 bug 已修：`_SYNTH_PROMPT.format(chunk=...)` 因 prompt 内含 JSON 示例字面量 `{...}` 触发 `KeyError`，改用 `.replace("{chunk}", ...)` 规避（已零成本验证：`{chunk}` 正确注入、JSON 示例保留、旧写法确为 `KeyError '"question"'`）。
+> - **spot check 已确认**：重建后的 gold 为文档中段的真实答案句（不再是标题/作者/摘要首句），质量 OK。
+> - **待执行（下次接续）**：跑完整**零成本重测** `python scripts/eval_retrieval.py`（不加 `--reingest`，复用已入库 collection），看分层表中 **A 是否依旧 ≤ baseline**——若是则 P1（384 偏大）成立，进入"扫多档 chunk size"讨论；若 A 显著回升则原负面结果主要是 P2/P3 测量噪声。
+>   - ⚠ 注意：`data/chroma_db/` 已 gitignore，**换机后该 collection 不存在**，首跑会触发重入库并**消耗嵌入额度**（非零成本）。换机续跑前需确认目标机已有持久化的 `eval_baseline`/`eval_fixed`，否则"零成本"不成立。
 
 ---
 
