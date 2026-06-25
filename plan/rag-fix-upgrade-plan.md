@@ -76,17 +76,17 @@ def chunker(blocks_str: str) -> list[str]:
 
 **暂定默认（token 语义容量，留待召回测试 bp 微调）**：中英文统一目标约 `size=384 / overlap=76`，分别可配。因为计长已归一到 token，单一预算即可让两种语言语义容量相近；仍保留中英文独立配置以便单独调。
 
-### 1.3 校准脚本 `scripts/calibrate_tokenizer.py`（一次性）
+### 1.3 校准脚本 `scripts/calibrate_tokenizer.py`（一次性，纯开发工具，不打包进 exe）
 - 仿 `scripts/verify_rag.py` 的 bootstrap（`sys.path` 插入后从 `src` import）。
-- 从已入库论文 / 解析 seed PDF 采样 N 段（中英文混合、长度多样）的代表性文本。
+- 解析 `data/pdfs/` 下论文，按句子累积成不同长度文本段（中英文混合、覆盖长度谱）。
 - 每段算特征 `(cjk, words)`，调 bge-m3 嵌入 API 取真实 `usage.prompt_tokens`（已确认硅基流动 embedding 返回该字段；RPM 2000 充裕）。
 - `numpy.linalg.lstsq` 拟合 `tokens ≈ a·cjk + b·words + c`，报告 R²/平均绝对误差。
-- 写入 `config/user_config.yaml` 的 `chunker.calib`，并置 `calibrated: true`。
+- **只打印**拟合结果与可粘贴到 `src/config.py` 出厂默认的片段（不写 yaml、不写 .env）。
 
-### 1.4 默认系数防"偷懒成正式值"（采纳 claude.AI 追问）
-- 出厂默认系数仅为经验占位（bge-m3/XLM-R 粗比例：中文 ≈1.0–1.1 token/字、英文 ≈1.3 token/词），**非真实校准结果**。
-- config 内显式标 `chunker.calib.calibrated: false`；`chunker.py` 在未校准时打一次性 WARNING。
-- 文档明确：**正式/生产入库前必须先跑 `calibrate_tokenizer.py` 用真实论文样本拟合**；脚本成功后置 `calibrated: true`。
+### 1.4 配置定位：chunker 为纯开发态、出厂硬编码（按用户对齐修订）
+- chunker.* **不进 yaml、不暴露前端**（yaml 是前端配置源，这些是内部调参）。读取顺序为 **.env（开发期临时 bp 调参）> `src/config.py` 硬编码出厂默认**，不进 `reload_config`。
+- 出厂默认系数当前仅为经验占位（中文 ≈1.05 token/字、英文 ≈1.3 token/词），`CHUNK_CALIBRATED` 默认 `False`，`chunker.py` 未校准时打一次性 WARNING。
+- 流程：**打包分发前**跑一次 `calibrate_tokenizer.py`，确认 R² 达标后把 A/B/C 硬编码进 config 出厂默认、并将 `CHUNK_CALIBRATED` fallback 改为 `True`，提交。此后生产用户不接触这些参数。
 
 ---
 
@@ -203,10 +203,9 @@ def _rerank(query, docs, top_n):
 
 ## 配置与打包改动汇总
 
-`src/config.py` 新增常量并**同步进 `reload_config()`**（该函数逐项重读，漏一个会在保存配置后留下脏值）。`_get` 返回 str，需加 int/float/bool 强制转换：
-- `chunker.*`：`CHUNK_SIZE_ZH/EN`、`CHUNK_OVERLAP_ZH/EN`、`CALIB_A/B/C`、`calibrated`
-- `rag.*`：`RAG_HYBRID_ENABLED`、`RAG_FETCH_MULTIPLIER`
-- `rerank.*`：`RERANK_ENABLED`、`RERANK_MODEL`、`RERANK_BASE_URL`、`RERANK_API_KEY`、`RERANK_TIMEOUT`
+`src/config.py` 新增 `_get_typed`（支持 int/float/bool；`_get` 仅返回 str）。常量分两类：
+- `chunker.*`（**纯开发态，已落地**）：`CHUNK_SIZE_ZH/EN`、`CHUNK_OVERLAP_ZH/EN`、`CHUNK_CALIB_A/B/C`、`CHUNK_CALIBRATED`。**只读 .env > 硬编码出厂默认，不进 yaml、不进 `reload_config`、不暴露前端**。
+- `rag.*` / `rerank.*`（Part 2/3，**是否进 yaml/前端待对齐**）：`RAG_HYBRID_ENABLED`、`RAG_FETCH_MULTIPLIER`、`RERANK_ENABLED`、`RERANK_MODEL`、`RERANK_BASE_URL`、`RERANK_API_KEY`、`RERANK_TIMEOUT`。若需用户可调则进 yaml 并**同步进 `reload_config()`**（逐项重读，漏一个会在保存配置后留脏值）；rerank 默认继承嵌入凭证，多数场景无需用户配置。
 
 打包：`requirements.txt` 加 `rank_bm25==0.2.2`；`physics_scholar.spec` 的 `hiddenimports` 加 `rank_bm25`（numpy 已打包，无编译扩展，无需 datas）。**运行期代码（src/ 内）严禁 import torch/transformers/tokenizers/sentence_transformers**（spec 已 exclude，会导致 exe 崩溃）。
 
