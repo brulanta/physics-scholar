@@ -51,9 +51,11 @@ from src.config import (  # noqa: E402
     MAIN_LLM_MODEL,
     PDF_DIR,
 )
+from src import config  # noqa: E402
 from src.core import hash_file, parser  # noqa: E402
 from src.core.chunker import _CJK, _WORD  # noqa: E402
 from src.core.chunker import chunker as new_chunker  # noqa: E402
+from src.rag.tools.rag_tool import _rerank  # noqa: E402  复用生产重排，保证各层跑同一份代码
 
 OUT_DIR = Path(__file__).resolve().parent / "eval_out"
 EVAL_USER = "eval"
@@ -361,6 +363,19 @@ def vector_retrieve(vs: Chroma):
     return fn
 
 
+def vector_rerank_retrieve(vs: Chroma):
+    """稠密过取 RAG_FETCH_MULTIPLIER*topk 候选 → 生产 _rerank 精排到 topk。
+
+    与生产 rag_tool 同一过取/重排逻辑（候选池越大重排天花板越高，见 probe_rerank.py）。
+    """
+    def fn(query: str, topk: int):
+        fetch_k = max(topk, config.RAG_FETCH_MULTIPLIER * topk)
+        cands = vs.similarity_search(query, k=fetch_k, filter=_EVAL_FILTER)
+        return _rerank(query, cands, topk)
+
+    return fn
+
+
 # ── 只读抽检：把"分数"背后的真实内容打印出来，定位 H1(评测器)/H2(检索)──────
 def _overlap_score(retrieved_text: str, gold_text: str):
     """返回 (inter, |retrieved set|, |gold set|, inter/|gold|)；与 is_relevant 同口径（gold 覆盖率）。"""
@@ -456,10 +471,11 @@ def main():
 
     print("\n========== 3) 分层评测 ==========")
     layers = {
-        "baseline": vector_retrieve(vs_baseline),  # 旧切片 + 纯向量
-        "A": vector_retrieve(vs_fixed),            # 新切片 + 纯向量
+        "baseline": vector_retrieve(vs_baseline),       # 旧切片 + 纯向量（测量偏置，见 plan，仅纵向参考）
+        "A": vector_retrieve(vs_fixed),                 # 新切片 + 纯向量
+        "A+rerank": vector_rerank_retrieve(vs_fixed),   # 新切片 + 稠密过取 + cross-encoder 重排（Part 3）
         # "B": Part 2 落地后接入 hybrid_search(vs_fixed, ...)
-        # "C": Part 3 落地后接入 hybrid_search + _rerank
+        # "C": Part 2+3 落地后接入 hybrid_search + _rerank
     }
     summary = {}
     for name, fn in layers.items():

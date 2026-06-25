@@ -118,6 +118,21 @@ CHUNK_CALIB_C = _get_typed("CHUNK_CALIB_C", fallback=3.1937, cast=float)
 CHUNK_CALIBRATED = _get_typed("CHUNK_CALIBRATED", fallback=True, cast=bool)
 ## 这套系数是基于4篇中文+4篇英文、共200个样本拟合得到的,R²=0.9698（此点可以补入plan）
 
+# ── 召回 / 重排 ── 纯开发态配置，不进 yaml、不暴露前端、不进 reload_config ──────
+# 与 chunker.* 同一定位：只读 .env（开发期临时调参）> 下面硬编码出厂默认。
+# 过取倍数：rag_tool 实际向量召回 k*RAG_FETCH_MULTIPLIER 个候选喂给重排，再截到 k。
+# 探针实测（scripts/probe_rerank.py）：候选池越大、重排天花板越高（fetch 10→50 把
+# 命中天花板从 0.30 抬到 0.70），故默认给足 10（k=5 → 过取 ~50）。
+RAG_FETCH_MULTIPLIER = _get_typed("RAG_FETCH_MULTIPLIER", fallback=10, cast=int)
+
+# 重排：硅基流动 bge-reranker-v2-m3，cross-encoder 直接对 (query, chunk) 打分。
+# 凭证/URL 复用 embedding（同账号同 key 可调 /rerank，已据官方文档确认），故不设
+# RERANK_BASE_URL/RERANK_API_KEY——_rerank 调用时直接引用 EMBEDDING_BASE_URL/KEY，
+# 使前端改 embedding key（经 reload_config 刷新）后重排自动跟随。
+RERANK_ENABLED = _get_typed("RERANK_ENABLED", fallback=True, cast=bool)
+RERANK_MODEL = _get("RERANK_MODEL") or "BAAI/bge-reranker-v2-m3"
+RERANK_TIMEOUT = _get_typed("RERANK_TIMEOUT", fallback=20, cast=int)
+
 
 # ── 热重载 ────────────────────────────────────────────────
 def reload_config() -> None:
