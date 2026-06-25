@@ -45,6 +45,34 @@ def _get(env_key: str, *yaml_keys: str, fallback: str = "") -> str:
     return node if isinstance(node, str) else fallback
 
 
+def _get_typed(env_key: str, *yaml_keys: str, fallback, cast):
+    """同 _get，但支持非字符串类型（int/float/bool）。
+
+    .env 读到的恒为字符串，yaml 读到的可能是原生 int/float/bool；统一用 cast 转换。
+    不传 yaml_keys 时只读 .env（用于纯开发态、不暴露给前端 yaml 的配置）。
+    取不到或转换失败时返回 fallback。
+    """
+    raw = os.getenv(env_key)
+    if raw is None and yaml_keys:
+        node = _cfg
+        for k in yaml_keys:
+            if not isinstance(node, dict):
+                node = None
+                break
+            node = node.get(k)
+        raw = node
+    if raw is None or raw == "":
+        return fallback
+    try:
+        if cast is bool:
+            if isinstance(raw, bool):
+                return raw
+            return str(raw).strip().lower() in ("1", "true", "yes", "on")
+        return cast(raw)
+    except (ValueError, TypeError):
+        return fallback
+
+
 # ── 常量（模块级，供其他模块 import）─────────────────────
 MAIN_LLM_API_KEY = _get("MAIN_API_KEY", "main_llm", "api_key")
 MAIN_LLM_BASE_URL = _get("MAIN_BASE_URL", "main_llm", "base_url")
@@ -71,6 +99,24 @@ EMBEDDING_BASE_URL = (
 )
 EMBEDDING_MODEL = _get("EMBEDDING_MODEL", "embedding", "model") or "BAAI/bge-m3"
 
+# ── 切片（chunker）── 纯开发态配置，不进 yaml、不暴露前端 ──────────
+# 切片长度按 bge-m3 token 语义容量度量；length_function 用本地校准公式估算 token：
+#   est_tokens ≈ CHUNK_CALIB_A·中文字数 + CHUNK_CALIB_B·英文词数 + CHUNK_CALIB_C
+# 中英文分路线仅作用于 size/overlap（让两种语言语义容量相近），分隔符统一。
+# 只读 .env（开发期临时调参，如召回测试 bp）> 下面的硬编码出厂默认值。
+CHUNK_SIZE_ZH = _get_typed("CHUNK_SIZE_ZH", fallback=384, cast=int)
+CHUNK_OVERLAP_ZH = _get_typed("CHUNK_OVERLAP_ZH", fallback=76, cast=int)
+CHUNK_SIZE_EN = _get_typed("CHUNK_SIZE_EN", fallback=384, cast=int)
+CHUNK_OVERLAP_EN = _get_typed("CHUNK_OVERLAP_EN", fallback=76, cast=int)
+
+# 校准系数：当前为经验占位（中文≈1.05 token/字、英文≈1.3 token/词），非真实校准。
+# 打包分发前须跑 scripts/calibrate_tokenizer.py 用真实论文样本拟合，把结果硬编码到此处
+# 出厂默认值并将 CHUNK_CALIBRATED fallback 改为 True（不写 yaml，不做前端 UI）。
+CHUNK_CALIB_A = _get_typed("CHUNK_CALIB_A", fallback=1.05, cast=float)
+CHUNK_CALIB_B = _get_typed("CHUNK_CALIB_B", fallback=1.30, cast=float)
+CHUNK_CALIB_C = _get_typed("CHUNK_CALIB_C", fallback=0.0, cast=float)
+CHUNK_CALIBRATED = _get_typed("CHUNK_CALIBRATED", fallback=False, cast=bool)
+
 
 # ── 热重载 ────────────────────────────────────────────────
 def reload_config() -> None:
@@ -80,6 +126,8 @@ def reload_config() -> None:
     global SUB_LLM_API_KEY, SUB_LLM_BASE_URL, SUB_LLM_MODEL
     global JINA_API_KEY, S2_API_KEY, OPENALEX_EMAIL
     global EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
+    # 注：chunker.* 为纯开发态配置（只读 .env > 硬编码默认），不进 yaml，
+    # 故无需在 reload_config（yaml 热重载）中重读。
 
     _cfg = _load_yaml()
 

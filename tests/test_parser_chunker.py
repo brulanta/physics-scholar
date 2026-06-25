@@ -1,8 +1,7 @@
 import pytest
 from src.core.parser import parse_pdf
-from src.core.chunker import chunker
-
-CHUNK_SIZE = 300  # 和chunker里保持一致
+from src.core.chunker import chunker, estimate_tokens, is_chinese
+from src.config import CHUNK_SIZE_EN, CHUNK_SIZE_ZH
 
 
 # ── parser ────────────────────────────────────────────────
@@ -45,7 +44,39 @@ def test_body_and_reference_no_overlap(english_pdf):
         assert ref_start not in result["body"][-500:]
 
 
-# ── chunker ───────────────────────────────────────────────
+# ── chunker（纯单元，无需 PDF 夹具）──────────────────────────
+
+
+def test_empty_input_returns_empty_list():
+    assert chunker("") == []
+    assert chunker("   \n  ") == []
+
+
+def test_is_chinese_detection():
+    assert is_chinese("这是一篇中文论文的摘要，研究了储备池计算。")
+    assert not is_chinese("This is an English abstract about reservoir computing.")
+    assert not is_chinese("")
+
+
+def test_estimate_tokens_monotonic():
+    # 文本越长，估算 token 越多
+    short = "reservoir computing"
+    long = "reservoir computing " * 50
+    assert estimate_tokens(short) < estimate_tokens(long)
+    # 空文本为 0
+    assert estimate_tokens("") == 0
+
+
+def test_long_text_splits_into_multiple_chunks():
+    # 长文本（带分隔符）应被切成多段，且每段在 token 预算内
+    text = ("Photonic reservoir computing exploits optical nonlinearity. " * 200)
+    chunks = chunker(text)
+    assert len(chunks) > 1
+    for c in chunks:
+        assert estimate_tokens(c) <= CHUNK_SIZE_EN * 1.5
+
+
+# ── chunker（依赖 PDF 夹具）─────────────────────────────────
 
 
 def test_returns_list(english_pdf):
@@ -60,12 +91,14 @@ def test_not_empty(english_pdf):
     assert len(chunks) > 0
 
 
-def test_chunk_length_reasonable(english_pdf):
+def test_chunk_token_length_reasonable(english_pdf):
     blocks = parse_pdf(english_pdf)
     chunks = chunker(blocks["body"])
     for chunk in chunks:
-        # 允许150%的余量（最后一个chunk可能较短，强制切分时可能略超）
-        assert len(chunk) <= CHUNK_SIZE * 1.5, f"chunk过长: {len(chunk)}"
+        # 按估算 token 度量，允许 50% 余量（强制切分边界可能略超）
+        assert estimate_tokens(chunk) <= CHUNK_SIZE_EN * 1.5, (
+            f"chunk 估算 token 过长: {estimate_tokens(chunk)}"
+        )
 
 
 def test_chunk_not_too_short(english_pdf):
@@ -82,4 +115,4 @@ def test_chinese_chunker(chinese_pdf):
     chunks = chunker(blocks["body"])
     assert len(chunks) > 0
     for chunk in chunks:
-        assert len(chunk) <= CHUNK_SIZE * 1.5
+        assert estimate_tokens(chunk) <= CHUNK_SIZE_ZH * 1.5
