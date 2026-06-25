@@ -15,7 +15,8 @@ PhysicsScholar 的本地 RAG 召回链存在一个入库期 bug，并缺少现�
 已确认的决策：
 - 切片 length_function = **校准的字符/词数公式**（零依赖、离线安全；用免费 bge-m3 的 `usage.prompt_tokens` 作 ground-truth 拟合系数）。
 - BM25 档位 = **rank_bm25 + 轻量分词**（英文 `\w+`，中文字二元组），不引 jieba。
-- 重排 = 硅基流动 **BAAI/bge-reranker-v2-m3**（`/rerank` 端点）。
+- 重排 = 硅基流动 **BAAI/bge-reranker-v2-m3**（`/rerank` 端点），**与 embedding 同一套开放逻辑**：url/model 定死、**复用 `EMBEDDING_API_KEY`**（已据官方文档确认硅基流动同一 key 可调 `/rerank`），**不新增前端配置**；`top_n`/超时等参数走 .env/硬编码默认。
+- 多路召回与重排的开关/调参（`RAG_HYBRID_ENABLED`、`RAG_FETCH_MULTIPLIER`、`RERANK_*`）一律 **纯开发态**（只读 .env > 硬编码默认，**不进 yaml、不暴露前端、不进 `reload_config`**），与 chunker 配置同一定位。
 - 评测 = **分层对比 + 文本重叠判定，~15–25 题**，独立放 `scripts/eval_retrieval.py`，不并入 `eval_framework`。
 
 ---
@@ -145,24 +146,27 @@ def _rrf_merge(ranked_lists, c=60):
 
 ## Part 3 — 重排（硅基流动 bge-reranker-v2-m3）
 
-**改动文件**：`src/rag/tools/rag_tool.py`（加 `_rerank`），`src/config.py`（+ `reload_config`）。
+**改动文件**：`src/rag/tools/rag_tool.py`（加 `_rerank`），`src/config.py`（仅加纯开发态常量，**不进 `reload_config`**）。
+
+**凭证复用（关键）**：重排**复用 embedding 的 url/key**，且在**调用时**直接引用 `config.EMBEDDING_BASE_URL` / `config.EMBEDDING_API_KEY`（而非 import 期快照），这样前端改了 embedding key、`reload_config` 刷新后重排自动跟随，无需把 key 纳入 reload。故**不新增** `RERANK_BASE_URL` / `RERANK_API_KEY` 常量。
 
 ```python
-import requests   # 已是依赖，无 torch
+import requests                 # 已是依赖，无 torch
+from src import config          # 调用时取 EMBEDDING_*，跟随 reload_config
 
 def _rerank(query, docs, top_n):
-    if not RERANK_ENABLED or not docs:
+    if not config.RERANK_ENABLED or not docs:
         return docs[:top_n]
     try:
         r = requests.post(
-            f"{RERANK_BASE_URL}/rerank",
-            json={"model": RERANK_MODEL, "query": query,
+            f"{config.EMBEDDING_BASE_URL}/rerank",                 # 复用 embedding base_url
+            json={"model": config.RERANK_MODEL, "query": query,
                   "documents": [d.page_content for d in docs],
                   "top_n": min(top_n, len(docs)), "return_documents": False},
-            headers={"Authorization": f"Bearer {RERANK_API_KEY}"},
-            timeout=RERANK_TIMEOUT)
+            headers={"Authorization": f"Bearer {config.EMBEDDING_API_KEY}"},  # 复用 embedding key
+            timeout=config.RERANK_TIMEOUT)
         r.raise_for_status()
-        order = [it["index"] for it in r.json()["results"]]   # API 已按相关度降序
+        order = [it["index"] for it in r.json()["results"]]   # results 已按 relevance_score 降序
         return [docs[i] for i in order][:top_n]
     except Exception as e:
         logger.warning("[RAG] rerank 失败，回退融合顺序: %s", e)
@@ -171,7 +175,13 @@ def _rerank(query, docs, top_n):
 
 接入顺序（`rag_tool` 内）：`hybrid_search(...)` 过取候选 → `_rerank(query, 候选, k)` → `format_context`。
 
-新增 config（默认继承嵌入凭证 → 不配也能用）：`RERANK_ENABLED=true`、`RERANK_MODEL=BAAI/bge-reranker-v2-m3`、`RERANK_BASE_URL`(默认 `EMBEDDING_BASE_URL`)、`RERANK_API_KEY`(默认 `EMBEDDING_API_KEY`)、`RERANK_TIMEOUT=20`。
+新增 config（**纯开发态：.env > 硬编码默认，不进 yaml/前端/`reload_config`**）：`RERANK_ENABLED=true`、`RERANK_MODEL="BAAI/bge-reranker-v2-m3"`、`RERANK_TIMEOUT=20`。（`top_n` 即工具的 `k`；候选池大小由 `RAG_FETCH_MULTIPLIER` 控。）
+
+### Part 3 附：硅基流动 `/rerank` 契约（据官方文档核实，供压缩上下文后查阅）
+- **端点**：`POST {EMBEDDING_BASE_URL}/rerank`（即 `https://api.siliconflow.cn/v1/rerank`）。
+- **鉴权**：`Authorization: Bearer {EMBEDDING_API_KEY}`（与 embedding 同账号同 key，已确认可用）。
+- **请求体**：`model`（必填，`BAAI/bge-reranker-v2-m3`）、`query`（必填，len≥1）、`documents`（必填，字符串数组，≥1 条）、`top_n`（返回条数，≥1）、`return_documents`（默认 `false`，置 false 只回 index）、`max_chunks_per_doc`（仅 bge-reranker-v2-m3 等支持，默认 1024）、`overlap_tokens`（0–80）。
+- **响应体**：`{id, results: [{index, relevance_score, ...}], meta}`；`results` 已按相关度降序，用 `index` 回映射原 `documents` 顺序即可。
 
 ---
 
@@ -203,9 +213,10 @@ def _rerank(query, docs, top_n):
 
 ## 配置与打包改动汇总
 
-`src/config.py` 新增 `_get_typed`（支持 int/float/bool；`_get` 仅返回 str）。常量分两类：
-- `chunker.*`（**纯开发态，已落地**）：`CHUNK_SIZE_ZH/EN`、`CHUNK_OVERLAP_ZH/EN`、`CHUNK_CALIB_A/B/C`、`CHUNK_CALIBRATED`。**只读 .env > 硬编码出厂默认，不进 yaml、不进 `reload_config`、不暴露前端**。
-- `rag.*` / `rerank.*`（Part 2/3，**是否进 yaml/前端待对齐**）：`RAG_HYBRID_ENABLED`、`RAG_FETCH_MULTIPLIER`、`RERANK_ENABLED`、`RERANK_MODEL`、`RERANK_BASE_URL`、`RERANK_API_KEY`、`RERANK_TIMEOUT`。若需用户可调则进 yaml 并**同步进 `reload_config()`**（逐项重读，漏一个会在保存配置后留脏值）；rerank 默认继承嵌入凭证，多数场景无需用户配置。
+`src/config.py` 新增 `_get_typed`（支持 int/float/bool；`_get` 仅返回 str）。**全部新增常量均为纯开发态**：只读 .env > 硬编码出厂默认，**不进 yaml、不暴露前端、不进 `reload_config`**（与 chunker 同一定位，故 `reload_config` 无需新增任何项）。
+- `chunker.*`（**已落地**）：`CHUNK_SIZE_ZH/EN`、`CHUNK_OVERLAP_ZH/EN`、`CHUNK_CALIB_A/B/C`、`CHUNK_CALIBRATED`。
+- `rag.*`（Part 2）：`RAG_HYBRID_ENABLED`、`RAG_FETCH_MULTIPLIER`。
+- `rerank.*`（Part 3）：`RERANK_ENABLED`、`RERANK_MODEL`、`RERANK_TIMEOUT`。**不设** `RERANK_BASE_URL` / `RERANK_API_KEY`——`_rerank` 调用时直接引用 `config.EMBEDDING_BASE_URL` / `config.EMBEDDING_API_KEY`，使前端改 embedding key 后（经 `reload_config` 刷新）重排自动跟随。
 
 打包：`requirements.txt` 加 `rank_bm25==0.2.2`；`physics_scholar.spec` 的 `hiddenimports` 加 `rank_bm25`（numpy 已打包，无编译扩展，无需 datas）。**运行期代码（src/ 内）严禁 import torch/transformers/tokenizers/sentence_transformers**（spec 已 exclude，会导致 exe 崩溃）。
 
@@ -218,6 +229,16 @@ def _rerank(query, docs, top_n):
 3. **Part 2**（混合检索）→ 跑 B。
 4. **Part 3**（重排）→ 跑 C。
 每步跑一遍评测，逐层确认增益归因。
+
+---
+
+## 进度 / 状态（截至当前会话，便于上下文压缩后续接）
+
+- **Part 1 切片修复**：✅ 已实现并提交 `4107baf`；计划文档对齐提交 `14f34f5`。`chunker.py`/`config.py`/`calibrate_tokenizer.py`/测试均已落地，`CHUNK_CALIBRATED` 仍为 `False`（待打包前跑校准脚本拟合后硬编码）。
+- **Part 4 评测脚手架（baseline/A）**：✅ 已实现并提交 `847caf2`（`scripts/eval_retrieval.py`，双 collection + LLM 合成测试集 + Recall@K/MRR）。用户正在本机配好凭证后跑 baseline/A 取数。
+- **Part 2 多路召回**：🚧 进行中。**已做（未提交）**：`.gitignore` 加 `.claude/`；`requirements.txt`（UTF-16）加 `rank_bm25==0.2.2`。**待做**：`physics_scholar.spec` 的 `hiddenimports` 加 `'rank_bm25'`；`config.py` 加 `RAG_HYBRID_ENABLED`/`RAG_FETCH_MULTIPLIER`；`rag_tool.py` 加 `hybrid_search`/`_rrf_merge`/`_bm25_tokenize`、`vs` 改惰性、按开关回退；`eval_retrieval.py` 接入 `B` 层（复用生产 `hybrid_search`）；装 `rank_bm25` 后离线验证 RRF/分词；提交。
+- **Part 3 重排**：⬜ 未开始（契约与配置定位已在上文敲定）。
+- **注意**：`src/config.py` 有用户本地未提交改动（在 `reload_config` 补了 `OPENALEX_API_KEY`），属用户有意改动，勿回退；在其基础上叠加 Part 2 常量即可。
 
 ---
 

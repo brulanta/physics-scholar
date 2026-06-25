@@ -26,6 +26,7 @@ models/
 # ========= IDE =========
 .vscode/
 .idea/
+.claude/
 
 # ========= Logs =========
 *.log
