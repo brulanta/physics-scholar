@@ -55,7 +55,7 @@ from src import config  # noqa: E402
 from src.core import hash_file, parser  # noqa: E402
 from src.core.chunker import _CJK, _WORD  # noqa: E402
 from src.core.chunker import chunker as new_chunker  # noqa: E402
-from src.rag.tools.rag_tool import _rerank  # noqa: E402  复用生产重排，保证各层跑同一份代码
+from src.rag.tools.rag_tool import _rerank, hybrid_search  # noqa: E402  复用生产重排/混合检索，保证各层跑同一份代码
 
 OUT_DIR = Path(__file__).resolve().parent / "eval_out"
 EVAL_USER = "eval"
@@ -376,6 +376,26 @@ def vector_rerank_retrieve(vs: Chroma):
     return fn
 
 
+def hybrid_retrieve(vs: Chroma):
+    """B 层：生产 hybrid_search（向量 + BM25 RRF）过取，截到 topk，不重排。"""
+    def fn(query: str, topk: int):
+        fetch_k = max(topk, config.RAG_FETCH_MULTIPLIER * topk)
+        cands = hybrid_search(query, search_filter=_EVAL_FILTER, fetch_k=fetch_k, store=vs)
+        return cands[:topk]
+
+    return fn
+
+
+def hybrid_rerank_retrieve(vs: Chroma):
+    """C 层：生产 hybrid_search 过取 → 生产 _rerank 精排到 topk（线上完整路径）。"""
+    def fn(query: str, topk: int):
+        fetch_k = max(topk, config.RAG_FETCH_MULTIPLIER * topk)
+        cands = hybrid_search(query, search_filter=_EVAL_FILTER, fetch_k=fetch_k, store=vs)
+        return _rerank(query, cands, topk)
+
+    return fn
+
+
 # ── 只读抽检：把"分数"背后的真实内容打印出来，定位 H1(评测器)/H2(检索)──────
 def _overlap_score(retrieved_text: str, gold_text: str):
     """返回 (inter, |retrieved set|, |gold set|, inter/|gold|)；与 is_relevant 同口径（gold 覆盖率）。"""
@@ -474,8 +494,8 @@ def main():
         "baseline": vector_retrieve(vs_baseline),       # 旧切片 + 纯向量（测量偏置，见 plan，仅纵向参考）
         "A": vector_retrieve(vs_fixed),                 # 新切片 + 纯向量
         "A+rerank": vector_rerank_retrieve(vs_fixed),   # 新切片 + 稠密过取 + cross-encoder 重排（Part 3）
-        # "B": Part 2 落地后接入 hybrid_search(vs_fixed, ...)
-        # "C": Part 2+3 落地后接入 hybrid_search + _rerank
+        "B": hybrid_retrieve(vs_fixed),                 # 新切片 + 向量+BM25 RRF 融合，不重排（Part 2）
+        "C": hybrid_rerank_retrieve(vs_fixed),          # 新切片 + 混合过取 + cross-encoder 重排（Part 2+3，线上完整路径）
     }
     summary = {}
     for name, fn in layers.items():

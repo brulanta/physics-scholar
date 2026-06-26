@@ -237,13 +237,8 @@ def _rerank(query, docs, top_n):
 - **Part 1 切片修复**：✅ 已实现并提交 `4107baf`；计划文档对齐提交 `14f34f5`。`chunker.py`/`config.py`/`calibrate_tokenizer.py`/测试均已落地。**校准已完成**：`calibrate_tokenizer.py` 用 4 篇中文+4 篇英文、共 200 个样本拟合，**R²=0.9698**（>0.95 目标达标），系数已硬编码进 `config.py` 出厂默认（`CHUNK_CALIB_A=0.9491 / B=1.6108 / C=3.1937`），`CHUNK_CALIBRATED` fallback 改为 `True`。
 - **Part 4 评测脚手架（baseline/A）**：✅ 已实现并提交 `847caf2`（`scripts/eval_retrieval.py`，双 collection + LLM 合成测试集 + Recall@K/MRR）。用户正在本机配好凭证后跑 baseline/A 取数。
 - **Part 3 重排**：✅ **已实现并提交 `307a202`**。`config.py` 加 `RERANK_ENABLED/MODEL/TIMEOUT` + `RAG_FETCH_MULTIPLIER`（纯开发态，不进 yaml/reload_config）；`rag_tool.py` 加 `_rerank`（复用 `EMBEDDING_*`、失败优雅降级）并把检索流改为「过取 k*MULT → 重排到 k → format」；`eval_retrieval.py` 接 `A+rerank` 层；新增 `scripts/probe_rerank.py` 离线探针。**生产路径实测（n=20，eval 过取 100）**：A+rerank **R@1 0.70 / R@3 0.80 / R@10 0.80 / MRR 0.7417**（A 纯稠密 0.05 / 0.30 / 0.1196）——兑现探针预测。
-- **Part 2 多路召回**：🚧 **未开始**（换机后旧"已做未提交"的痕迹随损坏的 `data/` 一并丢失，本机工作树干净）。`config.py` 的 OPENALEX 本地改动是旧会话误记，**实际早已提交，工作树无该改动**（已 git diff 核实）。**下一步 todo（明日另一台机器接续）**：
-  1. `requirements.txt`（UTF-16，注意编码别写成 UTF-8）加 `rank_bm25==0.2.2`；`physics_scholar.spec` `hiddenimports`（第 44 行）加 `'rank_bm25'`；本机 `pip install rank_bm25==0.2.2`（当前**未安装**，import 会失败）。
-  2. `config.py` 加 `RAG_HYBRID_ENABLED`（纯开发态 kill switch，默认 `True`，回退纯向量用）。`RAG_FETCH_MULTIPLIER` 已随 Part 3 落地，复用即可。
-  3. `rag_tool.py` 加纯函数 `_bm25_tokenize` / `_rrf_merge` / `hybrid_search`（见 Part 2 §2.1–2.3）；检索流改为 `HYBRID_ENABLED ? hybrid_search(过取) : 纯向量过取` → 喂给已有 `_rerank`。唯一键 `(doc_id, section, chunk_index)`。
-  4. `eval_retrieval.py` 接 `B`（hybrid 无重排）/ `C`（hybrid+rerank）层，复用生产 `hybrid_search`。
-  5. 装 `rank_bm25` 后现写离线探针验证分词/RRF（**勿信 `eval_framework` 陈旧测试**），再跑 baseline/A/B/C 分层表。
-  6. 提交 Part 2。
+- **Part 2 多路召回**：✅ **代码已落地（待提交本次会话）**。`rank_bm25==0.2.2` 已装、已在 `requirements.txt`（UTF-16）、`physics_scholar.spec` `hiddenimports` 加 `'rank_bm25'`；`config.py` 加 `RAG_HYBRID_ENABLED`（纯开发态 kill switch，默认 `True`）；`rag_tool.py` 加纯函数 `_bm25_tokenize`（英文按词 + 中文单字 + 字二元组）/ `_chunk_key` / `_rrf_merge`（RRF c=60，唯一键 `(doc_id, section, chunk_index)`）/ `hybrid_search`（向量 + BM25 同 filter 取数、RRF 融合，`store` 参数默认生产单例、eval 可传独立 collection）；检索流改为 `HYBRID_ENABLED ? hybrid_search(过取) : 纯向量过取` → 喂已有 `_rerank`；`eval_retrieval.py` 接 `B`（hybrid 无重排）/ `C`（hybrid+rerank）层，复用生产 `hybrid_search`；新增 `scripts/probe_bm25.py` 离线探针（零网络，**12/12 断言通过**：分词口径、BM25 精确术语命中、RRF 去重/融合/唯一键含 section）。
+  - **下一步 todo（评测取数，用户本机手动跑）**：`python scripts/eval_retrieval.py`（`data/`+`scripts/eval_out` 已双机同步、凭证就绪、复用已入库 collection 不 `--reingest`），看 `summary.json` 的 **B / C 层是否抬过 A+rerank 的 0.70 天花板**——B 验证 BM25 把稠密埋掉的精确术语题送进候选池，C 是线上完整路径。若 B/C 抬高 R@K，则兑现「BM25 抬候选池天花板」预期；若无增益需查分词/融合。拿到数字后回填本节并提交评测结论。
   - **靶向预期**：探针已证 rerank 天花板卡在 0.70，残留 30% 是稠密过取 50 都埋在 rank>50 的 gold——BM25 精确术语命中正是把这些题送进候选池的手段，B/C 层用来验证此增益。
 
 ---

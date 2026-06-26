@@ -1,5 +1,8 @@
 import requests  # 已是依赖（无 torch），用于调硅基流动 /rerank
+from rank_bm25 import BM25Okapi
+from langchain_core.documents import Document
 from src.core.ingestor import get_vectorstore
+from src.core.chunker import _CJK, _WORD  # 复用 chunker 的 CJK/英文词正则，分词口径一致
 from src import config  # 调用时取 EMBEDDING_*/RERANK_*，跟随 reload_config
 from pydantic import BaseModel, Field
 from typing import Literal
@@ -9,6 +12,71 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 vs = get_vectorstore()
+
+# 全库 BM25 一次抓取的 chunk 上限（本地单用户库通常数百~数千，足够覆盖；防极端爆内存）。
+_BM25_CORPUS_LIMIT = 5000
+
+
+def _bm25_tokenize(text: str) -> list[str]:
+    """轻量分词：英文按词、中文按单字 + 字二元组（兼顾召回与精度），零额外打包。
+
+    与 chunker 复用同一套 CJK/英文词正则。中文不引 jieba：单字保召回，
+    相邻二元组补精度（如「滤波」「带宽」作为整体命中）。
+    """
+    low = text.lower()
+    words = _WORD.findall(low)
+    cjk = _CJK.findall(low)  # 单字列表
+    bigrams = [cjk[i] + cjk[i + 1] for i in range(len(cjk) - 1)]
+    return words + cjk + bigrams
+
+
+def _chunk_key(doc) -> tuple:
+    """chunk 唯一键 = (doc_id, section, chunk_index)，对应 chroma id f'{doc_id}_{chunk_index}'。"""
+    m = doc.metadata
+    return (m.get("doc_id"), m.get("section"), m.get("chunk_index"))
+
+
+def _rrf_merge(ranked_lists: list, c: int = 60) -> list:
+    """Reciprocal Rank Fusion：按各路名次融合去重，无需校准不同分数量纲。
+
+    分数 = Σ 1/(c + rank)；同一 chunk 在多路命中得分累加。按融合分降序返回。
+    """
+    score: dict = {}
+    keep: dict = {}
+    for docs in ranked_lists:
+        for rank, doc in enumerate(docs):
+            key = _chunk_key(doc)
+            score[key] = score.get(key, 0.0) + 1.0 / (c + rank)
+            keep[key] = doc
+    return [keep[key] for key in sorted(score, key=score.get, reverse=True)]
+
+
+def hybrid_search(query: str, *, search_filter: dict, fetch_k: int, store=None) -> list:
+    """多路召回：向量 + BM25，RRF 融合去重，返回 ≤fetch_k 个候选（喂给重排）。
+
+    向量路与 BM25 路都在同一 search_filter（多租户隔离）内取数，保证不串户。
+    BM25 在「该过滤命中的全部 chunk」上现建索引（本地库规模可接受）。
+    store 默认用生产单例 vs；eval 脚本可传入独立 collection 复用同一份逻辑。
+    """
+    store = store if store is not None else vs
+    vec_docs = store.similarity_search(query, k=fetch_k, filter=search_filter)
+
+    corpus = store._collection.get(
+        where=search_filter,
+        include=["documents", "metadatas"],
+        limit=_BM25_CORPUS_LIMIT,
+    )
+    bm25_docs = []
+    if corpus["documents"]:
+        bm25 = BM25Okapi([_bm25_tokenize(d) for d in corpus["documents"]])
+        scores = bm25.get_scores(_bm25_tokenize(query))
+        top = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:fetch_k]
+        bm25_docs = [
+            Document(page_content=corpus["documents"][i], metadata=corpus["metadatas"][i])
+            for i in top
+        ]
+
+    return _rrf_merge([vec_docs, bm25_docs])[:fetch_k]
 
 
 def _rerank(query: str, docs: list, top_n: int) -> list:
@@ -113,17 +181,22 @@ def make_rag_tool(user_id: str):
 
         # 1. 调用外部的 build_filter，逻辑清晰且可复用
         search_filter = build_filter(user_id=user_id, section=section, doc_id=doc_id)
-        # 2. 向量过取：召回 k*RAG_FETCH_MULTIPLIER 个候选喂给重排，重排再截到 k。
-        #    探针证实候选池越大重排天花板越高，且重排能把真 chunk 顶进 top-3。
+        # 2. 过取候选喂给重排：k*RAG_FETCH_MULTIPLIER 个。探针证实候选池越大重排天花板
+        #    越高。HYBRID 开启时走「向量 + BM25，RRF 融合」（BM25 把精确术语命中的题
+        #    送进候选池）；关闭时回退纯向量（kill switch）。
         fetch_k = max(k, k * config.RAG_FETCH_MULTIPLIER)
-        candidates = vs.similarity_search(query, k=fetch_k, filter=search_filter)
+        if config.RAG_HYBRID_ENABLED:
+            candidates = hybrid_search(query, search_filter=search_filter, fetch_k=fetch_k)
+        else:
+            candidates = vs.similarity_search(query, k=fetch_k, filter=search_filter)
         # 3. cross-encoder 精排到 k（失败优雅降级为候选原序截 k）
         docs = _rerank(query, candidates, k)
         logger.info(
-            "[RAG] User: %s | Query: %s | Doc_ID: %s | 过取: %d→重排: %d",
+            "[RAG] User: %s | Query: %s | Doc_ID: %s | hybrid: %s | 过取: %d→重排: %d",
             user_id,
             query,
             doc_id or "All",
+            config.RAG_HYBRID_ENABLED,
             len(candidates),
             len(docs),
         )

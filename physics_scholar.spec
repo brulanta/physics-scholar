@@ -42,6 +42,8 @@ a = Analysis(
         (str(ROOT / 'frontend' / 'public' / 'favicon.ico'), 'assets'),  # 打包到_internal/assets/下
     ],
     hiddenimports=[
+        # 多路召回 BM25（纯 Python + numpy，无编译扩展）
+        'rank_bm25',
         # 系统托盘
         'pystray',
         'pystray._win32',

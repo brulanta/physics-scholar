@@ -125,6 +125,11 @@ CHUNK_CALIBRATED = _get_typed("CHUNK_CALIBRATED", fallback=True, cast=bool)
 # 命中天花板从 0.30 抬到 0.70），故默认给足 10（k=5 → 过取 ~50）。
 RAG_FETCH_MULTIPLIER = _get_typed("RAG_FETCH_MULTIPLIER", fallback=10, cast=int)
 
+# 多路召回 kill switch：True 时走「向量 + BM25，RRF 融合」过取候选；False 回退纯向量过取。
+# BM25 靠精确术语（MPF/滤波带宽/Q值等）命中稠密检索捞不到的题，把它们送进候选池抬高
+# 重排天花板（探针证实残留 30% 是稠密过取 50 都埋在 rank>50 的 gold）。
+RAG_HYBRID_ENABLED = _get_typed("RAG_HYBRID_ENABLED", fallback=True, cast=bool)
+
 # 重排：硅基流动 bge-reranker-v2-m3，cross-encoder 直接对 (query, chunk) 打分。
 # 凭证/URL 复用 embedding（同账号同 key 可调 /rerank，已据官方文档确认），故不设
 # RERANK_BASE_URL/RERANK_API_KEY——_rerank 调用时直接引用 EMBEDDING_BASE_URL/KEY，
