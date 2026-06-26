@@ -61,6 +61,8 @@ Tool results are only visible within the current graph loop — they do not pers
 
 `chat()` and `regenerate()` are the entry points; both build a fresh agent per call via `build_agent(user_id)` (tools are closures over `user_id`).
 
+When changing CoT / tool-call behavior, the logic spans **three places**: `graph.py` (prefill + guard), the prompt modules in `src/rag/prompts/`, and `trim_thinking.py` (strips CoT from output before storage/display).
+
 ### Agent tools (`src/rag/tools/`) — tiered, not equal
 Defined retrieval hierarchy (the prompt instructs the agent to follow coarse→fine, stop when sufficient):
 - `rag_tool` — local vector search over user's ingested papers (primary; supports whole-library and single-doc targeted search)
@@ -81,12 +83,19 @@ Defined retrieval hierarchy (the prompt instructs the agent to follow coarse→f
 
 Embedding model is **fixed to `BAAI/bge-m3`** (via SiliconFlow API, not local). Changing the embedding model invalidates all existing vectors, so it is intentionally not user-selectable.
 
-### Data (runtime, gitignored)
-`data/pdfs/` (uploaded papers), `data/chroma_db/` (vectors), `data/SQLite/app.db` (sessions, messages, paper registry). Messages form a tree supporting regenerate/edit branches (`memory.py` / `ConversationRepo`).
+The LLM must be OpenAI-compatible (configured via `langchain_openai.ChatOpenAI`). A separate optional "sub LLM" is used only for Jina full-text scoring, falling back to the main LLM.
 
-## Notes
-- LLM must be OpenAI-compatible; configured via `langchain_openai.ChatOpenAI`. A separate optional "sub LLM" is used only for Jina full-text scoring (falls back to main LLM).
-- When working on CoT / tool-call behavior, remember the logic spans **three places**: `graph.py` (prefill + guard), the prompt modules, and `trim_thinking.py` (output cleanup).
-- **Workflow across machines.** Development spans multiple machines (home / company), synced via git. When wrapping up a work session (or when the user signals network instability / "明日换机继续"), **push the current branch** so the next machine can pull — don't assume `main`; push to whatever branch is checked out (the long-running RAG work lives on `temp-work-RAG-Strategy-Adjustment`). The plan file (`plan/rag-fix-upgrade-plan.md`) is the cross-session handoff: it carries the **next-stage todo**, not a log of the current stage's内容; keep its progress/状态 section honest against `git log` before pushing.
-- **`data/` is gitignored and does NOT travel with git.** PDFs, ChromaDB vectors, SQLite — none of it is committed. If a task's continuation on another machine depends on local data assets (e.g. ingested `eval_baseline`/`eval_fixed` collections, the `data/pdfs/` corpus, `scripts/eval_out/testset.json`), **remind the user in-session to manually transfer them** (or warn that re-ingesting will burn embedding API额度). Do not write such transfer reminders into the plan — they are this-session logistics, not next-stage work.
-- **Treat `tests/`, `scripts/`, `eval_framework/`, `seed_builder/` as untrusted-by-default.** Many files there are version-drifted or one-off scripts that only worked in their original context; failures are usually stale assertions or missing data fixtures (e.g. specific PDFs lost when `data/` was rebuilt), **not** real signals about current code. Before running any as a correctness gate, **read it and check git provenance** (was it authored for the current architecture / by the current workflow?). Prefer **writing fresh, purpose-built verification** (a throwaway probe, an end-to-end run of the current pipeline) over reviving old assertions — making stale tests green is a time sink and yields false confidence. Files demonstrably current and owned by the active plan (e.g. `scripts/eval_retrieval.py`, `scripts/probe_rerank.py` from the RAG-fix work) are the exception: extend them, don't rewrite.
+### Data (runtime, gitignored)
+`data/pdfs/` (uploaded papers), `data/chroma_db/` (vectors), `data/SQLite/app.db` (sessions, messages, paper registry). Messages form a tree supporting regenerate/edit branches (`memory.py` / `ConversationRepo`). **`data/` is gitignored and does NOT travel with git** — none of it is committed.
+
+## Cross-machine workflow
+
+Development spans multiple machines (home / company), synced via git.
+
+- **Push the current branch when wrapping up** (or when the user signals network instability / "明日换机继续") so the next machine can pull — don't assume `main`; push to whatever branch is checked out.
+- **The plan file (`plan/rag-fix-upgrade-plan.md`) is the cross-session handoff**: it carries the **next-stage todo**, not a log of the current stage's内容; keep its progress/状态 section honest against `git log` before pushing.
+- **`data/` does not travel with git** (see Architecture > Data). If a continuation on another machine depends on local data assets (ingested `eval_baseline`/`eval_fixed` collections, the `data/pdfs/` corpus, `scripts/eval_out/testset.json`), **remind the user in-session to manually transfer them** (or warn that re-ingesting burns embedding API额度). Don't write such transfer reminders into the plan — they are this-session logistics, not next-stage work.
+
+## Trust boundary
+
+**Treat `tests/`, `scripts/`, `eval_framework/`, `seed_builder/` as untrusted-by-default.** Many are version-drifted or one-off scripts; failures there are usually stale assertions or missing data fixtures, **not** signals about current code. Before relying on one as a correctness gate, read it and check git provenance; prefer writing fresh, purpose-built verification over reviving old assertions. Exception: files demonstrably current and owned by the active plan (e.g. `scripts/eval_retrieval.py`, `scripts/probe_rerank.py`) — extend them, don't rewrite.
