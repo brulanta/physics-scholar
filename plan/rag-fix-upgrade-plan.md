@@ -237,9 +237,7 @@ def _rerank(query, docs, top_n):
 - **Part 1 切片修复**：✅ 已实现并提交 `4107baf`；计划文档对齐提交 `14f34f5`。`chunker.py`/`config.py`/`calibrate_tokenizer.py`/测试均已落地。**校准已完成**：`calibrate_tokenizer.py` 用 4 篇中文+4 篇英文、共 200 个样本拟合，**R²=0.9698**（>0.95 目标达标），系数已硬编码进 `config.py` 出厂默认（`CHUNK_CALIB_A=0.9491 / B=1.6108 / C=3.1937`），`CHUNK_CALIBRATED` fallback 改为 `True`。
 - **Part 4 评测脚手架（baseline/A）**：✅ 已实现并提交 `847caf2`（`scripts/eval_retrieval.py`，双 collection + LLM 合成测试集 + Recall@K/MRR）。用户正在本机配好凭证后跑 baseline/A 取数。
 - **Part 3 重排**：✅ **已实现并提交 `307a202`**。`config.py` 加 `RERANK_ENABLED/MODEL/TIMEOUT` + `RAG_FETCH_MULTIPLIER`（纯开发态，不进 yaml/reload_config）；`rag_tool.py` 加 `_rerank`（复用 `EMBEDDING_*`、失败优雅降级）并把检索流改为「过取 k*MULT → 重排到 k → format」；`eval_retrieval.py` 接 `A+rerank` 层；新增 `scripts/probe_rerank.py` 离线探针。**生产路径实测（n=20，eval 过取 100）**：A+rerank **R@1 0.70 / R@3 0.80 / R@10 0.80 / MRR 0.7417**（A 纯稠密 0.05 / 0.30 / 0.1196）——兑现探针预测。
-- **Part 2 多路召回**：✅ **代码已落地（待提交本次会话）**。`rank_bm25==0.2.2` 已装、已在 `requirements.txt`（UTF-16）、`physics_scholar.spec` `hiddenimports` 加 `'rank_bm25'`；`config.py` 加 `RAG_HYBRID_ENABLED`（纯开发态 kill switch，默认 `True`）；`rag_tool.py` 加纯函数 `_bm25_tokenize`（英文按词 + 中文单字 + 字二元组）/ `_chunk_key` / `_rrf_merge`（RRF c=60，唯一键 `(doc_id, section, chunk_index)`）/ `hybrid_search`（向量 + BM25 同 filter 取数、RRF 融合，`store` 参数默认生产单例、eval 可传独立 collection）；检索流改为 `HYBRID_ENABLED ? hybrid_search(过取) : 纯向量过取` → 喂已有 `_rerank`；`eval_retrieval.py` 接 `B`（hybrid 无重排）/ `C`（hybrid+rerank）层，复用生产 `hybrid_search`；新增 `scripts/probe_bm25.py` 离线探针（零网络，**12/12 断言通过**：分词口径、BM25 精确术语命中、RRF 去重/融合/唯一键含 section）。
-  - **下一步 todo（评测取数，用户本机手动跑）**：`python scripts/eval_retrieval.py`（`data/`+`scripts/eval_out` 已双机同步、凭证就绪、复用已入库 collection 不 `--reingest`），看 `summary.json` 的 **B / C 层是否抬过 A+rerank 的 0.70 天花板**——B 验证 BM25 把稠密埋掉的精确术语题送进候选池，C 是线上完整路径。若 B/C 抬高 R@K，则兑现「BM25 抬候选池天花板」预期；若无增益需查分词/融合。拿到数字后回填本节并提交评测结论。
-  - **靶向预期**：探针已证 rerank 天花板卡在 0.70，残留 30% 是稠密过取 50 都埋在 rank>50 的 gold——BM25 精确术语命中正是把这些题送进候选池的手段，B/C 层用来验证此增益。
+- **Part 2 多路召回**：✅ **已落地并实测验证**（提交 `6659717`；测试夹具修复随后提交）。`rank_bm25==0.2.2` 已装、已在 `requirements.txt`（UTF-16）、`physics_scholar.spec` `hiddenimports` 加 `'rank_bm25'`；`config.py` 加 `RAG_HYBRID_ENABLED`（纯开发态 kill switch，默认 `True`）；`rag_tool.py` 加纯函数 `_bm25_tokenize`（英文按词 + 中文单字 + 字二元组）/ `_chunk_key` / `_rrf_merge`（RRF c=60，唯一键 `(doc_id, section, chunk_index)`）/ `hybrid_search`（向量 + BM25 同 filter 取数、RRF 融合，`store` 参数默认生产单例、eval 可传独立 collection）；检索流改为 `HYBRID_ENABLED ? hybrid_search(过取) : 纯向量过取` → 喂已有 `_rerank`；`eval_retrieval.py` 接 `B`（hybrid 无重排）/ `C`（hybrid+rerank）层，复用生产 `hybrid_search`；新增 `scripts/probe_bm25.py` 离线探针（零网络，**12/12 断言通过**）。**分层评测实测见下方「Part 2 B/C 评测结果」。**
 
 ---
 
@@ -330,3 +328,28 @@ def _rerank(query, docs, top_n):
 - 自定义 BM25 风险靠选用 `rank_bm25` 成熟库规避；中文字二元组分词的检索效果由 B 层评测兜底验证。
 - 重排/重入库消耗付费/限频 API：重排有 kill switch + 超时降级；eval 双 collection 入库加 `--reingest` 门控并持久化。
 - 切片参数变更会改变 `chunk_count` 与 chroma id：**已入库旧文档不会自动重切**（可接受；评测用全新独立 collection 规避对比污染）。
+
+---
+
+## Part 2 B/C 评测结果（2026-06-26）
+
+`python scripts/eval_retrieval.py`（n=20，复用已入库 collection，未 `--reingest`）：
+
+| layer | R@1 | R@3 | R@5 | R@10 | MRR |
+|-------|-----|-----|-----|------|-----|
+| baseline | 0.0 | 0.0 | 0.0 | 0.05 | 0.005 |
+| A（纯稠密） | 0.05 | 0.15 | 0.20 | 0.30 | 0.1196 |
+| A+rerank | 0.70 | 0.80 | 0.80 | 0.80 | 0.7417 |
+| **B（hybrid 无重排）** | 0.30 | 0.65 | 0.75 | **0.80** | 0.4942 |
+| **C（hybrid+rerank）** | **1.0** | **1.0** | **1.0** | **1.0** | **1.0** |
+
+**结论（设计假设全部兑现）**：
+1. **B 证实 BM25 抬高候选池天花板**：B 的 R@10=0.80 > A+rerank 的 0.70 上限——稠密过取 50 都埋在 rank>50 的精确术语题，被 BM25 字面命中送进候选池。这正是 Part 2 的靶区。
+2. **C 证实「BM25 补池 + 重排排序」协同**：B（池子好但无重排，R@1 仅 0.30）→ C（重排把池里 gold 全顶到 rank1，R@1=1.0）。逐层归因清晰：A → A+rerank（重排，被稠密池封顶 0.70）→ B（BM25 补池到 0.80）→ C（补池 + 重排）。
+3. **生产默认 `RAG_HYBRID_ENABLED=True` + `RERANK_ENABLED=True` 保留**——被验证的最强组合。
+
+**⚠ C=1.0 的免责声明（勿误读为真实线上 R@1=100%）**：本评测**有自指性**——query 由 `eval_fixed` 某 chunk 生成，gold 答案句逐字摘自**同一 chunk**，命中判定看「检索片段覆盖 gold ≥0.6」。故**源 chunk 对 gold 覆盖≈1.0**，且 query 与源 chunk 共享精确术语 → BM25 必然捞回源 chunk → cross-encoder 必然顶到 rank1。C=1.0 含相当比例「检索到出题源 chunk」的半送分效应，**绝对值高估真实用户 query（不会与 chunk 共享这么紧的字面）下的 R@1**。**可信部分**：相对排序（C > B > A+rerank > A）与「BM25 抬池子天花板」是真信号（同 testset、同判定，苹果对苹果）；叠加 n≈20、本评测「方向性参考、非统计严谨」。
+
+**chunk-size 扫描正式取消**：hybrid+rerank 已解决大 chunk 稀释/hubness 问题（不重切、不重嵌入），无需再烧嵌入额度扫 256/200 档。
+
+**RAG 修复升级四部分（Part 1 切片 + Part 2 多路召回 + Part 3 重排 + Part 4 评测）全部落地并验证完毕。**

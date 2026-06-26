@@ -5,12 +5,20 @@ from src.config import PDF_DIR
 
 @pytest.fixture
 def english_pdf():
-    return str(PDF_DIR / "Parallel-Reservoir-Computing-Using-Optical-Amplifiers.pdf")
+    # 项目早期架构搭建时的 parser/chunker 夹具。所需 PDF 不随 git 同步（data/ 已 gitignore），
+    # 换机/重建 data/ 后会缺失 → 文件不在则 skip，把这些 PDF 放回 data/pdfs/ 即自动启用。
+    path = PDF_DIR / "Parallel-Reservoir-Computing-Using-Optical-Amplifiers.pdf"
+    if not path.exists():
+        pytest.skip(f"缺少测试 PDF（data/ 不随 git 同步）：{path.name}")
+    return str(path)
 
 
 @pytest.fixture
 def chinese_pdf():
-    return str(PDF_DIR / "不同类型胶原蛋白在皮肤衰老中的作用及其研究进展.pdf")
+    path = PDF_DIR / "不同类型胶原蛋白在皮肤衰老中的作用及其研究进展.pdf"
+    if not path.exists():
+        pytest.skip(f"缺少测试 PDF（data/ 不随 git 同步）：{path.name}")
+    return str(path)
 
 
 @pytest.fixture
