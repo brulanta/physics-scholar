@@ -1,4 +1,6 @@
+import requests  # 已是依赖（无 torch），用于调硅基流动 /rerank
 from src.core.ingestor import get_vectorstore
+from src import config  # 调用时取 EMBEDDING_*/RERANK_*，跟随 reload_config
 from pydantic import BaseModel, Field
 from typing import Literal
 from langchain.tools import tool
@@ -7,6 +9,35 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 vs = get_vectorstore()
+
+
+def _rerank(query: str, docs: list, top_n: int) -> list:
+    """用硅基流动 bge-reranker-v2-m3 对候选 docs 精排，返回 top_n。
+
+    凭证/URL 复用 embedding（调用时取 config.EMBEDDING_*，故前端改 key 经 reload_config
+    刷新后自动跟随）。任何异常都优雅降级为「按原候选顺序截 top_n」，绝不抛进 agent。
+    """
+    if not config.RERANK_ENABLED or not docs:
+        return docs[:top_n]
+    try:
+        r = requests.post(
+            f"{config.EMBEDDING_BASE_URL}/rerank",  # 复用 embedding base_url
+            json={
+                "model": config.RERANK_MODEL,
+                "query": query,
+                "documents": [d.page_content for d in docs],
+                "top_n": min(top_n, len(docs)),
+                "return_documents": False,
+            },
+            headers={"Authorization": f"Bearer {config.EMBEDDING_API_KEY}"},  # 复用 embedding key
+            timeout=config.RERANK_TIMEOUT,
+        )
+        r.raise_for_status()
+        order = [it["index"] for it in r.json()["results"]]  # results 已按相关度降序
+        return [docs[i] for i in order][:top_n]
+    except Exception as e:
+        logger.warning("[RAG] rerank 失败，回退候选原序: %s", e)
+        return docs[:top_n]
 
 
 class RagToolRequest(BaseModel):
@@ -82,19 +113,19 @@ def make_rag_tool(user_id: str):
 
         # 1. 调用外部的 build_filter，逻辑清晰且可复用
         search_filter = build_filter(user_id=user_id, section=section, doc_id=doc_id)
-        # 2. 配置检索器
-        retriever = vs.as_retriever(
-            search_kwargs={
-                "k": k,
-                "filter": search_filter,
-            }
-        )
-        docs = retriever.invoke(query)
+        # 2. 向量过取：召回 k*RAG_FETCH_MULTIPLIER 个候选喂给重排，重排再截到 k。
+        #    探针证实候选池越大重排天花板越高，且重排能把真 chunk 顶进 top-3。
+        fetch_k = max(k, k * config.RAG_FETCH_MULTIPLIER)
+        candidates = vs.similarity_search(query, k=fetch_k, filter=search_filter)
+        # 3. cross-encoder 精排到 k（失败优雅降级为候选原序截 k）
+        docs = _rerank(query, candidates, k)
         logger.info(
-            "[RAG] User: %s | Query: %s | Doc_ID: %s",
+            "[RAG] User: %s | Query: %s | Doc_ID: %s | 过取: %d→重排: %d",
             user_id,
             query,
             doc_id or "All",
+            len(candidates),
+            len(docs),
         )
         return format_context(docs)
 

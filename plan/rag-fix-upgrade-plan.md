@@ -236,9 +236,15 @@ def _rerank(query, docs, top_n):
 
 - **Part 1 切片修复**：✅ 已实现并提交 `4107baf`；计划文档对齐提交 `14f34f5`。`chunker.py`/`config.py`/`calibrate_tokenizer.py`/测试均已落地。**校准已完成**：`calibrate_tokenizer.py` 用 4 篇中文+4 篇英文、共 200 个样本拟合，**R²=0.9698**（>0.95 目标达标），系数已硬编码进 `config.py` 出厂默认（`CHUNK_CALIB_A=0.9491 / B=1.6108 / C=3.1937`），`CHUNK_CALIBRATED` fallback 改为 `True`。
 - **Part 4 评测脚手架（baseline/A）**：✅ 已实现并提交 `847caf2`（`scripts/eval_retrieval.py`，双 collection + LLM 合成测试集 + Recall@K/MRR）。用户正在本机配好凭证后跑 baseline/A 取数。
-- **Part 2 多路召回**：🚧 进行中。**已做（未提交）**：`.gitignore` 加 `.claude/`；`requirements.txt`（UTF-16）加 `rank_bm25==0.2.2`。**待做**：`physics_scholar.spec` 的 `hiddenimports` 加 `'rank_bm25'`；`config.py` 加 `RAG_HYBRID_ENABLED`/`RAG_FETCH_MULTIPLIER`；`rag_tool.py` 加 `hybrid_search`/`_rrf_merge`/`_bm25_tokenize`、`vs` 改惰性、按开关回退；`eval_retrieval.py` 接入 `B` 层（复用生产 `hybrid_search`）；装 `rank_bm25` 后离线验证 RRF/分词；提交。
-- **Part 3 重排**：⬜ 未开始（契约与配置定位已在上文敲定）。
-- **注意**：`src/config.py` 有用户本地未提交改动（在 `reload_config` 补了 `OPENALEX_API_KEY`），属用户有意改动，勿回退；在其基础上叠加 Part 2 常量即可。
+- **Part 3 重排**：✅ **已实现并提交 `307a202`**。`config.py` 加 `RERANK_ENABLED/MODEL/TIMEOUT` + `RAG_FETCH_MULTIPLIER`（纯开发态，不进 yaml/reload_config）；`rag_tool.py` 加 `_rerank`（复用 `EMBEDDING_*`、失败优雅降级）并把检索流改为「过取 k*MULT → 重排到 k → format」；`eval_retrieval.py` 接 `A+rerank` 层；新增 `scripts/probe_rerank.py` 离线探针。**生产路径实测（n=20，eval 过取 100）**：A+rerank **R@1 0.70 / R@3 0.80 / R@10 0.80 / MRR 0.7417**（A 纯稠密 0.05 / 0.30 / 0.1196）——兑现探针预测。
+- **Part 2 多路召回**：🚧 **未开始**（换机后旧"已做未提交"的痕迹随损坏的 `data/` 一并丢失，本机工作树干净）。`config.py` 的 OPENALEX 本地改动是旧会话误记，**实际早已提交，工作树无该改动**（已 git diff 核实）。**下一步 todo（明日另一台机器接续）**：
+  1. `requirements.txt`（UTF-16，注意编码别写成 UTF-8）加 `rank_bm25==0.2.2`；`physics_scholar.spec` `hiddenimports`（第 44 行）加 `'rank_bm25'`；本机 `pip install rank_bm25==0.2.2`（当前**未安装**，import 会失败）。
+  2. `config.py` 加 `RAG_HYBRID_ENABLED`（纯开发态 kill switch，默认 `True`，回退纯向量用）。`RAG_FETCH_MULTIPLIER` 已随 Part 3 落地，复用即可。
+  3. `rag_tool.py` 加纯函数 `_bm25_tokenize` / `_rrf_merge` / `hybrid_search`（见 Part 2 §2.1–2.3）；检索流改为 `HYBRID_ENABLED ? hybrid_search(过取) : 纯向量过取` → 喂给已有 `_rerank`。唯一键 `(doc_id, section, chunk_index)`。
+  4. `eval_retrieval.py` 接 `B`（hybrid 无重排）/ `C`（hybrid+rerank）层，复用生产 `hybrid_search`。
+  5. 装 `rank_bm25` 后现写离线探针验证分词/RRF（**勿信 `eval_framework` 陈旧测试**），再跑 baseline/A/B/C 分层表。
+  6. 提交 Part 2。
+  - **靶向预期**：探针已证 rerank 天花板卡在 0.70，残留 30% 是稠密过取 50 都埋在 rank>50 的 gold——BM25 精确术语命中正是把这些题送进候选池的手段，B/C 层用来验证此增益。
 
 ---
 
@@ -263,6 +269,52 @@ def _rerank(query, docs, top_n):
 > - **spot check 已确认**：重建后的 gold 为文档中段的真实答案句（不再是标题/作者/摘要首句），质量 OK。
 > - **待执行（下次接续）**：跑完整**零成本重测** `python scripts/eval_retrieval.py`（不加 `--reingest`，复用已入库 collection），看分层表中 **A 是否依旧 ≤ baseline**——若是则 P1（384 偏大）成立，进入"扫多档 chunk size"讨论；若 A 显著回升则原负面结果主要是 P2/P3 测量噪声。
 >   - ⚠ 注意：`data/chroma_db/` 已 gitignore，**换机后该 collection 不存在**，首跑会触发重入库并**消耗嵌入额度**（非零成本）。换机续跑前需确认目标机已有持久化的 `eval_baseline`/`eval_fixed`，否则"零成本"不成立。
+
+---
+
+## 发现与决策（换机重测 + 二次根因定位，2026-06-25 新机器）
+
+背景：上一台开发机的 `data/` 拷回家中新机后损坏，旧 4+4 论文 / 旧 baseline+A 结果 / 旧问答集全部丢失。重新收集 4 中文 + 4 英文论文，零成本重测（collections 已于本机入库，未 `--reingest`）。
+
+本轮分层结果（n=20）：`baseline` 全 0；`A` R@1=0.05 / R@3=0.15 / R@5=0.20 / R@10=0.30 / MRR=0.1196。两层都低，触发"先证伪测量工具"排查。**关键：本轮论文与上一台机器不同，数字不是旧序列的延续，是全新一组。**
+
+### 根因（按只读抽检 + 受控 embedding 探针定位，按确定性排序）
+
+1. **库与 embedding 健康，已排除坏库/模型不匹配**：
+   - 用**源 chunk 原文**当 query → 每题 rank1 精确命中自己，cosine 距离≈0.000（rank2 直接跳到 0.12–0.31）。
+   - 受控探针：query「减小MPF滤波带宽…」对【答案原句 0.2251 / 同领域英文 0.4478 / 不同主题中文 0.7075 / 纯无关英文"猫坐窗台"0.3706】——**对孤立答案句是强命中（0.225）**，向量归一化正常（norm=1.0），ingest 与 query 同模型（否则自检索不会 0.000）。
+
+2. **真正瓶颈 = 大 chunk 稀释（P1 假设这次被定量证实）**：query↔**孤立答案句** = 0.225，但 query↔**包含该句的 384-token 大 chunk**（中位 571 字）> 0.35。答案句语义被周围 ~500 字平均掉，被一批 **hub chunk**（对任意 query 都落在 0.35–0.45，连"猫坐窗台"对中文 query 都 0.37）挤出 top-10。这是**切片粒度问题，非 bug**。推论：query↔句 0.225 说明粒度越接近句子，稠密检索越准 → 更小 chunk 是一个真实杠杆（但要重嵌入、花额度）。
+
+3. **`baseline` 列结构性偏低，是测量设计偏置**（免责声明，精确口径，勿误读为"数据完全没用"）：
+   - **baseline 的 R@K 在当前评测设计下结构性偏低**，原因是 **gold 答案句从 `eval_fixed` 的 chunk 摘录并按 `eval_fixed` 源片校验（SPAN_VERBATIM_MIN），不保证落在单个 `eval_baseline`（350字）chunk 内**；长答案句跨 baseline chunk 边界 → 没有任一单片能覆盖 ≥60% gold token（`OVERLAP_THRESHOLD=0.6`）→ 命中结构性趋零（Q5 baseline 实测最高 cover=0.55，正卡在阈值下）。
+   - **因此 `baseline` 的 R@K 不适合用于 baseline vs A 的横向对比**，"baseline 0 → A 0.3"**不能**解读为"修切片的增益"。
+   - **但 baseline 自身的 MRR / 排序质量的纵向趋势仍可参考**（同一 baseline 库、同一判定口径下，跨改动版本看 baseline 自己的相对变化是有效的）。
+   - A→B→C 全部跑在**同一个 `eval_fixed` + 同一判定**上，是苹果对苹果，**baseline 列脏不影响 A/B/C 的逐层归因**。
+
+### 决策（本轮）
+- **不**采信 baseline vs A 横向数字，也**不**据此扫 chunk size（那是花钱项，且现已知主因是稀释/hubness，rerank 可能更省地解决）。
+- 诊断恰好命中 Part 2/3 设计意图：**Part 3 重排（cross-encoder 直接对 (query,chunk) 打分，对稀释/hubness 鲁棒，过取候选再精排，不重切不重嵌入）** 很可能是最大一针；**Part 2 BM25** 靠精确术语（MPF/滤波带宽/Q值）命中稠密检索捞不到的。
+- **下一步先做"rerank 离线探针"**（不动生产代码，复用现有 testset + eval_fixed 候选，调一次硅基流动 `/rerank`，看 A 的 R@K 能抬到多少）——最便宜、最能验证方向。探针有效再决定：直接按序进 Part 2，还是把 Part 3 提前。
+
+### rerank 探针结果（`scripts/probe_rerank.py`，2026-06-25）
+
+| metric | A(dense) | rerank@10 | rerank@20 | rerank@50 |
+|--------|----------|-----------|-----------|-----------|
+| R@1 | 0.05 | 0.25 | 0.30 | **0.60** |
+| R@3 | 0.15 | 0.30 | 0.35 | **0.70** |
+| R@5 | 0.20 | 0.30 | 0.35 | **0.70** |
+| R@10 | 0.30 | 0.30 | 0.35 | **0.70** |
+| MRR | 0.1196 | 0.275 | 0.325 | **0.650** |
+
+候选池命中率（重排天花板，gold 在 fetch-K 池中的题占比）：fetch=10 → 0.30；fetch=20 → 0.35；**fetch=50 → 0.70**。
+
+**结论（强信号）**：
+1. **重排是最大、最便宜的一针，且证明了瓶颈是双塔排序而非内容**：候选池里只要有 gold，cross-encoder 几乎必把它顶进 top-3（rerank@50 的 R@3=0.70 = 天花板 0.70，R@1=0.60 ≈ 86% 落 rank1）。R@1 0.05→0.60、MRR 0.12→0.65，不重切、不重嵌入、带 kill-switch。
+2. **重排被"候选池天花板"封顶，过取倍数是关键杠杆**：fetch 10→50 把天花板从 0.30 抬到 0.70（gold 越过取越可能进池）。故生产 `RAG_FETCH_MULTIPLIER` 要给足（k=5 → 过取 ~50）。
+3. **残留 30% 是稠密过取 50 都捞不到 gold 的题**（gold 在 273 片里被稠密埋到 rank>50）——这正是 **Part 2 BM25** 的靶区（精确术语命中把这些题送进候选池，再由重排顶上来）。突破 0.70 要靠 Part 2 / 更小切片，重排对这部分无能为力。
+
+**据此修订实施顺序（把 Part 3 提前）**：Part 3 重排先落地（dominant 增益、最小改动）→ 评测加 `A+rerank` 层确认线上化收益 → 再做 Part 2 BM25 抬高候选池天花板 → 评测 `hybrid+rerank`。chunk-size 扫描继续暂缓（rerank 已大幅缓解稀释，待 Part 2 后若仍卡天花板再议）。
 
 ---
 

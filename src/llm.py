@@ -18,6 +18,7 @@ main_llm = ChatOpenAI(
     base_url=MAIN_LLM_BASE_URL,
     extra_body=DEEPSEEK_EXTRA_BODY,
     max_retries=5,  # ← 核心加固：网络抖动或 429 限流时，自动指数退避重试 5 次
+    streaming=True,  # ← 真流式：astream_events(v2) 下逐 token 推送 on_chat_model_stream
 )
 
 # 副 API：用于信息提取、打分等结构化任务（建议温度设为 0）

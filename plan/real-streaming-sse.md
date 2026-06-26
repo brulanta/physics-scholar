@@ -1,5 +1,16 @@
 # 真流式（SSE）传输实装
 
+## 完成状态（2026-06-25）
+流式实装全部完成（步骤 1–8），浏览器端 ①纯问答 ②工具时间轴 ③regenerate ④切会话中止 均人工验收通过。核心结论：
+- **选型 `astream_events(version="v2")`**：同一条流给 token + `metadata.langgraph_node` + 工具边界（`on_tool_start` 在工具执行前触发，满足"检索中"实时 spinner）；v3 beta 的 reasoning 自动分离对"已禁用原生 thinking、思考写进正文"的我们无效，不取。
+- **节点必须异步化**：`call_llm`/`final_answer` 改 `async`+`await ainvoke`，否则 callback 不冒泡拿不到 token 级事件。副作用：同步 `agent.invoke()` 失效，`chat()`/`regenerate()` 非流式兜底改用 `asyncio.run(ainvoke)`（过渡态）。
+- **三态状态机 `_consume_events`**：thinking/tool/answer，`</thinking>`+`[TOOL_LOOP:DONE]`/`final_answer` 判定进正文；`done` 带权威 `answer`（全文 last-close-wins）覆盖前端累计文本消除漂移。断连即 `return`/`CancelledError`→不落库。
+- **前端**：fetch+ReadableStream 消费 SSE，竖向时间轴（O──[A]──[B]，进 answer 折叠），AbortController 切会话/卸载中止后端流。
+- **心跳**：单 pending `__anext__`+`asyncio.wait` 超时竞速发 `: ping`，为外接 MCP 长工具链/反代保活。
+- **已知边界**：流式无法前瞻"最后一个 `</thinking>`"，DONE 后惯性早闭标签会致瞬时闪烁（done 覆盖保正确性，不写错库）；可选 `answer_reset` 硬化暂不做。详见下文「风险与边界」。
+
+验证：`_consume_events` 6 离线单测 + 真实后端流式回归 + 浏览器人工验收。DB 零迁移。
+
 ## Context
 
 当前 PhysicsScholar 的回答是"假流式"：后端 `agent.invoke()` 一次性算完整个 LangGraph 回合，前端 axios 拿到完整 `answer` 后用 8ms `setInterval` 逐字符做打字机动画。用户在工具检索（arXiv/S2/Jina）期间只能干等，且看不到 agent 在"思考还是在调工具"。
@@ -27,6 +38,12 @@
 ## 关键技术结论（务必先验证）
 
 **`call_llm` / `final_answer` 节点内的 LLM 调用必须异步化**（与上面 API 选型无关，三种方案都需要）。仅设 `streaming=True` 但节点内仍用同步 `.invoke()`，在 `astream_events` 下拿不到稳定的 token 级 `on_chat_model_stream`（同步节点被丢线程池，callback 不冒泡）。实现第一步先写个最小脚本验证：`async for ev in agent.astream_events(state, version="v2")` 能否拿到 `on_chat_model_stream` 且事件带 `ev["metadata"]["langgraph_node"]`。环境：py3.11 / langgraph 1.1.3 / langchain-core 1.2.23，均支持 v2 + langgraph_node。
+
+**第一步验证已完成（2026-06-24，实跑通过）**：A 项 PASS —— `astream_events(v2)` 拿到逐 token `on_chat_model_stream`、事件带 `metadata.langgraph_node`（`{'call_llm': N}`），同一条流里含完整 `<thinking>…</thinking>` 边界 + 正文，可被状态机切分。脚本：`scripts/verify_astream.py`（临时，收尾可删）。实跑环境 langchain-core 实际为 1.2.20（仍支持 v2 + langgraph_node）。
+
+> **发现**：节点改 async-only 后，旧的同步 `agent.invoke()` 直接抛 `TypeError: No synchronous function provided to "call_llm"`，导致 `chat()`/`regenerate()` 的非流式兜底路径失效——本 plan 原假设"旧 invoke 路径可直接保留"不成立。
+> **决策（选项1）**：`chat()`/`regenerate()` 内部把 `agent.invoke(...)` 改为 `asyncio.run(agent.ainvoke(...))`，保持函数同步签名不变（仅供测试/脚本兜底，不被 async 路由调用，无嵌套事件循环问题）。
+> **理由**：这是过渡态兜底，不值得为它投入更多开发（如把整条链改 async 并波及所有调用方）；改动最小、回归测试可继续跑（B 项验证 PASS）。后续步骤 3 抽 `_prepare` 时这两处自然会再被触及。
 
 ## SSE 事件契约
 
@@ -90,15 +107,22 @@
 - **空回答/漂移**：`done` 带权威 `answer`，前端覆盖累计文本。
 - DB 零迁移（时间轴不持久化）。
 
+> **发现（thinking 尾标签"最后一个"在流式下不可前瞻）**：非流式 `trim_thinking` 对全文取**最后一个** `</thinking>` 做切割；流式下"最后"是未来量。`_consume_events` 只能取**当前 buf 内**最后一个尾标签 + `marker==DONE` 即切入正文，且 `answer_open` 后不再回看。对「DONE 后惯性吐一次 `</thinking>` → 再续若干 phase → 真正合法 `</thinking>` → 正文」这类输出，会在**早闭标签处误判**，把后续 phase 当 `answer_delta` 短暂泄漏到正文区。
+> **现状兜底**：落库用图根 `on_chain_end` 的权威全文走非流式 last-close-wins，`done.answer` 始终正确并覆盖前端累计文本 —— 误判只造成**瞬时视觉闪烁，不写错库、不留错误结果**；良性单尾标签输出（prompt 加固后的常态）下 first==last，无差异。
+> **可选硬化**：`answer_open` 后继续累积 buf 并每片重跑 `_rfind_close_think`，若出现更靠后的尾标签则发 `answer_reset` 事件让前端清空已累计正文、按新切割点重流。代价是前端累计逻辑加分支。
+> **暂不做**：源头已用 prompt 压低触发概率，`done` 覆盖保证正确性下限，投入产出比低；真要做更适合等步骤 6 前端累计逻辑成型后顺手加 `answer_reset`，不空悬协议字段。
+
 ## 实施顺序
-1. graph.py 异步化 + 最小脚本验证 token 流 & `langgraph_node`。
-2. llm.py `main_llm streaming=True`（回归旧 invoke：tool_calls 聚合/裁剪正常）。
-3. graph.py `_consume_events` + `chat_stream`/`regenerate_stream` + 辅助函数。
-4. routes.py StreamingResponse + 断连检测。
-5. chat.js `streamChat`/`consumeSSE`。
-6. ChatPage.vue 改造 + 新 state。
-7. ThinkingTimeline.vue + ChatWindow 透传。
-8. 打磨：断连不落库、done 带 answer、可选心跳。
+- [x] 1. graph.py 异步化 + 最小脚本验证 token 流 & `langgraph_node`。（A/B 实跑通过）
+- [x] 2. llm.py `main_llm streaming=True`（随步骤1 B 项验证覆盖：asyncio.run(ainvoke) 下 tool_calls 聚合/裁剪正常）。
+- [x] 3. graph.py `_consume_events` + `chat_stream`/`regenerate_stream` + 辅助函数。（四场景单测通过）
+- [x] 4. routes.py StreamingResponse + 断连检测。（纯问答端到端实跑通过：帧序列正确、流式==权威 done.answer、已落库）
+- [x] 5. chat.js `streamChat`/`consumeSSE`。
+- [x] 6. ChatPage.vue 改造 + 新 state。
+- [x] 7. ThinkingTimeline.vue + ChatWindow 透传。
+- [x] 8. 打磨：断连不落库、done 带 answer（3–6 实现）；~15s 心跳 `: ping\n\n` 已加（单 pending __anext__ + asyncio.wait 超时竞速，为外接 MCP 长工具链/反代保活，前端已忽略注释帧）。
+
+**剩余的端到端人工验收**（步骤1–7 已实装，待浏览器肉眼过）：① 纯问答流式 ② 工具 chip 时间轴 ③ regenerate 分支 ④ 中途切会话后端 `async for` 立即停。环境无 Playwright，由开发者手动跑 `uvicorn`(:8000)+`npm run dev` 验证。
 
 ## 验证
 - **单元/脚本**：`astream_events` 验证脚本（确认 `on_chat_model_stream` + `langgraph_node`）；构造 DONE/PENDING/无标记/final_answer 四种输出，单测 `_consume_events` 的事件序列；`pytest`（含现有非流式 invoke 回归）。
