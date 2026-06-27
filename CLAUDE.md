@@ -94,7 +94,8 @@ Development spans multiple machines (home / company), synced via git.
 
 - **Push the current branch when wrapping up** (or when the user signals network instability / "明日换机继续") so the next machine can pull — don't assume `main`; push to whatever branch is checked out.
 - **The plan file (`plan/rag-fix-upgrade-plan.md`) is the cross-session handoff**: it carries the **next-stage todo**, not a log of the current stage's内容; keep its progress/状态 section honest against `git log` before pushing.
-- **`data/` does not travel with git** (see Architecture > Data). If a continuation on another machine depends on local data assets (ingested `eval_baseline`/`eval_fixed` collections, the `data/pdfs/` corpus, `scripts/eval_out/testset.json`), **remind the user in-session to manually transfer them** (or warn that re-ingesting burns embedding API额度). Don't write such transfer reminders into the plan — they are this-session logistics, not next-stage work.
+- **Plans live in the repo.** Once a plan is accepted and you exit plan mode, immediately sync it into the `plan/` folder with a clear, obvious file name (e.g. `mcp-tool-migration-plan.md`) so it travels with git — don't leave it in `~/.claude/plans/`.
+- **Closing a session with plan work unfinished? Check the gitignored files for handoff dependencies.** Git-ignored content (`data/` — see Architecture > Data — or any other untracked local asset) does NOT travel with git. When wrapping up a session whose plan work isn't fully done, scan for whether continuing on another machine depends on such local-only files, and if so **remind the user in-session to transfer them manually** (or warn of the cost to regenerate, e.g. re-ingesting burns embedding API额度). These are this-session logistics — remind, don't write them into the plan.
 
 ## Trust boundary
 
