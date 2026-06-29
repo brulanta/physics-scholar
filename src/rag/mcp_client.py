@@ -48,9 +48,9 @@ else:
 
 USER_ID = os.getenv("PS_USER_ID", "default")
 
-# 阶段 0 只挂 web（无状态、不依赖 chroma/sub_llm，最易跑通 stdio 端到端）；
-# local / jina 在后续阶段并入。其余工具仍走老内嵌路径（PS_USE_MCP 互斥）。
-_ACTIVE_SERVERS: tuple[str, ...] = ("web",)
+# 阶段 0 挂 web（无状态网络工具）；阶段 1 并入 local（rag + lookup，依赖 chroma）。
+# jina 在阶段 2 并入。未挂载的工具仍走老内嵌路径（PS_USE_MCP 互斥）。
+_ACTIVE_SERVERS: tuple[str, ...] = ("web", "local")
 
 
 def _server_params(name: str) -> dict:

@@ -97,8 +97,9 @@ MultiServerMCPClient({
 - **阶段 0（脚手架 + web）✅ 已完成（2026-06-29）**：加依赖、建 `src/mcp_servers/` 骨架、app.py 分流、mcp_client.py 单例、lifespan 接线。**先只挂 web_server**（无状态、不依赖 chroma/sub_llm，最易跑通 stdio 端到端），其余仍走老内嵌。
   验证（全部通过）：`get_tools()` 见 3 个 web 工具（名/描述/schema 原样）；arxiv+s2 真实网络往返 `success=True`；LLM 完整闭环（调 arxiv → 回喂 ToolMessage → 正常出最终答）；连发两次 arxiv，第二次多等 ~1.7s → 速率锁在子进程持久生效；`PS_USE_MCP=false` 时所有模块 import 干净、走老内嵌路径。
   **实施中发现 5 处与本计划设想不一致，详见下方「阶段 0 实施笔记」——架构未变，仅 client 侧实现手段与若干 API 名称调整。**
-- **阶段 1（local）**：迁 `rag_tool`+`lookup`。验证：chroma 在子进程初始化、`user_id=default` 过滤正确、rerank 走通；对已入库论文提问对比 body 文本一致；lookup 返回 doc_id 正确。
-  **并发专测（高风险）**：上传入库（主进程写 chroma，[ingestor.py:37](../src/core/ingestor.py#L37) `write_to_chroma`）与 local server（子进程读同一 `CHROMA_DIR`）同时发生，看是否 `database is locked` / 读陈旧 HNSW。若锁冲突，缓解：入库低频可串行化，或评估把写也搬进 local server 独占 chroma。
+- **阶段 1（local）✅ 已完成（2026-06-29）**：迁 `rag_tool`+`lookup`。验证（全部通过）：`get_tools()` 见 5 工具（web 3 + local 2），rag_tool schema=`[query,k,section,doc_id]`**不含 user_id**；子进程内 chroma 初始化、`user_id=default` 过滤正确、rerank 走通（过取 30→重排 3）；lookup 返回正确 doc_id；**body 文本 MCP vs 内嵌逐字节一致**（BYTE-IDENTICAL，已排除 rerank API 服务端偶发抖动的干扰）。
+  **并发专测（高风险）通过**：MCP 子进程持续检索（读）与父进程 delete+重新入库（写 `write_to_chroma`）交错并发，5 写 4 读零错误、**无 `database is locked`**。chromadb 1.5.x 走 SQLite + 各进程独立连接，本地单用户入库低频场景未触发锁冲突，稳态可接受（若日后高并发触发，缓解仍是入库串行化或把写也收进 local server）。
+  实现细节：rag_tool/lookup 在内嵌世代是 `make_*(user_id)` **闭包工厂**，闭包已把 user_id 烘进去、产出的 `@tool` 签名本就不含 user_id，故 local_server 直接 `to_fastmcp(make_*(USER_ID))` 即满足计划「删闭包、user_id 不进 schema」目标，**无需改 rag_tool.py / lookup_local_paper_id.py**；graph.py 的 build_agent 已是按 `mcp_names` 剔除同名内嵌工具的通用逻辑，阶段 1 仅 `_ACTIVE_SERVERS` 加 `"local"`，**graph.py 零改动**。
 - **阶段 2（jina）**：迁 `jina`。验证：sub_llm 在子进程重建、分块打分耗时可接受、长文档不超时；url+query 看 scored_chunks，无 query 看全文截断。
 - **阶段 3（收尾）**：三 server 全切，封存老接线，补 spec hiddenimports，`pyinstaller physics_scholar.spec` 打包验证 frozen 子进程能起、工具可调、tray 退出无孤儿进程。
 
@@ -146,6 +147,12 @@ MultiServerMCPClient({
 另：**孤儿子进程防护改用 Windows Job Object（kill-on-close）而非手动 terminate pid**。MCP stdio client 把子进程 pid 私有化、公开 API 取不到；改为 app.py 启动时把主进程放进 kill-on-close Job，子进程继承成员资格，主进程退出（含 tray `os._exit(0)` 绕过 lifespan）时内核连同子进程树一并回收。比手动 terminate 更稳，对应计划风险 #1。frozen 形态下仍需在阶段 3 实测确认。
 
 **新增文件**：`src/rag/tool_runtime.py`（`PS_USE_MCP` 开关单一真相源，main.py/graph.py/routes.py 共用，避免各读各的漂移）。
+
+---
+
+## 阶段 1 实施笔记（2026-06-29）
+
+- 验证阶段发现本机生产 chroma collection `rag_langchain` 是 RAG 升级前的 **384 维历史废数据**（与当前 bge-m3/1024 维不兼容，检索必报维度错），且注册表里那条记录指向的 PDF 本体已在跨机同步中丢失——属 gitignored `data/` 手动同步的遗留漂移，非 MCP 迁移问题。已**重置生产库**：删 `rag_langchain` collection + 清 default 注册表，从 `data/pdfs/` 现有 8 篇 PDF 重新入库为 1024 维玩具数据（eval_baseline/eval_fixed 两个 1024 维评测库未动）。**换机继续前注意：各机的 `data/` 需自行保证为 bge-m3 时代的 1024 维库，旧机器若残留 384 维库会同样报错。**
 
 ---
 
