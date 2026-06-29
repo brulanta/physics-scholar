@@ -18,6 +18,8 @@ from src.rag.tools.arxiv_tool import arxiv_tool
 from src.rag.tools.s2_tool import s2_search_tool
 from src.rag.tools.jina_tool import jina_tool
 from src.rag.tools.openalex_tool import openalex_tool
+from src.rag.tool_runtime import USE_MCP
+from src.rag import mcp_client
 from src.rag.memory import (
     ConversationMemory,
     format_history,
@@ -342,14 +344,33 @@ def build_final_prefill() -> str:
 def build_agent(user_id: str):
     paper_id_search_tool = make_paper_id_search_tool(user_id)
     rag_tool = make_rag_tool(user_id)
-    tools = [
-        rag_tool,
-        paper_id_search_tool,
-        arxiv_tool,
-        s2_search_tool,
-        openalex_tool,
-        jina_tool,
-    ]  # 新增
+
+    if USE_MCP:
+        # MCP 路径：从 MCP server 取的工具（阶段 0 = web：s2/arxiv/openalex）替代
+        # 对应内嵌工具；尚未迁移的工具（rag/lookup/jina）仍用内嵌实例。
+        # mcp_client.get_tools() 已在 lifespan startup 一次性加载并缓存。
+        mcp_tools = mcp_client.get_tools()
+        mcp_names = {t.name for t in mcp_tools}
+        inline_tools = [
+            rag_tool,
+            paper_id_search_tool,
+            arxiv_tool,
+            s2_search_tool,
+            openalex_tool,
+            jina_tool,
+        ]
+        # 内嵌列表里凡是已被 MCP 接管的同名工具，剔除，避免重复绑定
+        inline_tools = [t for t in inline_tools if t.name not in mcp_names]
+        tools = inline_tools + mcp_tools
+    else:
+        tools = [
+            rag_tool,
+            paper_id_search_tool,
+            arxiv_tool,
+            s2_search_tool,
+            openalex_tool,
+            jina_tool,
+        ]
     llm_with_tools = llm.bind_tools(tools)
     tool_node = ToolNode(tools)
 

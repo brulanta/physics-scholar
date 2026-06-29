@@ -94,8 +94,9 @@ MultiServerMCPClient({
 
 ## 分阶段实施与验证（每阶段可独立回滚：`PS_USE_MCP=false`）
 
-- **阶段 0（脚手架 + web）**：加依赖、建 `src/mcp_servers/` 骨架、app.py 分流、mcp_client.py 单例、lifespan 接线。**先只挂 web_server**（无状态、不依赖 chroma/sub_llm，最易跑通 stdio 端到端），其余仍走老内嵌。
-  验证：`get_tools()` 见 3 个 web 工具；触发 s2 检索的 query → SSE `tool_start`/`tool_end` 正常、返回含 `success`；连发两次看速率锁在子进程生效。
+- **阶段 0（脚手架 + web）✅ 已完成（2026-06-29）**：加依赖、建 `src/mcp_servers/` 骨架、app.py 分流、mcp_client.py 单例、lifespan 接线。**先只挂 web_server**（无状态、不依赖 chroma/sub_llm，最易跑通 stdio 端到端），其余仍走老内嵌。
+  验证（全部通过）：`get_tools()` 见 3 个 web 工具（名/描述/schema 原样）；arxiv+s2 真实网络往返 `success=True`；LLM 完整闭环（调 arxiv → 回喂 ToolMessage → 正常出最终答）；连发两次 arxiv，第二次多等 ~1.7s → 速率锁在子进程持久生效；`PS_USE_MCP=false` 时所有模块 import 干净、走老内嵌路径。
+  **实施中发现 5 处与本计划设想不一致，详见下方「阶段 0 实施笔记」——架构未变，仅 client 侧实现手段与若干 API 名称调整。**
 - **阶段 1（local）**：迁 `rag_tool`+`lookup`。验证：chroma 在子进程初始化、`user_id=default` 过滤正确、rerank 走通；对已入库论文提问对比 body 文本一致；lookup 返回 doc_id 正确。
   **并发专测（高风险）**：上传入库（主进程写 chroma，[ingestor.py:37](../src/core/ingestor.py#L37) `write_to_chroma`）与 local server（子进程读同一 `CHROMA_DIR`）同时发生，看是否 `database is locked` / 读陈旧 HNSW。若锁冲突，缓解：入库低频可串行化，或评估把写也搬进 local server 独占 chroma。
 - **阶段 2（jina）**：迁 `jina`。验证：sub_llm 在子进程重建、分块打分耗时可接受、长文档不超时；url+query 看 scored_chunks，无 query 看全文截断。
@@ -103,12 +104,12 @@ MultiServerMCPClient({
 
 ## 风险点（按概率排序）
 
-1. **frozen 子进程孤儿（高）**：`os._exit(0)` 绕过 lifespan → tray 回调显式 terminate pid。
+1. **frozen 子进程孤儿（高）**：`os._exit(0)` 绕过 lifespan。**阶段 0 改用 Windows Job Object（kill-on-close）兜底**（见阶段 0 实施笔记末），不再手动 terminate pid；frozen 形态待阶段 3 实测。
 2. **ChromaDB 多进程访问同一目录（高）**：主进程写 + 子进程读，chromadb 1.5.5 用 SQLite 持久化，可能 `database is locked`。阶段 1 必测。
 3. **子进程重复初始化开销（中）**：embeddings/Chroma/sub_llm 冷启，lifespan startup 一次性付清（单例长驻）；`wait_and_open_browser` 轮询 `/api/health`（[app.py:29](../app.py#L29)）能容忍。
 4. **速率限制状态分裂（中）**：新旧并存 = 两份锁，回滚开关必须互斥。
-5. **子进程启动失败静默（中）**：[app.py:12-15](../app.py#L12-L15) 把 None stdout/stderr 重定向 devnull 会吞子进程报错 → startup 加超时+失败降级，子进程 stderr 接日志文件。
-6. **工具名前缀（中）**：`@mcp.tool(name=...)` 钉死原名。
+5. **子进程启动失败静默（中）→ 已暴露真根因并修复**：真正的崩溃源是日志写 stdout 污染 JSON-RPC（见阶段 0 实施笔记 #4），已改 logger 走 stderr。lifespan startup 仍含 try/except 失败降级（MCP 不可用不阻断启动）。
+6. **工具名前缀（中）→ 已解除**：`tool_name_prefix=False`（默认）+ `to_fastmcp` 保留原名，无需 `@mcp.tool(name=...)`（见实施笔记 #2）。
 7. **版本兼容（已解除）**：langchain-mcp-adapters 0.3.0 要求 langchain-core>=1.0.0,<2.0.0，项目 1.2.23 满足、不降级；须 pin `>=0.3.0` 避开 0.2.x 旧世代。详见「版本兼容」小节。
 8. **spec 打包遗漏（低但必现）**：hiddenimports 补全。
 
@@ -129,6 +130,22 @@ MultiServerMCPClient({
 1. `pytest`（确认非 live 基线不被破坏）。
 2. dev：`uvicorn src.main:app --reload`，前端发触发各工具的 query，看 SSE `tool_start/tool_end`、返回 `success`、速率锁生效、入库+检索并发无锁冲突。
 3. frozen：`pyinstaller physics_scholar.spec` → 跑 exe，验证 3 个子进程可起、工具可调、tray 退出无孤儿进程（任务管理器核对）。
+
+---
+
+## 阶段 0 实施笔记（2026-06-29，落地与计划设想的偏差）
+
+架构整体未推翻——3 个 stdio server / app.py 分流 / `PS_USE_MCP` 互斥 / agent-as-client / HTTP 留口全部保留。以下 5 处是实现细节修正，后续阶段 1/2/3 须沿用：
+
+1. **`to_fastmcp()` 取代手工平铺签名（简化，消除最大转写风险）**：langchain-mcp-adapters 0.3.0 自带 `to_fastmcp(langchain_tool)`，把现有 `@tool` 对象的 `name`/`description`/args_schema 完整 JSON **逐字**转成 FastMCP 工具。故计划「实现方案 > 工具迁移方式」里『Pydantic 字段平铺成函数签名、`Field(description=...)` 逐字抄写』**整段不再需要**，server 文件只 import 原工具对象 + `to_fastmcp`。阶段 1/2（local/jina）同样这么做（rag_tool/lookup/jina 都是现成 `@tool`）。
+2. **工具名天然钉死，无需 `@mcp.tool(name=...)`**：`MultiServerMCPClient(tool_name_prefix=False)` 是默认值，client 不加 server 前缀；`to_fastmcp` 又保留原名。故计划风险 #6 与「显式钉死原工具名」自动满足，`graph.py:728` 的 `ev["name"]` 透传不受影响（已验证 3 工具名 = s2_search_tool/arxiv_tool/openalex_tool）。
+3. **`MultiServerMCPClient` 无 `startup/shutdown`，改用「常驻会话」模式（核心偏差）**：0.3.0 的 `get_tools()` 文档明写「A new session will be created for each tool call」——默认每次工具调用新起子进程会话，会击穿速率锁（每调用重生 → 锁归零）与冷启动。`mcp_client.py` 改为用 `AsyncExitStack` 把 `client.session(name)` 在进程存活期常驻，`load_mcp_tools(live_session)` 绑定到常驻会话；对外仍暴露计划承诺的 `startup/shutdown/restart/get_tools`。**这是计划「agent 侧改造」小节 API 名称的修正，接口形状不变。**
+4. **stdio server 的致命陷阱：日志必须走 stderr（计划风险 #5 的真实根因）**：stdio MCP 把 **stdout 当 JSON-RPC 专用通道**，任何写 stdout 的日志都会污染协议帧 → `ValidationError: JSONRPCMessage` → 会话崩溃 `CancelledError`。原 `logger.py` 输出到 `sys.stdout`，已改为 `sys.stderr`（uvicorn 惯例，MCP client 自动转发子进程 stderr）。**这是全局 logger 改动，影响所有进程，阶段 1/2 的 local/jina server 同样依赖此修复。**
+5. **ToolMessage.content 是 list-of-blocks，非纯字符串（行为差异，已验证无害）**：adapters 的 `_convert_call_tool_result` 恒返回 `[{"type":"text","text": "<JSON字符串>"}]`，而老内嵌工具返回纯 str。`graph.py:_tool_ok` 只读 `.status`（不受影响）；langchain_openai 把 list-content 原样下发，gemini-3.1-pro 代理 LLM 实测接受、闭环正常。**若后续接其他 LLM 报 tool 消息格式错，回看此处。**
+
+另：**孤儿子进程防护改用 Windows Job Object（kill-on-close）而非手动 terminate pid**。MCP stdio client 把子进程 pid 私有化、公开 API 取不到；改为 app.py 启动时把主进程放进 kill-on-close Job，子进程继承成员资格，主进程退出（含 tray `os._exit(0)` 绕过 lifespan）时内核连同子进程树一并回收。比手动 terminate 更稳，对应计划风险 #1。frozen 形态下仍需在阶段 3 实测确认。
+
+**新增文件**：`src/rag/tool_runtime.py`（`PS_USE_MCP` 开关单一真相源，main.py/graph.py/routes.py 共用，避免各读各的漂移）。
 
 ---
 

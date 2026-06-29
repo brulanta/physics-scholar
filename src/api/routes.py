@@ -9,6 +9,8 @@ from src.config import PDF_DIR, get_config_dict, save_config_dict
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index, delete_paper
 from src.rag.graph import chat_stream, regenerate_stream
+from src.rag.tool_runtime import USE_MCP
+from src.rag import mcp_client
 import requests
 from typing import Literal
 from src.rag.memory import ConversationMemory, MessageRepo, ConversationRepo
@@ -61,6 +63,13 @@ async def get_config():
 @router.post("/config")
 async def update_config(data: UserConfig):
     save_config_dict(data.model_dump())
+    # MCP 路径下，工具跑在子进程里，读的是子进程启动时注入的旧 key。重启常驻会话
+    # 让子进程带着新 key 重新拉起（_inject_config_env 此刻读到的已是 reload 后的值）。
+    if USE_MCP:
+        try:
+            await mcp_client.restart()
+        except Exception:
+            logger.exception("[mcp] 配置热重载后重启会话失败")
     return {"success": True, "message": "配置已保存"}
 
 
