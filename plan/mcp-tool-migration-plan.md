@@ -100,8 +100,9 @@ MultiServerMCPClient({
 - **阶段 1（local）✅ 已完成（2026-06-29）**：迁 `rag_tool`+`lookup`。验证（全部通过）：`get_tools()` 见 5 工具（web 3 + local 2），rag_tool schema=`[query,k,section,doc_id]`**不含 user_id**；子进程内 chroma 初始化、`user_id=default` 过滤正确、rerank 走通（过取 30→重排 3）；lookup 返回正确 doc_id；**body 文本 MCP vs 内嵌逐字节一致**（BYTE-IDENTICAL，已排除 rerank API 服务端偶发抖动的干扰）。
   **并发专测（高风险）通过**：MCP 子进程持续检索（读）与父进程 delete+重新入库（写 `write_to_chroma`）交错并发，5 写 4 读零错误、**无 `database is locked`**。chromadb 1.5.x 走 SQLite + 各进程独立连接，本地单用户入库低频场景未触发锁冲突，稳态可接受（若日后高并发触发，缓解仍是入库串行化或把写也收进 local server）。
   实现细节：rag_tool/lookup 在内嵌世代是 `make_*(user_id)` **闭包工厂**，闭包已把 user_id 烘进去、产出的 `@tool` 签名本就不含 user_id，故 local_server 直接 `to_fastmcp(make_*(USER_ID))` 即满足计划「删闭包、user_id 不进 schema」目标，**无需改 rag_tool.py / lookup_local_paper_id.py**；graph.py 的 build_agent 已是按 `mcp_names` 剔除同名内嵌工具的通用逻辑，阶段 1 仅 `_ACTIVE_SERVERS` 加 `"local"`，**graph.py 零改动**。
+- **阶段 1.5（第三方质询闭环）⏳ 待执行（2026-06-30 锁定）**：阶段 1 经第三方（Gemini）质询 + 本地实测，暴露 1 个 P0 真回归 + 2 项技术债，须在推进阶段 2 前/中处理。详见下方「阶段 1 第三方质询闭环」。
 - **阶段 2（jina）**：迁 `jina`。验证：sub_llm 在子进程重建、分块打分耗时可接受、长文档不超时；url+query 看 scored_chunks，无 query 看全文截断。
-- **阶段 3（收尾）**：三 server 全切，封存老接线，补 spec hiddenimports，`pyinstaller physics_scholar.spec` 打包验证 frozen 子进程能起、工具可调、tray 退出无孤儿进程。
+- **阶段 3（收尾）**：三 server 全切，封存老接线，补 spec hiddenimports，`pyinstaller physics_scholar.spec` 打包验证 frozen 子进程能起、工具可调、tray 退出无孤儿进程。**追加 frozen 硬伤修复（见下方质询闭环 P0-b / P1-b）**：① config.py ROOT 加 `sys.frozen` 分支（否则 data/chroma/SQLite 写进 `_MEIPASS` 临时目录、重启即丢）；② 入口首行 `multiprocessing.freeze_support()` 防套娃；③ 实机任务管理器核验 Job Object 绑的是顶层 Bootloader PID、kill-on-close 真生效。
 
 ## 风险点（按概率排序）
 
@@ -153,6 +154,38 @@ MultiServerMCPClient({
 ## 阶段 1 实施笔记（2026-06-29）
 
 - 验证阶段发现本机生产 chroma collection `rag_langchain` 是 RAG 升级前的 **384 维历史废数据**（与当前 bge-m3/1024 维不兼容，检索必报维度错），且注册表里那条记录指向的 PDF 本体已在跨机同步中丢失——属 gitignored `data/` 手动同步的遗留漂移，非 MCP 迁移问题。已**重置生产库**：删 `rag_langchain` collection + 清 default 注册表，从 `data/pdfs/` 现有 8 篇 PDF 重新入库为 1024 维玩具数据（eval_baseline/eval_fixed 两个 1024 维评测库未动）。**换机继续前注意：各机的 `data/` 需自行保证为 bge-m3 时代的 1024 维库，旧机器若残留 384 维库会同样报错。**
+
+---
+
+## 阶段 1 第三方质询闭环（2026-06-30，结论已审核，预备执行）
+
+阶段 1 push 后经第三方（Gemini 3.1 pro）质询，3 项均已本地核代码 / 实测复核，结论与修复方向如下。**P0-a 是已实测坐实的真回归，优先级最高。**
+
+### P0-a：ChromaDB 跨进程「写后读」可见性 —— 已实测坐实，**真回归**
+- **实测结论**（两进程驱动 worker，worker 开长驻连接不重建，父进程写入带 sentinel 的新文档后 worker 立即查）：
+  - `similarity_search`（HNSW，进程内存路径）：**看不到**新写入（命中 0）。
+  - `_collection.get(where=...)`（SQLite 直读，BM25 路径用的就是它）：**看得到**（命中 1）。
+  - 即常驻子进程「脑裂」：`hybrid_search` 的 BM25 路能召回刚入库的论文、向量路召回不到，rerank 只在残缺候选池里排。
+- **为何是回归**：内嵌世代 agent 与入库共享主进程同一个 `get_vectorstore()` 单例 HNSW，入库后下一轮查询天然可见；MCP 把读拆进常驻子进程后才破。真实翻车场景＝「上传论文→立刻提问该篇」，向量召回静默劣化直到子进程重启。
+- **不采用 `mcp_client.restart()` 修复**（已核代码排除）：① `confirm_paper`（[routes.py:223](../src/api/routes.py#L223)）是 sync `def`，FastAPI 丢线程池 → 前端一次传多篇＝多个 `confirm_and_index` 写线程**真并发**；②「入库一次 restart 一次」在并行入库下＝**重启风暴**，且 `restart()` 不分 server，会**连带重启 web 子进程、把 S2/arxiv/openalex 速率锁归零**（恰是常驻会话当初要保住的东西）；③ restart 的 teardown↔rebuild 窗口内 `get_tools()` 返回 `[]`，撞上某轮 chat 的 `build_agent` → 当轮无 MCP 工具（竞态）。
+- **采用方案：local server 侧「惰性代际检查」（pull 式，Gemini 方案 B 的去风暴实现）**：
+  1. 主进程每次入库/删除成功后（`confirm_and_index` / `delete_paper` 末端），bump 一个轻量代际令牌——chroma 目录下一个 sentinel 文件，写其 mtime 或自增计数。
+  2. local server 的 rag_tool / lookup 在**每次查询开头**比对令牌，若已推进则重建 `get_vectorstore()` 单例后再查；否则照用。
+  - 收益：N 篇并行入库 bump N 次，下一次查询**只重建 1 次**（自动合并，无风暴）；**只动 local 的 chroma 连接，web/jina 子进程与速率锁完全不碰**；从不 teardown，无 `get_tools()` 空窗竞态。
+  - **执行坑**：[rag_tool.py:14](../src/rag/tools/rag_tool.py#L14) 在**模块级** `vs = get_vectorstore()` 且 `hybrid_search` 闭包到该 `vs`；只 reset `ingestor._vectorstore` 不够，须让 rag_tool 重新取（改 `hybrid_search`/`rag_tool` 内部按需 `get_vectorstore()`，或重建后回写模块级 `vs`）。
+  - 备选（重，留作日后高频入库场景）：把「写」也收进 local server，单进程内读写共享一个 HNSW，可见性问题自然消失。
+- **重测 gate**：复跑跨进程写后读实测，要求 HNSW 路径在入库后下一次查询命中新文档（令牌触发重建后 `HNSW>0`）；并验证并行入库 N 篇时 web 速率锁不被连带清零。
+
+### P1-a：`ToolMessage.content` 恒为 list-of-blocks —— 成立（技术债 / vendor lock-in）
+- adapters 的 `_convert_call_tool_result` 恒返回 `[{"type":"text","text": "<JSON>"}]`，破坏老内嵌工具的纯 `str` 行为（阶段 0 实施笔记 #5 已记，Gemini 独立复现）。
+- 当前不崩：`graph.py:_tool_ok`（[graph.py:122](../src/rag/graph.py#L122)）只读 `.status`、不碰 content。
+- 未来崩点（真）：接本地开源模型（Qwen/Llama）拼 prompt 格式错乱；或引入 LangChain Memory/Callbacks/OutputParser 对 list 调 `.split()` 等 → `AttributeError`。
+- **修复**：在 adapter 取回端做防御性展平——确认全为 text block 时 flatten 成纯 `str` 再交回 langchain 生态。低风险低成本。
+
+### P0-b / P1-b：Frozen（PyInstaller）多进程与路径陷阱 —— 部分已坐实，部分待阶段 3 实机
+- **P0-b 绝对路径（已核代码坐实，打包必炸）**：[config.py:10](../src/config.py#L10) `ROOT = Path(__file__).resolve().parent.parent` **无 `sys.frozen` 分支**；frozen 下 `__file__` 指向 `_MEIPASS` 临时解压目录 → `data/`/chroma/SQLite 写进临时目录、**重启即丢**。注意 [app.py:5-8](../app.py#L5) 自己有 frozen 分支、config.py 没有，二者不一致。修：config.py ROOT 加 frozen 分支，指向 **exe 真实所在目录**（非 `_MEIPASS`）。
+- **P1-b `freeze_support()`（缺失，低成本应补）**：全仓无 `multiprocessing.freeze_support`。当前 MCP 子进程靠 `PS_MCP_SERVER` env 分流 + `sys.exit(0)`（[app.py:21-25](../app.py#L21)）不走 multiprocessing，但 PyInstaller 官方要求 frozen 入口首行加，防子进程套娃。
+- **待阶段 3 实机（无法静态定论）**：[app.py:115](../app.py#L115) `AssignProcessToJobObject(GetCurrentProcess())` 绑的是否顶层 Bootloader 进程、用户从任务管理器强杀顶层 EXE 时 kill-on-close 是否真连带回收子进程树。
 
 ---
 
