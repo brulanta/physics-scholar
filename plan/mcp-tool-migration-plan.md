@@ -100,7 +100,7 @@ MultiServerMCPClient({
 - **阶段 1（local）✅ 已完成（2026-06-29）**：迁 `rag_tool`+`lookup`。验证（全部通过）：`get_tools()` 见 5 工具（web 3 + local 2），rag_tool schema=`[query,k,section,doc_id]`**不含 user_id**；子进程内 chroma 初始化、`user_id=default` 过滤正确、rerank 走通（过取 30→重排 3）；lookup 返回正确 doc_id；**body 文本 MCP vs 内嵌逐字节一致**（BYTE-IDENTICAL，已排除 rerank API 服务端偶发抖动的干扰）。
   **并发专测（高风险）通过**：MCP 子进程持续检索（读）与父进程 delete+重新入库（写 `write_to_chroma`）交错并发，5 写 4 读零错误、**无 `database is locked`**。chromadb 1.5.x 走 SQLite + 各进程独立连接，本地单用户入库低频场景未触发锁冲突，稳态可接受（若日后高并发触发，缓解仍是入库串行化或把写也收进 local server）。
   实现细节：rag_tool/lookup 在内嵌世代是 `make_*(user_id)` **闭包工厂**，闭包已把 user_id 烘进去、产出的 `@tool` 签名本就不含 user_id，故 local_server 直接 `to_fastmcp(make_*(USER_ID))` 即满足计划「删闭包、user_id 不进 schema」目标，**无需改 rag_tool.py / lookup_local_paper_id.py**；graph.py 的 build_agent 已是按 `mcp_names` 剔除同名内嵌工具的通用逻辑，阶段 1 仅 `_ACTIVE_SERVERS` 加 `"local"`，**graph.py 零改动**。
-- **阶段 1.5（第三方质询闭环）🔄 进行中（2026-06-30）**：阶段 1 经第三方（Gemini）质询 + 本地实测，暴露 1 个 P0 真回归 + 2 项技术债。**P0-a 已修复落地并通过重测 gate（见下）**；P1-a / P0-b / P1-b 仍待办。详见下方「阶段 1 第三方质询闭环」。
+- **阶段 1.5（第三方质询闭环）✅ 已完成（2026-06-30）**：阶段 1 经第三方（Gemini）质询 + 本地实测，暴露 1 个 P0 真回归 + 3 项技术债/硬伤。**四项（P0-a 写后读 + 句柄泄漏二轮、P0-b frozen 路径、P1-a content 展平、P1-b freeze_support）全部修复落地并各自验证**，详见下方「阶段 1 第三方质询闭环」。frozen 形态的实机核验（Job Object kill-on-close 真连带回收子进程树）留阶段 3。
 - **阶段 2（jina）**：迁 `jina`。验证：sub_llm 在子进程重建、分块打分耗时可接受、长文档不超时；url+query 看 scored_chunks，无 query 看全文截断。
 - **阶段 3（收尾）**：三 server 全切，封存老接线，补 spec hiddenimports，`pyinstaller physics_scholar.spec` 打包验证 frozen 子进程能起、工具可调、tray 退出无孤儿进程。**追加 frozen 硬伤修复（见下方质询闭环 P0-b / P1-b）**：① config.py ROOT 加 `sys.frozen` 分支（否则 data/chroma/SQLite 写进 `_MEIPASS` 临时目录、重启即丢）；② 入口首行 `multiprocessing.freeze_support()` 防套娃；③ 实机任务管理器核验 Job Object 绑的是顶层 Bootloader PID、kill-on-close 真生效。
 
@@ -185,11 +185,15 @@ MultiServerMCPClient({
   - 备选（重，留作日后高频入库场景）：把「写」也收进 local server，单进程内读写共享一个 HNSW，可见性问题自然消失。
 - **重测 gate**：复跑跨进程写后读实测，要求 HNSW 路径在入库后下一次查询命中新文档（令牌触发重建后 `HNSW>0`）；并验证并行入库 N 篇时 web 速率锁不被连带清零。
 
-### P1-a：`ToolMessage.content` 恒为 list-of-blocks —— 成立（技术债 / vendor lock-in）
+### P1-a：`ToolMessage.content` 恒为 list-of-blocks —— ✅ 已修复落地（2026-06-30）
 - adapters 的 `_convert_call_tool_result` 恒返回 `[{"type":"text","text": "<JSON>"}]`，破坏老内嵌工具的纯 `str` 行为（阶段 0 实施笔记 #5 已记，Gemini 独立复现）。
-- 当前不崩：`graph.py:_tool_ok`（[graph.py:122](../src/rag/graph.py#L122)）只读 `.status`、不碰 content。
-- 未来崩点（真）：接本地开源模型（Qwen/Llama）拼 prompt 格式错乱；或引入 LangChain Memory/Callbacks/OutputParser 对 list 调 `.split()` 等 → `AttributeError`。
-- **修复**：在 adapter 取回端做防御性展平——确认全为 text block 时 flatten 成纯 `str` 再交回 langchain 生态。低风险低成本。
+- 当前不崩：`graph.py:_tool_ok`（[graph.py:122](../src/rag/graph.py#L122)）只读 `.status`、不碰 content。未来崩点（真）：接本地开源模型（Qwen/Llama）拼 prompt 格式错乱；或引入 LangChain Memory/Callbacks/OutputParser 对 list 调 `.split()` 等 → `AttributeError`。
+- **修复**：在 adapter 取回端（[mcp_client.py](../src/rag/mcp_client.py) `_patch_tool_flatten`）就地包装每个 load 出来的工具的**两条出口**，全为 text block 时展平成纯 `str`：
+  - **成功路径**：工具 `coroutine` 返回 `(content, artifact)`（`response_format=content_and_artifact`）→ 展平 content、保留 artifact。
+  - **错误路径**：MCP `isError=True` 走 `handle_tool_error` 回调返回 list-of-blocks（**不经 coroutine 返回值**），单独包一层展平、`status="error"` 不受影响（`_tool_ok` 仍正确）。
+  - 出现 image/file 等非文本 block 时保持原 list 不动（本项目 6 工具全部只返回文本，理论上不触发），不破坏多模态。
+- **核源依据**：list 包装发生在 adapters 0.3.0 [tools.py:268-271](file) `_convert_call_tool_result` 与 [tools.py:154-157](file) `_handle_mcp_tool_error`；工具是 `StructuredTool(response_format="content_and_artifact", coroutine=..., handle_tool_error=...)`（[tools.py:528-536](file)）。
+- **验证**：合成 StructuredTool 探针 + **真实 local server 端到端**双覆盖——成功路径（`lookup` 正确 list 参数）content=纯 str / status=success；错误路径（schema 校验失败）content=纯 str / status=error 保留。pytest 非 live 基线不破。
 
 ### P0-b / P1-b：Frozen（PyInstaller）多进程与路径陷阱 —— 部分已坐实，部分待阶段 3 实机
 - **P0-b 绝对路径 —— ✅ 已修复落地（2026-06-30）**：[config.py](../src/config.py) `ROOT` 原 `Path(__file__).resolve().parent.parent` **无 `sys.frozen` 分支**；frozen 下 `__file__` 指向 `_MEIPASS` 临时解压目录 → `data/`/chroma/SQLite/用户 yaml 写进临时目录、**重启即丢**。

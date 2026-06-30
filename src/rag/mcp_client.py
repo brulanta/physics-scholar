@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import sys
 import asyncio
+import functools
 import contextlib
 from pathlib import Path
 
@@ -39,6 +40,59 @@ from src.mcp_servers import _inject_config_env
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def _flatten_text_blocks(content):
+    """把 adapters 产出的 list-of-text-blocks 展平回纯 str；其它形态原样返回。
+
+    langchain-mcp-adapters 0.3.0 的 `_convert_call_tool_result` 恒把工具返回包成
+    `[{"type":"text","text": "<JSON字符串>"}]`，破坏了老内嵌工具「返回纯 str」的行为
+    （阶段 0 实施笔记 #5 / 阶段 1.5 P1-a）。本项目 6 工具全部只返回文本（JSON 字符串或纯
+    文本），故「全为 text block」时拼回纯 str，行为与内嵌世代一致；一旦出现 image/file
+    等非文本 block（理论上本项目不会），保持原 list 不动，不破坏多模态。
+    """
+    if (
+        isinstance(content, list)
+        and content
+        and all(isinstance(b, dict) and b.get("type") == "text" for b in content)
+    ):
+        return "".join(b.get("text", "") for b in content)
+    return content
+
+
+def _patch_tool_flatten(tool):
+    """就地包装单个 adapter 工具的成功/错误两条出口，使 ToolMessage.content 回归纯 str。
+
+    - 成功路径：工具 `coroutine` 返回 `(content, artifact)`（response_format=
+      content_and_artifact）；展平 content、保留 artifact。
+    - 错误路径：MCP `isError=True` 经 `handle_tool_error` 回调返回 list-of-blocks，
+      不走 coroutine 返回值；单独包一层，展平后 `status="error"` 不受影响。
+    两处包装均为幂等纯转换，探针实测保留 artifact 与 status。返回工具本身（就地改）。
+    """
+    orig_coro = getattr(tool, "coroutine", None)
+    if orig_coro is not None:
+
+        @functools.wraps(orig_coro)
+        async def _coro(*args, **kwargs):
+            result = await orig_coro(*args, **kwargs)
+            # content_and_artifact 形态：(content, artifact)
+            if isinstance(result, tuple) and len(result) == 2:
+                content, artifact = result
+                return _flatten_text_blocks(content), artifact
+            return _flatten_text_blocks(result)
+
+        tool.coroutine = _coro
+
+    err_handler = getattr(tool, "handle_tool_error", None)
+    if callable(err_handler):
+
+        @functools.wraps(err_handler)
+        def _err(exc):
+            return _flatten_text_blocks(err_handler(exc))
+
+        tool.handle_tool_error = _err
+
+    return tool
 
 # 项目根（与 app.py 的 ROOT 同义：dev 下为仓库根，frozen 下为 _MEIPASS）
 if getattr(sys, "frozen", False):
@@ -108,6 +162,9 @@ class _MCPClientSingleton:
                     self._client.session(name)
                 )
                 server_tools = await load_mcp_tools(session, server_name=name)
+                # P1-a：把 adapter 的 list-of-text-blocks 出口展平回纯 str，
+                # 与老内嵌工具行为一致（避免下游对 list 调 .split() 等炸裂）。
+                server_tools = [_patch_tool_flatten(t) for t in server_tools]
                 tools.extend(server_tools)
                 logger.info(
                     "[mcp] server '%s' 已就绪，加载 %d 个工具：%s",
