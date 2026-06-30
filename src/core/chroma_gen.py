@@ -88,6 +88,18 @@ def _rebuild() -> None:
     from src.core import ingestor
     from src.rag.tools import rag_tool
 
+    # 先显式 stop 旧 System，再清字典。clear_system_cache() 本身只把 ClassVar 字典重置为 {}，
+    # **不调 system.stop()**（见 chromadb 1.5.5 shared_system_client.py：_release_system 才会
+    # stop，clear_system_cache 不会）。而释放 SQLite 连接 / HNSW mmap 句柄的唯一路径是
+    # RustBindingsAPI.stop() → `del self.bindings`。System 与其 component 互持引用成环，靠
+    # 引用计数收不掉、只能等周期 GC——在常驻子进程里，每次入库后重建都会泄漏一批句柄直到下次
+    # 周期 GC。本机探针：15 次重建仅 clear 泄漏 +245 句柄（GC 后归零）；显式 stop 后 +5 持平、
+    # **无需 gc.collect()**。故这里显式 stop 旧 System（不强制 GC，避开查询热路上的全堆暂停）。
+    for sysobj in list(SharedSystemClient._identifier_to_system.values()):
+        try:
+            sysobj.stop()
+        except Exception:  # stop 失败不阻断重建——最坏退化为旧的「等 GC 回收」行为
+            pass
     SharedSystemClient.clear_system_cache()  # ★ 驱逐进程级缓存 System/HNSW
     ingestor._vectorstore = None  # 下次 get_vectorstore 真正重建 Chroma
     rag_tool.vs = ingestor.get_vectorstore()  # 回写模块全局，hybrid_search/直接路同时生效
