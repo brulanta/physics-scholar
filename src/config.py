@@ -1,13 +1,21 @@
 # src/config.py
 from pathlib import Path
 from dotenv import load_dotenv
-import os, yaml
+import os, sys, yaml
 from pydantic import BaseModel
 
 load_dotenv()
 
 # ── 路径 ──────────────────────────────────────────────────
-ROOT = Path(__file__).resolve().parent.parent
+# frozen（PyInstaller onedir）下 __file__ 指向 _MEIPASS 临时解压目录，data/chroma/SQLite
+# 与用户 yaml 若写进那里会在重启/退出时丢失。故 ROOT 必须指向 **exe 真实所在目录**（可写、
+# 持久），而非 _MEIPASS。注意：这与 app.py 的 ROOT（=_MEIPASS，供 sys.path 导入打包内 src）
+# 故意取向相反——config.ROOT 只管「可写持久数据 + 用户 yaml」，只读打包资产（dist/profiles）
+# 由各自的 __file__ 落在 _MEIPASS、不归 config.ROOT 管。dev 下走原逻辑（仓库根）。
+if getattr(sys, "frozen", False):
+    ROOT = Path(sys.executable).resolve().parent
+else:
+    ROOT = Path(__file__).resolve().parent.parent
 
 DATA_DIR = ROOT / "data"
 PDF_DIR = DATA_DIR / "pdfs"

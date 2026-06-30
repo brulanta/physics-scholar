@@ -192,7 +192,10 @@ MultiServerMCPClient({
 - **修复**：在 adapter 取回端做防御性展平——确认全为 text block 时 flatten 成纯 `str` 再交回 langchain 生态。低风险低成本。
 
 ### P0-b / P1-b：Frozen（PyInstaller）多进程与路径陷阱 —— 部分已坐实，部分待阶段 3 实机
-- **P0-b 绝对路径（已核代码坐实，打包必炸）**：[config.py:10](../src/config.py#L10) `ROOT = Path(__file__).resolve().parent.parent` **无 `sys.frozen` 分支**；frozen 下 `__file__` 指向 `_MEIPASS` 临时解压目录 → `data/`/chroma/SQLite 写进临时目录、**重启即丢**。注意 [app.py:5-8](../app.py#L5) 自己有 frozen 分支、config.py 没有，二者不一致。修：config.py ROOT 加 frozen 分支，指向 **exe 真实所在目录**（非 `_MEIPASS`）。
+- **P0-b 绝对路径 —— ✅ 已修复落地（2026-06-30）**：[config.py](../src/config.py) `ROOT` 原 `Path(__file__).resolve().parent.parent` **无 `sys.frozen` 分支**；frozen 下 `__file__` 指向 `_MEIPASS` 临时解压目录 → `data/`/chroma/SQLite/用户 yaml 写进临时目录、**重启即丢**。
+  - **修复**：`ROOT` 加 frozen 分支 `Path(sys.executable).resolve().parent`（exe 真实所在目录，可写持久），dev 走原逻辑（仓库根）。**与 [app.py:5-8](../app.py#L5) 的 frozen ROOT 故意取向相反**——app.py 的 ROOT=`_MEIPASS`（供 `sys.path.insert` 导入打包内 `src`）；config.ROOT 只管「可写持久数据 + 用户 yaml」。只读打包资产不归 config.ROOT 管、已各自正确：`dist/`（[main.py:46](../src/main.py#L46) 自己的 `__file__` → `_MEIPASS/dist` ✓）、prompts `profiles/`（[builder.py:180](../src/rag/prompts/builder.py#L180) 自己的 `__file__` ✓）、`mcp_client.py` 的 ROOT 已自带 `_MEIPASS` 分支 ✓。
+  - **验证**：dev 分支 ROOT 与改前**逐字节一致**（pytest 不可能因此回归，frozen 分支仅 PyInstaller 下激活）；模拟 `sys.frozen`/`sys.executable` 核 frozen 分支 ROOT 落在 exe 同级、不含 `_MEI`；config 全消费者（ingestor/registry/init_SQLite/routes/rag_tool/chroma_gen）import 链干净。
+  - **行为备注（留打包阶段）**：spec 把出厂 `config/user_config.yaml` 打进 `_MEIPASS/config/`，但 `_yaml_path` 现指向 exe 同级 → **首次运行该文件尚不存在**。`_load_yaml()` 缺文件返回 `{}`、`save_config_dict` 自带 `parent.mkdir` → 首跑读 .env/硬编码默认、首次「保存设置」时在 exe 同级建 `config/`，行为正确（用户填设置页前为空配置）。若日后要让出厂默认值随首启自动落地到可写目录，需在启动时显式 copy `_MEIPASS/config` → exe 同级（本次不做，记此备查）。
 - **P1-b `freeze_support()`（缺失，低成本应补）**：全仓无 `multiprocessing.freeze_support`。当前 MCP 子进程靠 `PS_MCP_SERVER` env 分流 + `sys.exit(0)`（[app.py:21-25](../app.py#L21)）不走 multiprocessing，但 PyInstaller 官方要求 frozen 入口首行加，防子进程套娃。
 - **待阶段 3 实机（无法静态定论）**：[app.py:115](../app.py#L115) `AssignProcessToJobObject(GetCurrentProcess())` 绑的是否顶层 Bootloader 进程、用户从任务管理器强杀顶层 EXE 时 kill-on-close 是否真连带回收子进程树。
 
