@@ -102,9 +102,10 @@ else:
 
 USER_ID = os.getenv("PS_USER_ID", "default")
 
-# 阶段 0 挂 web（无状态网络工具）；阶段 1 并入 local（rag + lookup，依赖 chroma）。
-# jina 在阶段 2 并入。未挂载的工具仍走老内嵌路径（PS_USE_MCP 互斥）。
-_ACTIVE_SERVERS: tuple[str, ...] = ("web", "local")
+# 阶段 0 挂 web（无状态网络工具）；阶段 1 并入 local（rag + lookup，依赖 chroma）；
+# 阶段 2 并入 jina（依赖 sub_llm 分片打分）。至此 6 工具全部 MCP 化。
+# 未挂载的工具仍走老内嵌路径（PS_USE_MCP 互斥）。
+_ACTIVE_SERVERS: tuple[str, ...] = ("web", "local", "jina")
 
 
 def _server_params(name: str) -> dict:
