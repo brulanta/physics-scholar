@@ -140,57 +140,113 @@ def _active_connections() -> dict[str, dict]:
 
 
 class _MCPClientSingleton:
-    """进程级单例：常驻会话 + 工具缓存。"""
+    """进程级单例：常驻会话 + 工具缓存。
+
+    ## 为什么需要专属 owner 任务（anyio cancel scope 跨任务退出的坑）
+    MCP stdio 会话（mcp.stdio_client / ClientSession）内部基于 anyio task group +
+    cancel scope。anyio 铁律：**cancel scope 必须在进入它的同一个任务里退出**。
+    startup() 在 FastAPI lifespan 任务里进入这些 session；若 restart()/shutdown()
+    从**请求任务**（POST /api/config 热重载）里 `aclose` 同一个 stack，cancel scope
+    会跨任务退出 → anyio 把取消反向传播回 lifespan 任务 → `CancelledError: Cancelled
+    via cancel scope ... by Task-xxx`，lifespan 任务被误杀、后端报错、配置重启框迟迟不弹。
+
+    解法：一个常驻 `_owner` 任务独占所有 session 的 enter/exit；startup/restart/
+    shutdown 只对它发「起（create_task）/停（Event.set）」信号，enter 与 exit 永远落在
+    owner 自己这一个任务里，与调用方所在的任务（lifespan / 请求）无关。
+    """
 
     def __init__(self) -> None:
-        self._client: MultiServerMCPClient | None = None
-        self._stack: contextlib.AsyncExitStack | None = None
         self._tools: list = []
         self._lock = asyncio.Lock()
+        self._owner_task: asyncio.Task | None = None
+        self._stop_event: asyncio.Event | None = None
+
+    async def _owner(self, ready: asyncio.Future, stop_event: asyncio.Event) -> None:
+        """常驻任务：进入全部 session → 置 ready → 等 stop_event → 在**本任务**内退出全部 session。
+
+        - 加载阶段的异常经 `ready` 上报给 startup（startup 据此判断启动成败）。
+        - 停止阶段（async with 退出）的 teardown 在 owner 任务内完成，cancel scope 同任务
+          退出、无跨任务噪声；残留的 benign 噪声由外层 except 兜底吞掉。
+        """
+        connections = _active_connections()
+        client = MultiServerMCPClient(connections)
+        try:
+            async with contextlib.AsyncExitStack() as stack:
+                try:
+                    tools: list = []
+                    for name in connections:
+                        session = await stack.enter_async_context(
+                            client.session(name)
+                        )
+                        server_tools = await load_mcp_tools(session, server_name=name)
+                        # P1-a：把 adapter 的 list-of-text-blocks 出口展平回纯 str，
+                        # 与老内嵌工具行为一致（避免下游对 list 调 .split() 等炸裂）。
+                        server_tools = [_patch_tool_flatten(t) for t in server_tools]
+                        tools.extend(server_tools)
+                        logger.info(
+                            "[mcp] server '%s' 已就绪，加载 %d 个工具：%s",
+                            name,
+                            len(server_tools),
+                            [t.name for t in server_tools],
+                        )
+                    self._tools = tools
+                except BaseException as e:
+                    # 加载失败：上报 startup；return 触发 async with 在本任务内 teardown
+                    # 已打开的部分 session。
+                    if not ready.done():
+                        ready.set_exception(e)
+                    return
+                ready.set_result(None)  # 通知 startup：工具已就绪
+                await stop_event.wait()  # 常驻，直到 shutdown/restart 发停止信号
+            # 退出 async with → 在本任务内 aclose 所有 session（cancel scope 同任务退出）
+        except BaseException:
+            # 停止阶段的 stdio teardown 偶发 benign 噪声（anyio cancel-scope / Windows
+            # ProcessLookup 等）；会话即将释放、子进程由 Job Object 兜底回收，静默吞掉。
+            logger.debug("[mcp] owner teardown 噪声已吞", exc_info=True)
+        finally:
+            self._tools = []
 
     async def startup(self) -> None:
-        """拉起所有 active server 的常驻 stdio 会话并缓存工具。lifespan 调一次。"""
+        """拉起常驻 owner 任务并等待工具加载完成。lifespan 调一次。"""
         async with self._lock:
-            if self._stack is not None:
+            if self._owner_task is not None:
                 logger.warning("[mcp] startup 重复调用，已忽略")
                 return
-            connections = _active_connections()
-            self._client = MultiServerMCPClient(connections)
-            self._stack = contextlib.AsyncExitStack()
-            tools: list = []
-            for name in connections:
-                session = await self._stack.enter_async_context(
-                    self._client.session(name)
-                )
-                server_tools = await load_mcp_tools(session, server_name=name)
-                # P1-a：把 adapter 的 list-of-text-blocks 出口展平回纯 str，
-                # 与老内嵌工具行为一致（避免下游对 list 调 .split() 等炸裂）。
-                server_tools = [_patch_tool_flatten(t) for t in server_tools]
-                tools.extend(server_tools)
-                logger.info(
-                    "[mcp] server '%s' 已就绪，加载 %d 个工具：%s",
-                    name,
-                    len(server_tools),
-                    [t.name for t in server_tools],
-                )
-            self._tools = tools
+            loop = asyncio.get_running_loop()
+            ready: asyncio.Future = loop.create_future()
+            stop_event = asyncio.Event()
+            task = asyncio.create_task(self._owner(ready, stop_event))
+            try:
+                await ready  # 等工具就绪；加载失败则在此抛出
+            except BaseException:
+                # owner 已在自身任务内 teardown 部分打开的 session，等它收尾再抛
+                with contextlib.suppress(BaseException):
+                    await task
+                self._tools = []
+                raise
+            self._owner_task = task
+            self._stop_event = stop_event
 
     async def shutdown(self) -> None:
-        """关闭所有常驻会话（子进程随之退出）。lifespan 退出时调用。"""
+        """给 owner 任务发停止信号并等它在自身任务内退出全部会话。lifespan 退出 / restart 调用。"""
         async with self._lock:
-            if self._stack is None:
+            if self._owner_task is None:
                 return
-            # stdio 会话基于 anyio task group，teardown 偶发抛 cancel-scope 噪声，
-            # 静默吞掉（进程即将退出，子进程会被一并回收）。
+            self._stop_event.set()  # 通知 owner：退出 async with → 在 owner 任务内 teardown
             with contextlib.suppress(BaseException):
-                await self._stack.aclose()
-            self._stack = None
-            self._client = None
+                await self._owner_task  # 等 teardown 完成（在 owner 任务里发生，非本任务）
+            self._owner_task = None
+            self._stop_event = None
             self._tools = []
             logger.info("[mcp] 所有 MCP 会话已关闭")
 
     async def restart(self) -> None:
-        """重启所有会话，让子进程重读 yaml 拿新 key（配置热重载后调用）。"""
+        """重启所有会话，让子进程重读 yaml 拿新 key（配置热重载后调用）。
+
+        shutdown 只给 owner 发信号、在 owner 任务内 teardown；startup 另起新 owner 任务。
+        故即便本方法被**请求任务**调用，session 的 enter/exit 仍全在 owner 任务内，
+        不会把取消泄漏回 lifespan 任务。
+        """
         logger.info("[mcp] 重启 MCP 会话以应用新配置")
         await self.shutdown()
         await self.startup()

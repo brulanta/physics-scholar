@@ -109,6 +109,9 @@ MultiServerMCPClient({
   - **打包 + frozen 子进程实证 ✅**：`pyinstaller physics_scholar.spec --noconfirm` EXIT=0。① `PS_MCP_SERVER=web` 直跑 exe + EOF stdin → 干净退出、stderr 无 ImportError；② **真 MCP client 驱动 frozen exe 起全部 3 server 并 JSON-RPC 握手 list_tools**：web 3 / local 2 / jina 1，全通过——坐实 frozen 子进程的 import 链（含 local 的 chromadb 启动、jina 的 llm/sub_llm import）与协议握手在打包态成立。临时脚本用完即删（信任边界）。
   - **打包 wart（已记，本阶段不修）**：spec 把整个 `ROOT/dist`（前端产物）作 datas 打入，但 `dist/` 同时含上一轮 `dist/PhysicsScholar/` 打包输出，PyInstaller 递归进旧构建文件刷一大片「Ignoring non-existent resource」WARNING——无害但 bundle 体积虚胖。日后清理方向：打包前清 `dist/PhysicsScholar/`，或把前端产物移出 `dist/` 顶层另置目录再改 spec datas 指向。
   - **❗ 待人工实机核验（无法 headless 定论，见下方「阶段 3 人工核验清单」）**：GUI tray-app 完整跑起（浏览器自动开、前端触发各工具）、用户从任务管理器强杀顶层 EXE 时 Job Object kill-on-close 是否连带回收 3 个 MCP 子进程树（无孤儿）。
+  - **实机核验回报（2026-06-30）**：
+    - **Job Object kill-on-close ✅ 实机通过**：托盘退出 / 任务管理器结束顶层任务 → 整组 `PhysicsScholar.exe`（主 + 3 MCP 子进程）一并退出，无孤儿。计划风险 #1 闭环。
+    - **P2-a 配置热重载 restart 跨任务取消 BUG ✅ 已修复**：用户实机在设置页保存主 LLM 配置后，后台打印 `CancelledError: Cancelled via cancel scope ... by Task-101`（重启框迟弹、后台报错）。**根因**：MCP stdio 会话（mcp.stdio_client / ClientSession）内部基于 anyio task group + cancel scope，anyio 铁律是 cancel scope 必须在**进入它的同一任务**里退出；旧实现 `startup()` 在 lifespan 任务进入 session，而 `POST /api/config → restart() → shutdown()` 从**请求任务** `aclose` 同一 stack → cancel scope 跨任务退出 → 取消反向传播回 lifespan 任务、误杀之。仅 restart 触发（startup/shutdown 同在 lifespan 任务，故阶段 0-2 未暴露；阶段 2 测试也在同一任务驱动 restart 而漏网）。**修复**：[mcp_client.py](../src/rag/mcp_client.py) 重构为**专属 owner 任务**独占所有 session enter/exit，`startup/restart/shutdown` 只对它发起/停信号（`create_task` / `asyncio.Event`），enter 与 exit 永远落在 owner 自己这一个任务，与调用方任务（lifespan / 请求）解耦。**验证**：临时脚本复刻「startup 在 A 任务、restart 从 B 任务调用」的真实场景 → 模拟 lifespan 任务不再被取消、restart 后 6 工具齐全（RC=0）；脚本用完即删。已重打 frozen exe 待用户复测设置页保存。
 
 ## 风险点（按概率排序）
 
