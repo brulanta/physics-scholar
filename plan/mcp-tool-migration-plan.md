@@ -100,7 +100,7 @@ MultiServerMCPClient({
 - **阶段 1（local）✅ 已完成（2026-06-29）**：迁 `rag_tool`+`lookup`。验证（全部通过）：`get_tools()` 见 5 工具（web 3 + local 2），rag_tool schema=`[query,k,section,doc_id]`**不含 user_id**；子进程内 chroma 初始化、`user_id=default` 过滤正确、rerank 走通（过取 30→重排 3）；lookup 返回正确 doc_id；**body 文本 MCP vs 内嵌逐字节一致**（BYTE-IDENTICAL，已排除 rerank API 服务端偶发抖动的干扰）。
   **并发专测（高风险）通过**：MCP 子进程持续检索（读）与父进程 delete+重新入库（写 `write_to_chroma`）交错并发，5 写 4 读零错误、**无 `database is locked`**。chromadb 1.5.x 走 SQLite + 各进程独立连接，本地单用户入库低频场景未触发锁冲突，稳态可接受（若日后高并发触发，缓解仍是入库串行化或把写也收进 local server）。
   实现细节：rag_tool/lookup 在内嵌世代是 `make_*(user_id)` **闭包工厂**，闭包已把 user_id 烘进去、产出的 `@tool` 签名本就不含 user_id，故 local_server 直接 `to_fastmcp(make_*(USER_ID))` 即满足计划「删闭包、user_id 不进 schema」目标，**无需改 rag_tool.py / lookup_local_paper_id.py**；graph.py 的 build_agent 已是按 `mcp_names` 剔除同名内嵌工具的通用逻辑，阶段 1 仅 `_ACTIVE_SERVERS` 加 `"local"`，**graph.py 零改动**。
-- **阶段 1.5（第三方质询闭环）⏳ 待执行（2026-06-30 锁定）**：阶段 1 经第三方（Gemini）质询 + 本地实测，暴露 1 个 P0 真回归 + 2 项技术债，须在推进阶段 2 前/中处理。详见下方「阶段 1 第三方质询闭环」。
+- **阶段 1.5（第三方质询闭环）🔄 进行中（2026-06-30）**：阶段 1 经第三方（Gemini）质询 + 本地实测，暴露 1 个 P0 真回归 + 2 项技术债。**P0-a 已修复落地并通过重测 gate（见下）**；P1-a / P0-b / P1-b 仍待办。详见下方「阶段 1 第三方质询闭环」。
 - **阶段 2（jina）**：迁 `jina`。验证：sub_llm 在子进程重建、分块打分耗时可接受、长文档不超时；url+query 看 scored_chunks，无 query 看全文截断。
 - **阶段 3（收尾）**：三 server 全切，封存老接线，补 spec hiddenimports，`pyinstaller physics_scholar.spec` 打包验证 frozen 子进程能起、工具可调、tray 退出无孤儿进程。**追加 frozen 硬伤修复（见下方质询闭环 P0-b / P1-b）**：① config.py ROOT 加 `sys.frozen` 分支（否则 data/chroma/SQLite 写进 `_MEIPASS` 临时目录、重启即丢）；② 入口首行 `multiprocessing.freeze_support()` 防套娃；③ 实机任务管理器核验 Job Object 绑的是顶层 Bootloader PID、kill-on-close 真生效。
 
@@ -161,7 +161,15 @@ MultiServerMCPClient({
 
 阶段 1 push 后经第三方（Gemini 3.1 pro）质询，3 项均已本地核代码 / 实测复核，结论与修复方向如下。**P0-a 是已实测坐实的真回归，优先级最高。**
 
-### P0-a：ChromaDB 跨进程「写后读」可见性 —— 已实测坐实，**真回归**
+### P0-a：ChromaDB 跨进程「写后读」可见性 —— ✅ 已修复落地（2026-06-30，commit 待提交）
+**修复实现**：新增 [src/core/chroma_gen.py](../src/core/chroma_gen.py)（代际令牌 + 惰性重建，单一真相源）。主进程 `confirm_and_index` / `delete_paper` 成功末端 `chroma_gen.bump()`（写 chroma 目录下 `.gen_token`，内容为单调 `time_ns`，tmp+os.replace 原子替换）；`rag_tool` 查询第一行 `chroma_gen.ensure_fresh()`（`PS_MCP_SERVER` 门控，内嵌路径 no-op），令牌推进才重建本子进程 chroma 连接；`local_server.py` 启动 `chroma_gen.init()` 记基线。双检锁保证并发只重建一次。
+- **★ 超出原笔记的关键发现（已实测坐实并修正方案）**：chromadb 1.5.5 的 `SharedSystemClient`（`chromadb/api/shared_system_client.py`）把 `System`（含 Rust HNSW segment / SQLite 连接）按 `persist_directory` 缓存在**进程级 `ClassVar` 字典**里。**只 `ingestor._vectorstore=None` 再 `Chroma(persist_directory=...)` 不够**——会拿回同一个缓存 System / 旧 HNSW，仍看不到新写入。`_rebuild` 必须先 `SharedSystemClient.clear_system_cache()` 驱逐缓存，再重建并回写 `rag_tool.vs`。两进程探针对照实测：不清缓存命中 0（甚至 InternalError）、清缓存+重建后命中。
+- **附带修正原笔记措辞**：`rag_tool.vs` 是**模块级全局变量**（非闭包）；`hybrid_search`（`store ... else vs`）与直接路都在**调用时**读模块全局 `vs`，故重建后回写 `rag_tool.vs=新 store` 对两条路同时生效。`lookup` 每次开新 SQLite 连接读注册表、不碰 chroma，**无需改**。
+- **重测 gate 已通过**：临时两进程脚本走生产路径（`write_to_chroma`+`bump` / 生产 `rag_tool`+`ensure_fresh`），关 hybrid/rerank 隔离 HNSW 向量路 → 入库后下一次查询命中新文档（`fix_visible=True`）；对照组阉割 `clear_system_cache` 复现失效。`pytest --ignore=tests/test_rag_chain.py` 116 passed（4 失败均为 pre-existing：test_backend 需 live server、test_s2 stale 断言，与本改动无关）。脚本已删（信任边界：tests//scripts/ 不留库）。
+
+> 以下为修复前的分析记录（保留备查）：
+
+#### 原始分析：已实测坐实，**真回归**
 - **实测结论**（两进程驱动 worker，worker 开长驻连接不重建，父进程写入带 sentinel 的新文档后 worker 立即查）：
   - `similarity_search`（HNSW，进程内存路径）：**看不到**新写入（命中 0）。
   - `_collection.get(where=...)`（SQLite 直读，BM25 路径用的就是它）：**看得到**（命中 1）。

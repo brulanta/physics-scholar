@@ -28,8 +28,13 @@ from langchain_mcp_adapters.tools import to_fastmcp
 
 from src.rag.tools.rag_tool import make_rag_tool
 from src.rag.tools.lookup_local_paper_id import make_paper_id_search_tool
+from src.core import chroma_gen
 
 USER_ID = os.getenv("PS_USER_ID", "default")
+
+# 记录启动时的向量库代际基线为「已生效」，首查不空转重建；之后主进程每次入库/删除
+# bump 令牌，rag_tool 查询开头 ensure_fresh() 比对到推进才重建本子进程 chroma 连接。
+chroma_gen.init()
 
 mcp = FastMCP(
     "local",

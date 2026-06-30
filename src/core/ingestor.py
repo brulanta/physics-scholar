@@ -1,4 +1,4 @@
-from src.core import registry, hash_file, extractor, parser, chunker
+from src.core import registry, hash_file, extractor, parser, chunker, chroma_gen
 from pathlib import Path
 from datetime import datetime
 from langchain_chroma import Chroma
@@ -125,6 +125,7 @@ def delete_paper(doc_id: str, user_id: str = "default"):
         existed_any = res1.get("existed") or res2.get("existed") or res3.get("existed")
 
         if existed_any:
+            chroma_gen.bump()  # 删除改变向量库代际，通知常驻子进程下次查询重建连接
             return {"success": True, "status": "deleted", "detail": "资源已清理"}
         else:
             return {
@@ -213,6 +214,7 @@ def confirm_and_index(
 
         # 5. 全部成功，回填并更新状态
         registry.update_after_index(paper_meta.doc_id, chunk_count, page_count, user_id)
+        chroma_gen.bump()  # 入库改变向量库代际，通知常驻子进程下次查询重建连接
         return {"success": True}
 
     except Exception as e:

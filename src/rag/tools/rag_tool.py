@@ -2,6 +2,7 @@ import requests  # 已是依赖（无 torch），用于调硅基流动 /rerank
 from rank_bm25 import BM25Okapi
 from langchain_core.documents import Document
 from src.core.ingestor import get_vectorstore
+from src.core import chroma_gen
 from src.core.chunker import _CJK, _WORD  # 复用 chunker 的 CJK/英文词正则，分词口径一致
 from src import config  # 调用时取 EMBEDDING_*/RERANK_*，跟随 reload_config
 from pydantic import BaseModel, Field
@@ -178,6 +179,9 @@ def make_rag_tool(user_id: str):
         传入 doc_id，检索范围限定为该论文。doc_id 由 lookup_local_paper_id 获取。
         section 参数可选 body（正文）或 reference（参考文献）。
         """
+        # 0. 跨进程写后读守卫：若主进程已入库/删除（代际令牌推进），重建本子进程的
+        #    chroma 连接，否则常驻 HNSW 看不到新文档。内嵌路径下为 no-op。
+        chroma_gen.ensure_fresh()
 
         # 1. 调用外部的 build_filter，逻辑清晰且可复用
         search_filter = build_filter(user_id=user_id, section=section, doc_id=doc_id)
