@@ -103,7 +103,12 @@ MultiServerMCPClient({
 - **阶段 1.5（第三方质询闭环）✅ 已完成（2026-06-30）**：阶段 1 经第三方（Gemini）质询 + 本地实测，暴露 1 个 P0 真回归 + 3 项技术债/硬伤。**四项（P0-a 写后读 + 句柄泄漏二轮、P0-b frozen 路径、P1-a content 展平、P1-b freeze_support）全部修复落地并各自验证**，详见下方「阶段 1 第三方质询闭环」。frozen 形态的实机核验（Job Object kill-on-close 真连带回收子进程树）留阶段 3。
 - **阶段 2（jina）✅ 已完成（2026-06-30）**：迁 `jina`。新建 [src/mcp_servers/jina_server.py](../src/mcp_servers/jina_server.py)（`to_fastmcp(jina_tool)`，业务体零改写），`mcp_client._ACTIVE_SERVERS` 加 `"jina"`，至此 6 工具全部 MCP 化。**graph.py 零改动**（build_agent 按 mcp_names 通用剔除同名内嵌工具的逻辑阶段 1 已就位）。验证（全部通过）：`get_tools()` 见 6 工具，jina_tool schema=`[url,query,top_n,score_threshold,max_return_tokens,no_query_max_tokens,chunk_size,chunk_overlap]` 原样保留；**无 query** → `full_text_truncated`、不调 sub_llm；**有 query** → `scored_chunks`、子进程内 `siliconflow /chat/completions 200`×N 证明 **sub_llm 在子进程按注入的 SUB_* env 重建并跑通分片打分**（content 经 P1-a 展平为纯 str、status 保留）。pytest 非 live 基线不破（116 passed，4 失败均 pre-existing）。
   实现要点：① jina_tool 是普通 `@tool`（无 user_id 闭包），server 写法与 web_server 同构、最简；② 全仓无任何地方调 `set_slice_system_prompt`，打分用硬编码 `SLICE_SYSTEM_PROMPT` 默认值，父/子进程行为一致，无需把 prompt 注入跨进程传递；③ 速率锁（_JINA_LOCK/_RECENT_FAILED 等）随模块 import 进子进程、常驻持久、与父进程隔离（前提 PS_USE_MCP 互斥）。
-- **阶段 3（收尾）**：三 server 全切，封存老接线，补 spec hiddenimports，`pyinstaller physics_scholar.spec` 打包验证 frozen 子进程能起、工具可调、tray 退出无孤儿进程。**追加 frozen 硬伤修复（见下方质询闭环 P0-b / P1-b）**：① config.py ROOT 加 `sys.frozen` 分支（否则 data/chroma/SQLite 写进 `_MEIPASS` 临时目录、重启即丢）；② 入口首行 `multiprocessing.freeze_support()` 防套娃；③ 实机任务管理器核验 Job Object 绑的是顶层 Bootloader PID、kill-on-close 真生效。
+- **阶段 3（收尾）🔄 自动化部分已完成（2026-06-30），实机 GUI 核验待人工**：
+  - **切换总闸 ✅**：[app.py](../app.py) `__main__` 内、起 server 线程前 `if frozen: os.environ.setdefault("PS_USE_MCP","true")`。dev 跑 `uvicorn src.main:app`（不经 `__main__`）保持 `tool_runtime` 的 false 默认 → 内嵌路径、pytest 基线不变；frozen exe 即 app.py → 默认走 MCP；环境变量仍可强制覆盖回退。**老内嵌接线不删**（保留为 PS_USE_MCP=false 的回滚路径，符合「每阶段可独立回滚」）。验证：临时脚本 `PS_USE_MCP=true` → `build_agent` 得 6 工具全部 MCP 提供、`mcp_names` 通用剔除内嵌同名，无重复绑定。
+  - **spec hiddenimports ✅**：[physics_scholar.spec](../physics_scholar.spec) 补 `mcp.*`（含 `mcp.os.win32.utilities` Windows stdio 句柄分支、`mcp.server.fastmcp`/`mcp.server.stdio`/`mcp.client.stdio`）、`langchain_mcp_adapters.{client,tools,sessions}`、`anyio._backends._asyncio`（运行期动态选后端、静态分析易漏）、`src.core.chroma_gen`、`src.rag.{mcp_client,tool_runtime}`、`src.mcp_servers.{__init__,local,web,jina}_server`。
+  - **打包 + frozen 子进程实证 ✅**：`pyinstaller physics_scholar.spec --noconfirm` EXIT=0。① `PS_MCP_SERVER=web` 直跑 exe + EOF stdin → 干净退出、stderr 无 ImportError；② **真 MCP client 驱动 frozen exe 起全部 3 server 并 JSON-RPC 握手 list_tools**：web 3 / local 2 / jina 1，全通过——坐实 frozen 子进程的 import 链（含 local 的 chromadb 启动、jina 的 llm/sub_llm import）与协议握手在打包态成立。临时脚本用完即删（信任边界）。
+  - **打包 wart（已记，本阶段不修）**：spec 把整个 `ROOT/dist`（前端产物）作 datas 打入，但 `dist/` 同时含上一轮 `dist/PhysicsScholar/` 打包输出，PyInstaller 递归进旧构建文件刷一大片「Ignoring non-existent resource」WARNING——无害但 bundle 体积虚胖。日后清理方向：打包前清 `dist/PhysicsScholar/`，或把前端产物移出 `dist/` 顶层另置目录再改 spec datas 指向。
+  - **❗ 待人工实机核验（无法 headless 定论，见下方「阶段 3 人工核验清单」）**：GUI tray-app 完整跑起（浏览器自动开、前端触发各工具）、用户从任务管理器强杀顶层 EXE 时 Job Object kill-on-close 是否连带回收 3 个 MCP 子进程树（无孤儿）。
 
 ## 风险点（按概率排序）
 
@@ -205,6 +210,25 @@ MultiServerMCPClient({
   - **修复**：`app.py` 顶部 `import multiprocessing`，`__main__` 块**首行**（`_setup_kill_on_close_job` / 起线程 / `tray.run()` 之前）调 `multiprocessing.freeze_support()`。非 frozen / 非 Windows 为 no-op，dev 与 pytest 零变化。
   - **验证**：`ast.parse` 语法通过；位置断言 `__main__ < freeze_support < job < tray.run`（对真实调用点，非注释引用）成立。
 - **待阶段 3 实机（无法静态定论）**：[app.py:115](../app.py#L115) `AssignProcessToJobObject(GetCurrentProcess())` 绑的是否顶层 Bootloader 进程、用户从任务管理器强杀顶层 EXE 时 kill-on-close 是否真连带回收子进程树。
+
+---
+
+## 阶段 3 人工核验清单（实机 GUI，需用户操作）
+
+自动化已证：frozen exe 能起 3 个 MCP 子进程、JSON-RPC 握手、列出全部 6 工具。剩下两项依赖 GUI / 内核行为，须在实机点一遍：
+
+1. **GUI 完整跑通**
+   - 双击 `dist/PhysicsScholar/PhysicsScholar.exe`（console=False，无控制台窗口；如要看日志可临时把 spec 的 `console` 改 True 重打）。
+   - 预期：系统托盘出现图标，浏览器自动打开 `http://localhost:57321`，前端正常加载。
+   - 在前端发几条触发不同工具的提问：① 问已入库论文（触发 `rag_tool`/`lookup`，走 local 子进程）；② 问需要联网检索的近期论文（触发 `s2`/`arxiv`/`openalex`，走 web 子进程）；③ 给一个 PDF/网页 URL 让它读全文（触发 `jina`，走 jina 子进程）。
+   - **看点**：SSE 流式正常、工具名在前端正确显示、返回内容无异常；首次「写后读」——上传一篇新论文后立刻就该篇提问，确认 `rag_tool` 能召回到（验证 chroma_gen 代际令牌在 frozen 下也生效）。
+2. **孤儿子进程核验（Job Object kill-on-close）** — 这是计划风险 #1 的最后一关
+   - exe 跑起后，打开任务管理器 → 详细信息，按名称排序，应能看到**多个 `PhysicsScholar.exe`**（1 个主 + 若干 MCP 子进程；展开「进程」树可见父子关系）。
+   - **强杀测试**：从任务管理器对**顶层** `PhysicsScholar.exe`「结束任务」（或托盘「退出」），然后刷新进程列表。
+   - **预期（通过）**：所有 `PhysicsScholar.exe`（含全部 MCP 子进程）**同时消失**，无残留孤儿。
+   - **若失败（残留子进程）**：说明 Job Object 没绑到顶层 Bootloader PID（PyInstaller onedir 下 exe 可能是「bootloader 父 + 真 Python 子」两层结构，`GetCurrentProcess()` 拿到的是哪一层需实测）。届时回 [app.py](../app.py) `_setup_kill_on_close_job`，改为显式拿父进程/或在 bootloader 层绑 Job。**记录实测结果到此处**。
+
+> 跨机注意：以上需在**装有该 exe 的机器**上做；`data/`（gitignored）不随 git，换机后 chroma/SQLite 需本机自有的 bge-m3/1024 维库（见阶段 1 实施笔记）。
 
 ---
 

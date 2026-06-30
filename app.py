@@ -128,6 +128,15 @@ if __name__ == "__main__":
     # dev 与 pytest 行为零变化。必须在 _setup_kill_on_close_job / 起线程 / tray.run() 之前。
     multiprocessing.freeze_support()
 
+    # ── MCP 总闸：frozen（打包分发）默认开启 ──────────────────────────────
+    # 阶段 3 收尾切换。dev 跑 `uvicorn src.main:app`（不经本 __main__），保持 tool_runtime
+    # 的 false 默认、走轻量内嵌路径、pytest 基线不变；MCP 仅需开发时 PS_USE_MCP=true 显式 opt-in。
+    # 而 frozen exe 即本 app.py，这里把开关 setdefault 成 true（用户仍可用环境变量强制覆盖回退），
+    # 让分发出去的产品默认走 MCP（6 工具拆进 3 个 stdio 子进程）。必须在起 server 线程
+    # （惰性 import src.main → tool_runtime.USE_MCP 读 env）之前设置。
+    if getattr(sys, "frozen", False):
+        os.environ.setdefault("PS_USE_MCP", "true")
+
     # 先把自己放进 kill-on-close Job，确保后续派生的 MCP 子进程不会变孤儿
     _setup_kill_on_close_job()
 
