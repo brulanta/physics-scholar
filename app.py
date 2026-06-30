@@ -24,6 +24,7 @@ if os.environ.get("PS_MCP_SERVER"):
     run_server(os.environ["PS_MCP_SERVER"])  # mcp.run(stdio)，阻塞直到 stdin 关闭
     sys.exit(0)
 
+import multiprocessing
 import uvicorn
 import webbrowser
 import threading
@@ -119,6 +120,14 @@ def _setup_kill_on_close_job():
 
 
 if __name__ == "__main__":
+    # PyInstaller 官方要求：frozen 入口首行调 freeze_support()，否则任何经 multiprocessing
+    # 派生的子进程在 frozen Windows 下会重新跑整个 bootloader（→ 又起一套 tray-app，套娃）。
+    # 本项目 MCP 子进程走 subprocess.Popen([sys.executable], env=PS_MCP_SERVER) 而非
+    # multiprocessing，当前不直接依赖它；此处为防御性脚手架——拦住未来自身或第三方库
+    # （如某些 embedding/并行后端）触发的 mp spawn。非 frozen / 非 Windows 下为 no-op，
+    # dev 与 pytest 行为零变化。必须在 _setup_kill_on_close_job / 起线程 / tray.run() 之前。
+    multiprocessing.freeze_support()
+
     # 先把自己放进 kill-on-close Job，确保后续派生的 MCP 子进程不会变孤儿
     _setup_kill_on_close_job()
 

@@ -196,7 +196,9 @@ MultiServerMCPClient({
   - **修复**：`ROOT` 加 frozen 分支 `Path(sys.executable).resolve().parent`（exe 真实所在目录，可写持久），dev 走原逻辑（仓库根）。**与 [app.py:5-8](../app.py#L5) 的 frozen ROOT 故意取向相反**——app.py 的 ROOT=`_MEIPASS`（供 `sys.path.insert` 导入打包内 `src`）；config.ROOT 只管「可写持久数据 + 用户 yaml」。只读打包资产不归 config.ROOT 管、已各自正确：`dist/`（[main.py:46](../src/main.py#L46) 自己的 `__file__` → `_MEIPASS/dist` ✓）、prompts `profiles/`（[builder.py:180](../src/rag/prompts/builder.py#L180) 自己的 `__file__` ✓）、`mcp_client.py` 的 ROOT 已自带 `_MEIPASS` 分支 ✓。
   - **验证**：dev 分支 ROOT 与改前**逐字节一致**（pytest 不可能因此回归，frozen 分支仅 PyInstaller 下激活）；模拟 `sys.frozen`/`sys.executable` 核 frozen 分支 ROOT 落在 exe 同级、不含 `_MEI`；config 全消费者（ingestor/registry/init_SQLite/routes/rag_tool/chroma_gen）import 链干净。
   - **行为备注（留打包阶段）**：spec 把出厂 `config/user_config.yaml` 打进 `_MEIPASS/config/`，但 `_yaml_path` 现指向 exe 同级 → **首次运行该文件尚不存在**。`_load_yaml()` 缺文件返回 `{}`、`save_config_dict` 自带 `parent.mkdir` → 首跑读 .env/硬编码默认、首次「保存设置」时在 exe 同级建 `config/`，行为正确（用户填设置页前为空配置）。若日后要让出厂默认值随首启自动落地到可写目录，需在启动时显式 copy `_MEIPASS/config` → exe 同级（本次不做，记此备查）。
-- **P1-b `freeze_support()`（缺失，低成本应补）**：全仓无 `multiprocessing.freeze_support`。当前 MCP 子进程靠 `PS_MCP_SERVER` env 分流 + `sys.exit(0)`（[app.py:21-25](../app.py#L21)）不走 multiprocessing，但 PyInstaller 官方要求 frozen 入口首行加，防子进程套娃。
+- **P1-b `freeze_support()` —— ✅ 已修复落地（2026-06-30）**：全仓原无 `multiprocessing.freeze_support`。当前 MCP 子进程靠 `PS_MCP_SERVER` env 分流 + `sys.exit(0)`（[app.py](../app.py)）走 `subprocess.Popen([sys.executable])` 而非 multiprocessing，故不直接依赖它；但 PyInstaller 官方要求 frozen 入口加，防未来自身/第三方库触发的 mp spawn 在 frozen Windows 下重跑 bootloader 套娃。
+  - **修复**：`app.py` 顶部 `import multiprocessing`，`__main__` 块**首行**（`_setup_kill_on_close_job` / 起线程 / `tray.run()` 之前）调 `multiprocessing.freeze_support()`。非 frozen / 非 Windows 为 no-op，dev 与 pytest 零变化。
+  - **验证**：`ast.parse` 语法通过；位置断言 `__main__ < freeze_support < job < tray.run`（对真实调用点，非注释引用）成立。
 - **待阶段 3 实机（无法静态定论）**：[app.py:115](../app.py#L115) `AssignProcessToJobObject(GetCurrentProcess())` 绑的是否顶层 Bootloader 进程、用户从任务管理器强杀顶层 EXE 时 kill-on-close 是否真连带回收子进程树。
 
 ---
