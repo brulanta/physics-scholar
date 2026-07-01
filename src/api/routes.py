@@ -23,7 +23,15 @@ logger = get_logger(__name__)
 # src/api/routes.py里加
 @router.get("/health")
 def health():
-    return {"status": "ok", "version": "0.1.0"}
+    # restarting：本进程正主动重启（托盘/配置页触发），供前端切到「正在重启」转圈遮罩，
+    # 与「意外断联/退出」（前端连续失败判 down、显示 X）区分开。
+    from src import service_state
+
+    return {
+        "status": "ok",
+        "version": "0.1.0",
+        "restarting": service_state.is_restarting(),
+    }
 
 
 # ── 全局配置 ─────────────────────────────────────────────────
@@ -95,6 +103,12 @@ async def fetch_models(data: FetchModelsRequest):
 
 @router.post("/config/restart")
 async def restart_app():
+    # 置「正在重启」标志：此后 /api/health 会带 restarting=true，前端（含托盘重启时
+    # 不知情的旧页面）轮询读到即显示转圈遮罩，而非误判为退出（X）。
+    from src import service_state
+
+    service_state.mark_restarting()
+
     async def _do_restart():
         await asyncio.sleep(0.5)  # 等前端收到200响应
         exe = sys.executable

@@ -40,17 +40,20 @@ PORT = 57321
 def _open_browser(url: str):
     """开默认浏览器且让其不落入本进程 kill-on-close Job（方案乙核心）。
 
-    Windows：os.startfile 走 ShellExecuteW，浏览器由 explorer 代拉起、非本进程后代 →
-    不在 Job 里，后端 os._exit / 重启关 Job 时不波及浏览器窗口及用户的其他标签页。
-    非 Windows（dev 的 mac/linux，且未启用 Job）：无 os.startfile，退回 webbrowser.open。
+    Windows：经 `explorer.exe <url>` 转交——常驻的 explorer shell 去拉起默认浏览器，
+    浏览器成为 **shell 的子进程**、而非本进程后代 → 不在本进程 Job 里，冷启动（浏览器
+    尚未运行）与热启动（已运行）都不会被 kill-on-close 连带杀掉。
+    （不用 os.startfile：冷启动时 ShellExecuteW 会把浏览器作为本进程直接子进程创建，
+    仍落进 Job → 实机确认「exe 自己拉起的浏览器」被连杀，「已在运行的」才幸免。）
+    我们 Popen 出的 explorer.exe 本身即使短暂入 Job 也会立刻退出转交，无碍。
+    非 Windows（dev 的 mac/linux，且未启用 Job）：退回 webbrowser.open。
     """
-    startfile = getattr(os, "startfile", None)
-    if startfile is not None:
+    if sys.platform == "win32":
         try:
-            startfile(url)
+            subprocess.Popen(["explorer.exe", url])
             return
         except OSError:
-            pass  # 无默认浏览器关联等极端情况，退回 webbrowser
+            pass  # explorer 异常等极端情况，退回 webbrowser
     webbrowser.open(url)
 
 
@@ -82,6 +85,14 @@ def make_tray_icon():
         _open_browser(f"http://localhost:{PORT}")
 
     def on_restart(icon, item):
+        # 置「正在重启」标志并短暂续命，让旧页面（托盘重启时它不知情）轮询到
+        # /api/health 的 restarting=true、切到「正在重启」转圈遮罩，再退出本进程。
+        # 否则前端只看到后端掉线、会误判为退出（X）。前端每 2s 轮询一次，睡 2.5s 兜住一轮。
+        from src import service_state
+
+        service_state.mark_restarting()
+        time.sleep(2.5)
+
         icon.stop()
         # CREATE_BREAKAWAY_FROM_JOB：让新 exe 脱离本进程即将关闭的 kill-on-close Job，
         # 否则随后的 os._exit(0) 关 Job 句柄会连带把新进程杀掉。非 Windows 上该 flag 为 0、

@@ -86,7 +86,10 @@ async function checkHealth() {
     const r = await fetch('/api/health')
     if (r.ok) {
       failCount = 0
-      serviceState.state = 'ok'
+      // 后端主动重启（托盘/配置页触发）会在下线前置 restarting=true。托盘重启时旧页面
+      // 本不知情，靠这里读到标志切到「正在重启」转圈遮罩，与「意外断联/退出」(X)区分。
+      const body = await r.json().catch(() => ({}))
+      serviceState.state = body.restarting ? 'restarting' : 'ok'
     } else {
       throw new Error()
     }
