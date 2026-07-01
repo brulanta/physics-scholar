@@ -14,28 +14,23 @@ MCP 工具迁移（`plan/mcp-tool-migration-plan.md`）已闭环，但收尾实�
 
 **验证（需实机）**：打包后配置页填主 LLM 配置 → 保存 → 弹「立即重启」→ 点击 → **新 exe 应自动拉起**（浏览器新窗口自动开）。若成功，遗留 1 的 Job 假设即被双路径共同证实。
 
-## B — MCP server 并行拉起（待议/待做）
+## B — MCP server 并行拉起 —— ✅ 已落地（2026-07-01）
 
-### 现状
-[mcp_client.py](../src/rag/mcp_client.py) `_MCPClientSingleton._owner` 里：
-```python
-async with contextlib.AsyncExitStack() as stack:
-    for name in connections:                       # ← 串行
-        session = await stack.enter_async_context(client.session(name))
-        server_tools = await load_mcp_tools(session, server_name=name)
-        server_tools = [_patch_tool_flatten(t) for t in server_tools]
-        tools.extend(server_tools)
-```
-3 个 server（web/local/jina）依次冷启：local 要初始化 chromadb、jina 要 import llm/sub_llm，串行累加等待。
+### 背景（原串行）
+[mcp_client.py](../src/rag/mcp_client.py) `_owner` 原以 `for name in connections:` 串行 `enter_async_context` + `load_mcp_tools`，3 个 server（web/local/jina）依次冷启。**实测串行 startup 总耗时 77s**，构成：web 27.7s / local 34.8s（chromadb import+初始化）/ jina 14.8s（llm import）——三段主体都是**独立子进程各自的 Python import 冷启**，天然可并行。
 
-### 改动方向（实装时定稿）
-- 用 `asyncio.gather` 并行 enter 三个 session + load tools，再汇总 `self._tools`。
-- **关键约束（anyio cancel scope）**：上一轮踩过的坑——session 的 enter/exit 必须落在**同一个任务**（owner 任务）。`asyncio.gather` 的子协程在**同一任务内**并发调度（非新任务），`AsyncExitStack.enter_async_context` 仍在 owner 任务栈上退出，**理论上不破坏 cancel scope 规则**；但 stdio_client 内部各自建 anyio task group，需实测 gather 并行 enter 是否引入跨 scope 干扰。**先小步验证：临时脚本并行 enter 3 session → 正常 list_tools + 正常 teardown 无 CancelledError，再落地。**
-- 保持 `_patch_tool_flatten`、工具名、错误降级不变；工具**顺序**若因并行乱序，检查是否影响 `build_agent` 的 `mcp_names` 剔除逻辑（应无关，按名匹配）。
-- 收益有限时（stdio 握手本身快，瓶颈在 chromadb/llm import 的 CPU 冷启，未必能并行压缩）可能不值得——**实测启动耗时前后对比，收益不显著则放弃，记录结论**。
+### 已落地实现（避开 anyio cancel-scope 坑）
+把 `_owner` 从「单任务串行 enter/exit 全部 session」重构为：
+- **每 server 一个常驻子任务** `_run_one_session`：在**自己任务内** `async with client.session(name)` enter → load → hold（`await stop_event.wait()`）→ 退出 async with 时在**同一子任务内** aclose。故每个 session 的 cancel scope 都同任务进出，**P2-a 修复（跨任务退栈误杀 lifespan）得以保持**。
+- **协调者任务** `_owner`：`asyncio.create_task` 起 N 个子任务并发拉起（并行冷启）→ `gather(per_ready)` 等全部就绪 → 按 `_ACTIVE_SERVERS` 声明序汇总 `self._tools`（并行不打乱工具顺序）→ `gather(tasks)` 等收尾。协调者**从不 enter/exit 任何 session**。
+- 加载失败：发 `stop_event` 让已就绪子任务 teardown，gather 收尾后向 startup 上报首个异常（startup 降级逻辑不变）。
+- `_patch_tool_flatten`、工具名、错误降级、startup/shutdown/restart 对外接口全不变。
 
-### 风险
-- 并行 teardown（shutdown 时 AsyncExitStack 逆序 aclose）比串行更易触发 stdio benign 噪声；现有 owner 的 `except BaseException` 兜底应能吞掉，需确认。
+### 验证（全部通过，临时脚本用完即删）
+- **并行 startup 24.09s**（串行 77s → **省 69%**，优于预估 ~35s）；`get_tools()` 6 工具齐全、顺序 = `_ACTIVE_SERVERS` 声明序。
+- **P2-a 保持**：从独立任务（模拟 `POST /api/config` 请求任务）调 `restart()` → 6 工具齐全、模拟 lifespan 任务未被取消、无 `CancelledError`。
+- **shutdown 干净**、无异常抛出（并行 teardown 的 benign 噪声由各子任务 `except` 吞掉）。
+- `pytest --ignore=tests/test_rag_chain.py` 基线不破。
 
 ## D — 强制重启 + 消除双重启浪费（待议，先记载不执行）
 

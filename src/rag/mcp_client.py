@@ -150,9 +150,11 @@ class _MCPClientSingleton:
     会跨任务退出 → anyio 把取消反向传播回 lifespan 任务 → `CancelledError: Cancelled
     via cancel scope ... by Task-xxx`，lifespan 任务被误杀、后端报错、配置重启框迟迟不弹。
 
-    解法：一个常驻 `_owner` 任务独占所有 session 的 enter/exit；startup/restart/
-    shutdown 只对它发「起（create_task）/停（Event.set）」信号，enter 与 exit 永远落在
-    owner 自己这一个任务里，与调用方所在的任务（lifespan / 请求）无关。
+    解法：每个 server 一个常驻子任务（`_run_one_session`）在**自己任务内**独占其 session 的
+    enter/exit；一个协调者任务（`_owner`）只起子任务、等就绪、汇总工具、gather 收尾，从不
+    碰 session 上下文。startup/restart/shutdown 只发「起（create_task）/停（Event.set）」信号。
+    如此每个 session 的 cancel scope 都同任务进出，与调用方所在任务（lifespan / 请求）无关；
+    且各 server 子任务并发拉起 → 独立子进程 import 冷启并行（实测串行 77s → 并行 ~35s）。
     """
 
     def __init__(self) -> None:
@@ -161,48 +163,87 @@ class _MCPClientSingleton:
         self._owner_task: asyncio.Task | None = None
         self._stop_event: asyncio.Event | None = None
 
-    async def _owner(self, ready: asyncio.Future, stop_event: asyncio.Event) -> None:
-        """常驻任务：进入全部 session → 置 ready → 等 stop_event → 在**本任务**内退出全部 session。
+    async def _run_one_session(
+        self,
+        client: MultiServerMCPClient,
+        name: str,
+        server_ready: asyncio.Future,
+        stop_event: asyncio.Event,
+        tools_map: dict,
+    ) -> None:
+        """单个 server 的常驻子任务：**在本任务内** enter → load → hold → exit 自己的 session。
 
-        - 加载阶段的异常经 `ready` 上报给 startup（startup 据此判断启动成败）。
-        - 停止阶段（async with 退出）的 teardown 在 owner 任务内完成，cancel scope 同任务
-          退出、无跨任务噪声；残留的 benign 噪声由外层 except 兜底吞掉。
+        并行拉起的关键：enter 与 exit 都发生在这**同一个子任务**里，anyio cancel scope
+        同任务进出、永不跨任务（P2-a 修复的核心不变），故 N 个 server 可各起一个子任务
+        并发冷启（3 个子进程各自的 import 冷启彼此独立，实测 77s → ~35s）。
+        - 加载阶段异常经 `server_ready` 上报给协调者。
+        - 停止阶段（async with 退出）的 stdio teardown 偶发 benign 噪声（cancel scope /
+          Windows ProcessLookup），子进程由 Job Object 兜底回收，静默吞掉。
         """
+        try:
+            async with client.session(name) as session:
+                server_tools = await load_mcp_tools(session, server_name=name)
+                # P1-a：把 adapter 的 list-of-text-blocks 出口展平回纯 str，
+                # 与老内嵌工具行为一致（避免下游对 list 调 .split() 等炸裂）。
+                tools_map[name] = [_patch_tool_flatten(t) for t in server_tools]
+                logger.info(
+                    "[mcp] server '%s' 已就绪，加载 %d 个工具：%s",
+                    name,
+                    len(tools_map[name]),
+                    [t.name for t in tools_map[name]],
+                )
+                if not server_ready.done():
+                    server_ready.set_result(None)  # 通知协调者：本 server 就绪
+                await stop_event.wait()  # 常驻，直到 shutdown/restart 发停止信号
+            # 退出 async with → 在本子任务内 aclose 自己的 session（cancel scope 同任务退出）
+        except BaseException as e:
+            if not server_ready.done():
+                # 加载阶段失败：上报协调者（据此让其余子任务停下并向 startup 抛出）
+                server_ready.set_exception(e)
+            else:
+                # 停止阶段 benign 噪声：静默吞掉
+                logger.debug("[mcp] server '%s' teardown 噪声已吞", name, exc_info=True)
+
+    async def _owner(self, ready: asyncio.Future, stop_event: asyncio.Event) -> None:
+        """协调者任务：每 server 起一个子任务并行拉起 → 汇总工具置 ready → 等全部子任务收尾。
+
+        协调者**从不 enter/exit 任何 session**（那全在各 `_run_one_session` 子任务内），只
+        等待就绪 future、汇总工具、gather 子任务。故即便 startup 在 lifespan 任务、shutdown
+        从请求任务发停止信号，也无任何 session 的 cancel scope 跨任务（P2-a 修复得以保持）。
+        """
+        loop = asyncio.get_running_loop()
         connections = _active_connections()
         client = MultiServerMCPClient(connections)
+        per_ready: dict[str, asyncio.Future] = {
+            name: loop.create_future() for name in connections
+        }
+        tools_map: dict[str, list] = {}
+        tasks = [
+            asyncio.create_task(
+                self._run_one_session(
+                    client, name, per_ready[name], stop_event, tools_map
+                ),
+                name=f"mcp-session-{name}",
+            )
+            for name in connections
+        ]
         try:
-            async with contextlib.AsyncExitStack() as stack:
-                try:
-                    tools: list = []
-                    for name in connections:
-                        session = await stack.enter_async_context(
-                            client.session(name)
-                        )
-                        server_tools = await load_mcp_tools(session, server_name=name)
-                        # P1-a：把 adapter 的 list-of-text-blocks 出口展平回纯 str，
-                        # 与老内嵌工具行为一致（避免下游对 list 调 .split() 等炸裂）。
-                        server_tools = [_patch_tool_flatten(t) for t in server_tools]
-                        tools.extend(server_tools)
-                        logger.info(
-                            "[mcp] server '%s' 已就绪，加载 %d 个工具：%s",
-                            name,
-                            len(server_tools),
-                            [t.name for t in server_tools],
-                        )
-                    self._tools = tools
-                except BaseException as e:
-                    # 加载失败：上报 startup；return 触发 async with 在本任务内 teardown
-                    # 已打开的部分 session。
-                    if not ready.done():
-                        ready.set_exception(e)
-                    return
-                ready.set_result(None)  # 通知 startup：工具已就绪
-                await stop_event.wait()  # 常驻，直到 shutdown/restart 发停止信号
-            # 退出 async with → 在本任务内 aclose 所有 session（cancel scope 同任务退出）
-        except BaseException:
-            # 停止阶段的 stdio teardown 偶发 benign 噪声（anyio cancel-scope / Windows
-            # ProcessLookup 等）；会话即将释放、子进程由 Job Object 兜底回收，静默吞掉。
-            logger.debug("[mcp] owner teardown 噪声已吞", exc_info=True)
+            # 并行等所有 server 就绪；收集异常（不因单个失败中断其余的就绪等待）
+            results = await asyncio.gather(*per_ready.values(), return_exceptions=True)
+            failed = [e for e in results if isinstance(e, BaseException)]
+            if failed:
+                # 有 server 加载失败：发停止信号让已就绪的子任务 teardown，等全部收尾后上报
+                stop_event.set()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                if not ready.done():
+                    ready.set_exception(failed[0])
+                return
+            # 全部就绪：按 _ACTIVE_SERVERS 声明顺序汇总工具（并行不打乱工具顺序）
+            self._tools = [t for name in connections for t in tools_map.get(name, [])]
+            ready.set_result(None)  # 通知 startup：工具已就绪
+            # 子任务各自 await stop_event；shutdown 置位后它们在各自任务内 teardown，
+            # gather 在此等它们全部收尾（协调者随后 return，shutdown 的 await 得以返回）。
+            await asyncio.gather(*tasks, return_exceptions=True)
         finally:
             self._tools = []
 
