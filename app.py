@@ -37,12 +37,33 @@ import pystray
 PORT = 57321
 
 
+def _open_browser(url: str):
+    """开默认浏览器且让其不落入本进程 kill-on-close Job（方案乙核心）。
+
+    Windows：os.startfile 走 ShellExecuteW，浏览器由 explorer 代拉起、非本进程后代 →
+    不在 Job 里，后端 os._exit / 重启关 Job 时不波及浏览器窗口及用户的其他标签页。
+    非 Windows（dev 的 mac/linux，且未启用 Job）：无 os.startfile，退回 webbrowser.open。
+    """
+    startfile = getattr(os, "startfile", None)
+    if startfile is not None:
+        try:
+            startfile(url)
+            return
+        except OSError:
+            pass  # 无默认浏览器关联等极端情况，退回 webbrowser
+    webbrowser.open(url)
+
+
 def wait_and_open_browser():
+    # 重启拉起的新进程：旧浏览器窗口仍在、由其 ServiceMask 自刷新接管，新进程不再开窗口
+    # （避免重复窗口）。故重启路径的 Popen 注入 PS_SUPPRESS_BROWSER=1，这里检测到就跳过。
+    if os.environ.get("PS_SUPPRESS_BROWSER"):
+        return
     url = f"http://localhost:{PORT}/api/health"  # 加上/api前缀
     while True:
         try:
             urllib.request.urlopen(url, timeout=1)
-            webbrowser.open(f"http://localhost:{PORT}")
+            _open_browser(f"http://localhost:{PORT}")
             break
         except Exception:
             time.sleep(0.5)
@@ -58,17 +79,20 @@ def make_tray_icon():
     image = Image.open(str(icon_path))
 
     def on_open(icon, item):
-        webbrowser.open(f"http://localhost:{PORT}")
+        _open_browser(f"http://localhost:{PORT}")
 
     def on_restart(icon, item):
         icon.stop()
         # CREATE_BREAKAWAY_FROM_JOB：让新 exe 脱离本进程即将关闭的 kill-on-close Job，
         # 否则随后的 os._exit(0) 关 Job 句柄会连带把新进程杀掉。非 Windows 上该 flag 为 0、
-        # 天然 no-op（Job 也未启用）。旧前端窗口按既有设计保留，由用户手动关闭。
+        # 天然 no-op（Job 也未启用）。
+        # PS_SUPPRESS_BROWSER=1：新进程不再开浏览器窗口——旧窗口（浏览器已脱离 Job、不受
+        # os._exit 波及）仍在，由其 ServiceMask 收到 200 自刷新到新后端，避免重复窗口。
         subprocess.Popen(
             [sys.executable],
             cwd=os.path.dirname(sys.executable),
             creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
+            env=dict(os.environ, PS_SUPPRESS_BROWSER="1"),
         )
         os._exit(0)
 
@@ -87,6 +111,18 @@ def make_tray_icon():
 
 
 def run_server():
+    # 重启场景两条路径都是「先 Popen 新进程、再 os._exit 旧进程」，新进程可能在旧进程
+    # 释放 57321 之前抢先 bind → WinError 10048 → 新进程崩、前后端全灭。这里先探测端口
+    # 可绑再交给 uvicorn，兜住旧进程退出释放端口的窗口（最多约 10s）。
+    import socket
+
+    for _ in range(20):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(("127.0.0.1", PORT))
+            break
+        except OSError:
+            time.sleep(0.5)
     uvicorn.run("src.main:app", host="127.0.0.1", port=PORT)
 
 

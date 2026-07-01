@@ -9,8 +9,6 @@ from src.config import PDF_DIR, get_config_dict, save_config_dict
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index, delete_paper
 from src.rag.graph import chat_stream, regenerate_stream
-from src.rag.tool_runtime import USE_MCP
-from src.rag import mcp_client
 import requests
 from typing import Literal
 from src.rag.memory import ConversationMemory, MessageRepo, ConversationRepo
@@ -62,14 +60,10 @@ async def get_config():
 
 @router.post("/config")
 async def update_config(data: UserConfig):
+    # 只落盘。配置生效走「强制整程重启」：前端保存成功后即触发 /config/restart，新 exe
+    # 会带新 key 重拉 MCP 子进程。故此处不再 await mcp_client.restart() 热重启会话——
+    # 那次热重启会被随后的整程重启覆盖，纯属浪费（且曾是 P2-a CancelledError 场景）。
     save_config_dict(data.model_dump())
-    # MCP 路径下，工具跑在子进程里，读的是子进程启动时注入的旧 key。重启常驻会话
-    # 让子进程带着新 key 重新拉起（_inject_config_env 此刻读到的已是 reload 后的值）。
-    if USE_MCP:
-        try:
-            await mcp_client.restart()
-        except Exception:
-            logger.exception("[mcp] 配置热重载后重启会话失败")
     return {"success": True, "message": "配置已保存"}
 
 
@@ -109,10 +103,13 @@ async def restart_app():
         # 的 Job 里，新 exe 若不脱离，随后的 os._exit(0) 关 Job 句柄会把它连带杀掉
         # （前后端全关、无自动拉起）。Job 已设 BREAKAWAY_OK，故子进程可显式脱离；
         # 非 Windows 上该 flag 取 0、天然 no-op。
+        # PS_SUPPRESS_BROWSER=1：新进程不再开浏览器窗口——旧前端窗口（浏览器已脱离 Job、
+        # 不受 os._exit 波及）仍在，由其 ServiceMask 收到 200 自刷新到新后端，避免重复窗口。
         subprocess.Popen(
             [exe],
             cwd=os.path.dirname(exe),
             creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
+            env=dict(os.environ, PS_SUPPRESS_BROWSER="1"),
         )
 
         os._exit(0)

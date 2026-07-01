@@ -227,28 +227,6 @@
 
       </div>
     </div>
-
-    <!-- 保存成功弹窗 -->
-    <div v-if="savedDialog" class="mini-overlay">
-      <div class="mini-modal">
-        <div class="mini-icon">
-          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-            <circle cx="11" cy="11" r="10" stroke="var(--green)" stroke-width="1.5" />
-            <path d="M6.5 11.5l3 3 6-6" stroke="var(--green)" stroke-width="1.8" stroke-linecap="round"
-              stroke-linejoin="round" />
-          </svg>
-        </div>
-        <div class="mini-title">配置已保存</div>
-        <div class="mini-desc">部分设置需要重启服务后生效</div>
-        <div class="mini-actions">
-          <button class="btn-cancel" @click="savedDialog = false">稍后重启</button>
-          <button class="btn-restart" :disabled="restarting" @click="doRestart">
-            <span v-if="restarting" class="spin">⟳</span>
-            <span v-else>立即重启</span>
-          </button>
-        </div>
-      </div>
-    </div>
   </Teleport>
 </template>
 
@@ -278,7 +256,6 @@ const fetching = reactive({ llm: false, sub: false })
 const fetchError = reactive({ llm: '', sub: '' })
 const saving = ref(false)
 const loadError = ref(false)
-const savedDialog = ref(false)
 
 // 是否可保存：主LLM三项必填
 const canSave = computed(() =>
@@ -371,10 +348,10 @@ async function doSave() {
       body: JSON.stringify(payload)
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    savedDialog.value = true
+    // 配置本就必须重启才生效，故保存成功即强制进入整程重启（不再给「稍后重启」选项）。
+    await doRestart()
   } catch (e) {
     alert('保存失败：' + (e.message || '未知错误'))
-  } finally {
     saving.value = false
   }
 }
@@ -383,9 +360,8 @@ async function doSave() {
 async function doRestart() {
   try {
     await fetch('/api/config/restart', { method: 'POST' })
-  } catch (_) { /* 正常 */ }
-  serviceState.state = 'restarting'  // ✨ 交给全局组件接管
-  savedDialog.value = false           // 关掉保存成功弹窗
+  } catch (_) { /* 正常：后端重启会中断本请求 */ }
+  serviceState.state = 'restarting'  // 交给全局 ServiceMask：收到 200 自刷新到新后端
 }
 
 function close() {
@@ -688,8 +664,7 @@ function close() {
 
 /* ── 按钮 ── */
 .btn-cancel,
-.btn-save,
-.btn-restart {
+.btn-save {
   padding: 8px 20px;
   border-radius: var(--radius-sm, 6px);
   font-size: 0.88em;
@@ -725,89 +700,6 @@ function close() {
 .btn-save:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.btn-restart {
-  background: var(--accent);
-  color: #fff;
-}
-
-.btn-restart:hover:not(:disabled) {
-  background: #5a7fff;
-}
-
-.btn-restart:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* ── 保存成功小弹窗 ── */
-.mini-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 800;
-  backdrop-filter: blur(4px);
-}
-
-.mini-modal {
-  background: var(--bg-2);
-  border: 1px solid var(--border-light, var(--border));
-  border-radius: var(--radius, 10px);
-  width: 340px;
-  max-width: 92vw;
-  padding: 28px 28px 22px;
-  text-align: center;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
-  animation: modal-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.mini-icon {
-  display: flex;
-  justify-content: center;
-  margin-bottom: 12px;
-}
-
-.mini-title {
-  font-size: 1em;
-  font-weight: 600;
-  color: var(--text);
-  margin-bottom: 6px;
-}
-
-.mini-desc {
-  font-size: 0.82em;
-  color: var(--text-3);
-  margin-bottom: 20px;
-  line-height: 1.5;
-}
-
-.mini-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-}
-
-.restart-hint {
-  margin-top: 14px;
-  font-size: 0.78em;
-  color: var(--text-3);
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse {
-
-  0%,
-  100% {
-    opacity: 0.5
-  }
-
-  50% {
-    opacity: 1
-  }
 }
 
 /* ── 旋转动画 ── */
