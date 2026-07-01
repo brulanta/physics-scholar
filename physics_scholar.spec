@@ -217,7 +217,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=False,   # 先保留控制台窗口，方便调试，确认没问题后改False
+    console=False,
     icon=str(ROOT / 'frontend' / 'public' / 'favicon.ico'),
 )
 
