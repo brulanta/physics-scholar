@@ -40,12 +40,16 @@ MCP 工具迁移（`plan/mcp-tool-migration-plan.md`）已闭环，但收尾实�
 3. **旧浏览器窗口连带被杀（数据丢失风险）**：见下 ★。
 
 ### 已落地实现（方案乙：浏览器永不进 Job + 旧窗口自刷新 + 强制重启）
-- **浏览器脱离 Job**（[app.py](../app.py) `_open_browser`）：Windows 用 `os.startfile`（ShellExecuteW，浏览器由 explorer 代拉起、非本进程后代 → 不落进 kill-on-close Job），非 Windows 退回 `webbrowser.open`。`wait_and_open_browser` 与托盘 `on_open` 都改调它。后端 `os._exit` / 重启关 Job **不再波及浏览器窗口及用户其他标签页**。
+- **浏览器脱离 Job**（[app.py](../app.py) `_open_browser`）：Windows 经 `explorer.exe <url>` 转交——常驻 shell 去拉起默认浏览器，浏览器成为 **shell 的子进程**而非本进程后代 → 冷/热启动都不落进 kill-on-close Job，非 Windows 退回 `webbrowser.open`。`wait_and_open_browser` 与托盘 `on_open` 都改调它。后端 `os._exit` / 重启关 Job **不再波及浏览器窗口及用户其他标签页**。
+  - ⚠️ 曾用 `os.startfile`（ShellExecuteW）——**实机翻车**：浏览器冷启动（尚未运行）时它把浏览器作为本进程直接子进程创建、仍落进 Job → exe 自己拉起的窗口被连杀，只有「浏览器已在运行」才幸免。`explorer.exe` 转交才真正冷/热都脱离。
 - **新进程不再开窗口**（env `PS_SUPPRESS_BROWSER=1`）：两条重启路径的 Popen（托盘 `on_restart`、[routes.py](../src/api/routes.py) `_do_restart`）都注入该标志；`wait_and_open_browser` 开头检测到即 `return`。旧窗口靠 ServiceMask 自刷新接管，不产生重复窗口。对 MCP 子进程无害（顶部 `PS_MCP_SERVER` 分流后即 `sys.exit`，走不到开浏览器逻辑）。
 - **端口竞态兜底**（[app.py](../app.py) `run_server`）：两条重启路径都「先 Popen 新进程、再 os._exit 旧进程」，新进程可能抢在旧进程释放 57321 前 bind → WinError 10048 崩。加端口探测重试（最多约 10s）兜住。
 - **去双重启**（[routes.py](../src/api/routes.py) `update_config`）：删掉 `await mcp_client.restart()` 整块（连同该文件已无用的 `mcp_client`/`USE_MCP` import）；只 `save_config_dict` 落盘，配置生效交给整程重启。
 - **强制重启交互**（[ConfigModal.vue](../frontend/src/components/Settings/ConfigModal.vue)）：删「保存成功」二选弹窗，`doSave` 成功即调 `doRestart()`（`/api/config/restart` + `serviceState.state='restarting'`）；清理 `savedDialog`/`.mini-*`/`.btn-restart` 死代码。
-- **前端 ServiceMask 不改**：`restarting→200→location.reload()` 复用；托盘重启路径下 `down` 状态天生能自恢复到 `ok`（timer 从不因 down 停），旧窗口短暂闪红叉后自愈——文案观感瑕疵、非功能问题，本次不打磨。
+- **遮罩语义分离 + 时序修复**（[ServiceMask.vue](../frontend/src/components/ServiceMask.vue) + 新增 [src/service_state.py](../src/service_state.py)）：
+  - **重启用转圈、退出/断联用 X**：托盘重启从原生托盘发起、前端不知情，只见后端掉线会误判为退出（X）。新增进程内共享标志 `service_state.RESTARTING`（托盘与 uvicorn 同进程），重启前置位、`/api/health` 带 `restarting` 字段；前端 `ok` 态轮询读到即切「正在重启」转圈。托盘 `on_restart` 置标志后 `sleep(2.5s)` 兜住前端一轮（2s）轮询再退出。退出/强杀不置标志 → 走 down 检测显示 X。
+  - **修「立刻刷回旧后端→空白→遮罩延迟」**：配置重启置 `restarting` 时旧后端还没死，原「200 即 reload」会刷回活着的旧后端。`restarting` 分支加 `sawDown` 守卫，先确认旧后端下线过一次，之后的 200 才 reload。
+  - **X 态文案**：由「程序已退出/请关闭此页面」改为「连接已中断/正在尝试重新连接，请稍候…」（方案乙不再要求用户手动关；退出与断联通用）。
 
 ### ★ 背景机制：Job Object 令浏览器窗口「跟着后端一起消失」（2026-07-01 实机确认，方案乙据此定案）
 主进程放进 `KILL_ON_JOB_CLOSE` 的 Job（防孤儿 MCP 子进程）；`webbrowser.open()` 拉起的浏览器作为主进程后代落进 Job → 后端 `os._exit` 关 Job 时被连带回收，**连同用户在同一浏览器开的其他标签页一起杀掉**。2026-07-01 实机确认「重启会关掉同浏览器的其他标签页」。
@@ -57,15 +61,14 @@ MCP 工具迁移（`plan/mcp-tool-migration-plan.md`）已闭环，但收尾实�
 
 - **A**：见上（实机配置页「立即重启」）。
 - **B**：临时脚本并行 enter 3 session 正常握手 + teardown 无 CancelledError；`get_tools()` 仍 6 工具；启动耗时前后对比；`pytest --ignore=tests/test_rag_chain.py` 基线不破（116 passed）。
-- **D（需实机，打包后 `python scripts/build_release.py`）**：
-  1. **浏览器不连带被杀（核心）**：同一浏览器另开无关标签页 → 触发重启 → 无关标签页完好、PhysicsScholar 页自刷新到新后端。
-  2. **强制重启交互**：填主 LLM → 保存 → 不弹二选框、直接进「正在重启」遮罩 → 新后端起来后自动刷新、新配置生效。
-  3. **去双重启**：保存配置后后台**不再**出现 `update_config` 触发的 `[mcp] 重启 MCP 会话` 日志。
-  4. **托盘重启**：旧窗口短暂红叉后自愈；任务管理器确认新一组进程（主+3 MCP）起来、无孤儿。
-  5. **端口竞态**：连续快速重启多次不崩（无 WinError 10048）。
-  6. `pytest --ignore=tests/test_rag_chain.py` 基线不破（116 passed）。
+- **D（实机核验通过，2026-07-01，打包后 `python scripts/build_release.py`）**：
+  1. **浏览器不连带被杀（核心）✅**：exe 冷启动自拉起窗口 + 同浏览器另开标签页 → 保存配置重启 / 托盘重启 / 托盘退出 → 窗口及其他标签页均完好（`explorer.exe` 转交修复后成立；`os.startfile` 版曾在冷启动翻车）。
+  2. **强制重启交互 ✅**：保存 → 不弹二选框、直接「正在重启」转圈 → 后端拉起后自动刷新、新配置生效（`sawDown` 守卫修复后不再刷回旧后端）。
+  3. **遮罩语义 ✅**：配置重启 / 托盘重启 → 转圈；托盘退出 / 任务管理器强杀 → X（「连接已中断…」）。托盘重启的 2.5s 续命体感无感（≤2~3s）。
+  4. **去双重启 ✅**：保存配置不再触发 `update_config` 的 MCP 热重启。
+  5. `pytest --ignore=tests/test_rag_chain.py` 基线不破（116 passed）。
 
 ## 收尾
 - 临时验证脚本用完即删（信任边界）；中文注释。
-- A/B 已在 `main`；D 在临时分支 `temp-work-startup-restart` 开发，收尾 push 该分支并让本 plan 进度/状态与 git log 对齐。
+- A/B 已在 `main`；D 在临时分支 `temp-work-startup-restart` 开发并实机通过，**待合并回 `main` + 删临时分支**。
 - 本 plan 处理完后，MCP 迁移 plan 保持为已闭环的迁移记录，不再往里堆新工作。
