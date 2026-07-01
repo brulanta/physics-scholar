@@ -12,8 +12,8 @@
                 <path d="M15 9l-6 6M9 9l6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
               </svg>
             </div>
-            <div class="mask-title">程序已退出</div>
-            <div class="mask-desc">请关闭此页面</div>
+            <div class="mask-title">连接已中断</div>
+            <div class="mask-desc">正在尝试重新连接，请稍候…</div>
           </template>
 
           <!-- 重启中 -->
@@ -54,17 +54,30 @@ onUnmounted(() => {
 })
 
 let failCount = 0
+// 重启期间是否已确认旧后端下线过一次。restarting 一置位时旧后端往往还活着
+// （_do_restart 有 0.5s 延迟 + 进程退出延迟），若此时的 200 就 reload，会刷回
+// 尚未退出的旧后端（配置弹窗随整页重载消失=看似「立刻刷新」，刷完是干净 ok 态=空白，
+// 旧后端稍后才真死→再走 down 检测=遮罩延迟出现）。故需先见到一次下线，之后的 200
+// 才是新后端就绪。
+let sawDown = false
 
 async function checkHealth() {
-  // 重启中：收到200就刷新页面
+  // 重启中：先确认旧后端已下线过一次，再于新后端就绪（200）时刷新页面
   if (serviceState.state === 'restarting') {
     try {
       const r = await fetch('/api/health')
       if (r.ok) {
-        clearInterval(timer)
-        location.reload()
+        if (sawDown) {
+          clearInterval(timer)
+          location.reload()
+        }
+        // 否则：这是尚未退出的旧后端，继续等它先下线
+      } else {
+        sawDown = true
       }
-    } catch (_) { /* 还没起来，继续等 */ }
+    } catch (_) {
+      sawDown = true  // 旧后端已下线，等新后端起来
+    }
     return
   }
 
