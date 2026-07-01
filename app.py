@@ -62,7 +62,14 @@ def make_tray_icon():
 
     def on_restart(icon, item):
         icon.stop()
-        subprocess.Popen([sys.executable], cwd=os.path.dirname(sys.executable))
+        # CREATE_BREAKAWAY_FROM_JOB：让新 exe 脱离本进程即将关闭的 kill-on-close Job，
+        # 否则随后的 os._exit(0) 关 Job 句柄会连带把新进程杀掉。非 Windows 上该 flag 为 0、
+        # 天然 no-op（Job 也未启用）。旧前端窗口按既有设计保留，由用户手动关闭。
+        subprocess.Popen(
+            [sys.executable],
+            cwd=os.path.dirname(sys.executable),
+            creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
+        )
         os._exit(0)
 
     def on_exit(icon, item):
@@ -107,8 +114,14 @@ def _setup_kill_on_close_job():
         info = win32job.QueryInformationJobObject(
             job, win32job.JobObjectExtendedLimitInformation
         )
+        # kill-on-close：主进程退出即连带回收整棵子进程树（杜绝孤儿 MCP server）。
+        # breakaway-ok：允许子进程显式 CREATE_BREAKAWAY_FROM_JOB 脱离本 Job——托盘「重启」
+        # 时新 exe 必须脱离这个「即将被 os._exit 关闭」的 Job，否则会被 kill-on-close 连带杀掉
+        # （新进程拉不起 + 旧窗口异常消失的根因）。新进程经 __main__ 会重建自己的 kill-on-close
+        # Job，孤儿防护在新进程侧自动重新成立。
         info["BasicLimitInformation"]["LimitFlags"] |= (
             win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+            | win32job.JOB_OBJECT_LIMIT_BREAKAWAY_OK
         )
         win32job.SetInformationJobObject(
             job, win32job.JobObjectExtendedLimitInformation, info

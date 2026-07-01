@@ -35,6 +35,10 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=extra_dlls,
     datas=[
+        # dist/ = 前端构建产物（vite outDir）。分发前务必先跑 `python scripts/build_release.py`：
+        # 它会先 npm run build 刷新前端、再清掉上一轮的 dist/PhysicsScholar/ 旧 bundle，
+        # 最后才 pyinstaller。直接跑 pyinstaller 会打进旧前端，且递归进 dist/PhysicsScholar/
+        # 刷一大片「Ignoring non-existent resource」WARNING。
         (str(ROOT / 'dist'), 'dist'),
         (str(ROOT / 'config'), 'config'),
         (str(ROOT / 'src'), 'src'),

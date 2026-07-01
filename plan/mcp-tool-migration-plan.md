@@ -113,20 +113,20 @@ MultiServerMCPClient({
     - **Job Object kill-on-close ✅ 实机通过**：托盘退出 / 任务管理器结束顶层任务 → 整组 `PhysicsScholar.exe`（主 + 3 MCP 子进程）一并退出，无孤儿。计划风险 #1 闭环。
     - **GUI 完整跑通 + frozen 写后读 ✅ 实机通过（07-01）**：双击 exe → 托盘图标 + 浏览器自动开 + 前端加载；三类工具（local 的 rag/lookup、web 的 s2/arxiv/openalex、jina 全文）均正常；**「上传论文→立刻就该篇提问」写后读命中**——坐实 `chroma_gen` 代际令牌在 frozen 下也生效。后台全程无报错。人工核验清单两项全部通过，**阶段 3 闭环**。
     - **P2-a 配置热重载 restart 跨任务取消 BUG ✅ 已修复并实机确认**：用户实机在设置页保存主 LLM 配置后，后台打印 `CancelledError: Cancelled via cancel scope ... by Task-101`（重启框迟弹、后台报错）。**根因**：MCP stdio 会话（mcp.stdio_client / ClientSession）内部基于 anyio task group + cancel scope，anyio 铁律是 cancel scope 必须在**进入它的同一任务**里退出；旧实现 `startup()` 在 lifespan 任务进入 session，而 `POST /api/config → restart() → shutdown()` 从**请求任务** `aclose` 同一 stack → cancel scope 跨任务退出 → 取消反向传播回 lifespan 任务、误杀之。仅 restart 触发（startup/shutdown 同在 lifespan 任务，故阶段 0-2 未暴露；阶段 2 测试也在同一任务驱动 restart 而漏网）。**修复**：[mcp_client.py](../src/rag/mcp_client.py) 重构为**专属 owner 任务**独占所有 session enter/exit，`startup/restart/shutdown` 只对它发起/停信号（`create_task` / `asyncio.Event`），enter 与 exit 永远落在 owner 自己这一个任务，与调用方任务（lifespan / 请求）解耦。**验证**：临时脚本复刻「startup 在 A 任务、restart 从 B 任务调用」的真实场景 → 模拟 lifespan 任务不再被取消、restart 后 6 工具齐全（RC=0）；脚本用完即删。实机复测：设置页保存主 LLM 配置后**后台不再有 CancelledError 报错**（保存后「是否重启」框仍正常弹出）。
-    - **遗留（本次不入库、归属待定；下一 session 专项处理，进 plan mode 先定方案再动手）**：
+    - **遗留（2026-07-01 专项处理，代码侧已落地；遗留 1 待实机核验证实假设）**：
 
-      **遗留 1 — frozen 托盘「重启」拉不起新进程 + 旧前端窗口异常跟随消失**
+      **遗留 1 — frozen 托盘「重启」拉不起新进程 + 旧前端窗口异常跟随消失 —— ✅ 代码修复已落地（2026-07-01），待实机核验**
       - 现象：托盘选「重启」后，新 exe 没起来；且旧前端窗口跟着消失（**以前的设计是旧窗口保留**、由用户手动关，因新程序拉起会自己开新窗口）。
       - 相关代码：[app.py](../app.py) `on_restart` = `icon.stop()` → `subprocess.Popen([sys.executable], cwd=os.path.dirname(sys.executable))` → `os._exit(0)`。
-      - **首要假设（本次 MCP 迁移新引入的副作用，需实测证实/证伪，勿当定论）**：本次为防孤儿 MCP 子进程新增的 **Windows Job Object（kill-on-close）** 是元凶。[app.py](../app.py) `_setup_kill_on_close_job()` 把主进程放进 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job；Windows 下**子进程默认继承 Job 成员资格** → `on_restart` 里 `Popen` 出的新 exe 也进了这个**即将被杀的 Job**，紧接着 `os._exit(0)` 关闭 Job 句柄 → 新进程被连带杀掉（「拉不起来」），旧窗口所属主进程也随之全灭（「旧窗口异常消失」）。此假设能自洽解释「MCP 化之前重启正常、之后失效」的时间线。
-      - **若坐实的修复方向**：给 Job 设 `JOB_OBJECT_LIMIT_BREAKAWAY_OK`，并让重启的 `Popen` 带 `creationflags=CREATE_BREAKAWAY_FROM_JOB` 让新进程脱离 Job；需权衡这样脱离后新进程若再派生 MCP 子进程是否仍受孤儿防护覆盖（可能要在新进程里重建自己的 Job）。**先实测（dev 加日志 / console=True 重打观察 `Popen` 后新进程是否立即被杀），再据实证选修复，别盲改。**
+      - **首要假设（本次 MCP 迁移新引入的副作用，实机核验前不当定论）**：本次为防孤儿 MCP 子进程新增的 **Windows Job Object（kill-on-close）** 是元凶。[app.py](../app.py) `_setup_kill_on_close_job()` 把主进程放进 `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` 的 Job；Windows 下**子进程默认继承 Job 成员资格** → `on_restart` 里 `Popen` 出的新 exe 也进了这个**即将被杀的 Job**，紧接着 `os._exit(0)` 关闭 Job 句柄 → 新进程被连带杀掉（「拉不起来」），旧窗口所属主进程也随之全灭（「旧窗口异常消失」）。此假设能自洽解释「MCP 化之前重启正常、之后失效」的时间线。
+      - **已落地修复（按首要假设直接落地，改动小/自洽/无回归）**：① [app.py](../app.py) `_setup_kill_on_close_job()` 的 `LimitFlags` 一并 OR 上 `JOB_OBJECT_LIMIT_BREAKAWAY_OK`；② `on_restart` 的 `subprocess.Popen` 加 `creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)`（常量 = `0x1000000`，非 Windows 上取 0 天然 no-op），让新 exe 脱离即将被 `os._exit` 关闭的旧 Job。孤儿防护不破：新进程经 app.py `__main__` 启动，`__main__` 起线程前已调 `_setup_kill_on_close_job()` → 新进程**重建自己的 kill-on-close Job**、覆盖它日后派生的 3 个 MCP 子进程，故 breakaway 只脱离「旧的、即将死」的 Job，无覆盖真空。
+      - **待实机核验**：托盘「重启」→ 新 exe 拉起（新浏览器窗口自开）、旧前端窗口保留（不异常消失）；对新进程组托盘退出/强杀顶层 → 整组一并消失、无孤儿（证明新进程重建的 Job 生效）。**若假设被证伪（仍拉不起/旧窗口仍消失）**：breakaway 无害但非根因，回「console=True + 日志观察 Popen 后新进程是否立即被杀」另查（`sys.executable` 路径 / `cwd` 权限 / bootloader 两层结构），并把实测结果记于此。
 
-      **遗留 2 — 打包未重跑前端 `npm run build`，exe 内前端为旧产物**
+      **遗留 2 — 打包携带旧前端 + spec dist wart —— ✅ 已固化（2026-07-01）**
       - 现象：exe 外观与最新源码有差。已核实：`dist/`（[spec](../physics_scholar.spec) 的 `datas` 把 `ROOT/dist` 整个打入）最后构建于 **2026-06-04**，而 `frontend/src/` 下 `ConfigModal.vue`/`ChatWindow.vue`/`SettingsDrawer.vue` 等多个源文件都比 `dist/index.html` 新 → exe 携带了 06-04 旧前端。
-      - **正确定稿分发流程**：先 `cd frontend && npm run build`（vite `outDir: ../dist`）→ 再 `pyinstaller physics_scholar.spec`。考虑是否把这步固化（构建脚本 / spec 注释 / 文档），避免再忘。
-      - **顺带一起处理的 spec wart（阶段 3 已记，本质同源）**：`dist/` 顶层同时含上一轮 `dist/PhysicsScholar/` 打包输出，`datas` 打整个 `dist/` 时 PyInstaller 会递归进旧构建刷一片「Ignoring non-existent resource」WARNING（无害、bundle 虚胖）。清理方向：打包前清 `dist/PhysicsScholar/`，或把前端产物移出 `dist/` 顶层另置目录、改 spec `datas` 指向。
+      - **已落地固化**：新建 [scripts/build_release.py](../scripts/build_release.py) 一键三步——`npm run build`（前端刷新）→ 删 `dist/PhysicsScholar/`（清旧 bundle、消 wart WARNING）→ `pyinstaller physics_scholar.spec --noconfirm`；任一步失败即停并打印中文错误。文档同步：[README.md](../README.md)/[README_en.md](../README_en.md) 前端构建段 + [CLAUDE.md](../CLAUDE.md) Packaging 段改为推荐该脚本；[spec](../physics_scholar.spec) `datas` 的 `dist` 行加注释警示。**保持 `dist/` 目录布局不变**（vite `outDir` / spec `datas` / main.py 挂载路径全不动）——问题本质是流程未固化 + 未清旧产物，脚本即根治，未采「拆分目录」重构。
 
-      > 两项都**不属 MCP 迁移范畴**，记于此仅为跨 session 交接线索；归属（是否另开分支/plan）下次和用户确认。约束照旧：临时验证脚本用完即删（信任边界）、中文注释、收尾 push 当前分支。
+      > 约束照旧：临时验证脚本用完即删（信任边界）、中文注释、收尾 push 当前分支 `temp-work-mcp-tool-migration`。
 
 ## 风险点（按概率排序）
 

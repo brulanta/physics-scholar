@@ -248,6 +248,10 @@ npm run build
 # Access http://localhost:8000 — no separate frontend process needed
 ```
 
+> **Packaging for distribution**: use `python scripts/build_release.py` (frontend build +
+> clear stale bundle + PyInstaller in one shot) to avoid shipping a stale frontend or
+> recursing into the previous `dist/PhysicsScholar/` bundle.
+
 ---
 
 ## Configuration

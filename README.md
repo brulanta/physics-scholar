@@ -249,6 +249,9 @@ npm run build
 # 访问 http://localhost:8000 即可，无需单独启动前端
 ```
 
+> **打包分发**：请用 `python scripts/build_release.py`（前端 build + 清旧产物 + PyInstaller 一步到位），
+> 避免直接跑 `pyinstaller` 时携带旧前端、或递归进上一轮 `dist/PhysicsScholar/` 刷 WARNING。
+
 ---
 
 ## 配置说明

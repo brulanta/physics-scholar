@@ -39,8 +39,9 @@ Live tests (real arXiv/S2/Jina calls) are **skipped by default** and only run wi
 
 ### Packaging
 ```bash
-pyinstaller physics_scholar.spec       # onedir build → dist/PhysicsScholar/
+python scripts/build_release.py        # 分发一键构建：npm run build → 清旧产物 → pyinstaller
 ```
+Prefer `scripts/build_release.py` for distribution builds — it rebuilds the frontend, clears the stale `dist/PhysicsScholar/` bundle, then packages, avoiding two footguns (shipping a stale frontend, and PyInstaller recursing into the old bundle). Running `pyinstaller physics_scholar.spec` directly bundles whatever is currently in `dist/` (may be an out-of-date frontend). Output → `dist/PhysicsScholar/`.
 The packaged exe listens on port **57321** (see `app.py`) and opens a system-tray icon; the dev server uses **8000**.
 
 ## Architecture
