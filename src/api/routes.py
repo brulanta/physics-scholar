@@ -105,7 +105,15 @@ async def restart_app():
         await asyncio.sleep(0.5)  # 等前端收到200响应
         exe = sys.executable
 
-        subprocess.Popen([exe], cwd=os.path.dirname(exe))
+        # CREATE_BREAKAWAY_FROM_JOB：与 app.py 托盘「重启」同理——本进程在 kill-on-close
+        # 的 Job 里，新 exe 若不脱离，随后的 os._exit(0) 关 Job 句柄会把它连带杀掉
+        # （前后端全关、无自动拉起）。Job 已设 BREAKAWAY_OK，故子进程可显式脱离；
+        # 非 Windows 上该 flag 取 0、天然 no-op。
+        subprocess.Popen(
+            [exe],
+            cwd=os.path.dirname(exe),
+            creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
+        )
 
         os._exit(0)
 
