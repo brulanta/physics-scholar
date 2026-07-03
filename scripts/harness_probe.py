@@ -54,6 +54,7 @@ from src.rag.graph import (  # noqa: E402
     _detect_marker,
 )
 from src.rag.prompts import build_prompt, CITATION_DEFAULT  # noqa: E402
+from src.rag.harness_profile import PRESETS  # noqa: E402
 from src.core.trim_thinking import process_llm_output  # noqa: E402
 
 TEST_CASES = REPO_ROOT / "eval_framework" / "test_cases.json"
@@ -79,7 +80,7 @@ def load_questions(only: list[str] | None) -> list[dict]:
     return items
 
 
-def build_initial_state(question: str, user_id: str, mode: str) -> dict:
+def build_initial_state(question: str, user_id: str, mode: str, profile) -> dict:
     """内联复刻 _prepare 的 initial_state（空 history）。"""
     system_prompt = build_prompt(
         mode="normal" if mode == "normal" else "discuss",
@@ -95,7 +96,7 @@ def build_initial_state(question: str, user_id: str, mode: str) -> dict:
         "conv_id": "harness_probe",
         "user_id": user_id,
         "translation": False,
-        "remaining_calls": 6,
+        "remaining_calls": profile.budget_n,
         "next_prefill": None,
     }
 
@@ -146,10 +147,10 @@ def collect_metrics(result: dict) -> dict:
     }
 
 
-async def run_one(item: dict, user_id: str, mode: str) -> dict:
+async def run_one(item: dict, user_id: str, mode: str, profile) -> dict:
     """跑单题，返回 {id, metrics..., latency, error}。"""
-    agent = build_agent(user_id)
-    state = build_initial_state(item["question"], user_id, mode)
+    agent = build_agent(user_id, profile)
+    state = build_initial_state(item["question"], user_id, mode, profile)
     t0 = time.perf_counter()
     try:
         result = await agent.ainvoke(state)
@@ -224,15 +225,19 @@ async def main_async(args) -> None:
         print("没有可跑的题目。", file=sys.stderr)
         sys.exit(1)
 
+    profile = PRESETS[args.profile]
+    label = args.label or args.profile  # 未显式指定 label 时用 profile 名
+
     print(
-        f"harness_probe | label={args.label} | mode={args.mode} | "
+        f"harness_probe | profile={args.profile} | label={label} | mode={args.mode} | "
         f"user_id={args.user_id} | {len(items)} 题\n"
+        f"  {profile}\n"
     )
 
     rows: list[dict] = []
     for i, item in enumerate(items, 1):
         print(f"[{i}/{len(items)}] {item['id']} 跑中…", file=sys.stderr)
-        row = await run_one(item, args.user_id, args.mode)
+        row = await run_one(item, args.user_id, args.mode, profile)
         rows.append(row)
 
     print()
@@ -244,11 +249,13 @@ async def main_async(args) -> None:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = OUT_DIR / f"behavior_{args.label}_{stamp}.json"
+    out_path = OUT_DIR / f"behavior_{label}_{stamp}.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(
             {
-                "label": args.label,
+                "label": label,
+                "profile": args.profile,
+                "profile_fields": vars(profile),
                 "mode": args.mode,
                 "user_id": args.user_id,
                 "timestamp": stamp,
@@ -265,7 +272,13 @@ async def main_async(args) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="Harness 行为量具（阶段②）")
     p.add_argument("--only", nargs="*", help="只跑指定题目 id，如 Q01 Q05")
-    p.add_argument("--label", default="FLASH", help="本次运行标签（如 FLASH/STRONG），入存档名")
+    p.add_argument(
+        "--profile",
+        default="FLASH",
+        choices=list(PRESETS.keys()),
+        help="HarnessProfile 预置：FLASH（现状基线）| STRONG（松绑候选）",
+    )
+    p.add_argument("--label", default=None, help="运行标签（入存档名）；缺省=profile 名")
     p.add_argument("--mode", default="normal", choices=["normal", "discuss"])
     p.add_argument("--user-id", dest="user_id", default="default", help="rag_tool 语料所属 user_id")
     args = p.parse_args()

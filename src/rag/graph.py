@@ -32,6 +32,7 @@ from src.rag.prompts import (
     CITATION_TRANSLATION,
 )
 from src.core.trim_thinking import process_llm_output, THINK_TAG_PATTERN
+from src.rag.harness_profile import HarnessProfile, FLASH
 from src.utils.logger import get_logger
 import asyncio
 import contextlib
@@ -147,11 +148,15 @@ class AgentState(TypedDict):
     pending_correction: str  # 新增
 
 
-def thinking_guard(state: AgentState) -> dict:
+def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
+    # 轴 A（guard_mode）：off = 完全不检查，工具调用直接放行
+    if profile.guard_mode == "off":
+        return state
+
     messages = list(state["messages"])
     last_msg = messages[-1]
     retry_count = state.get("thinking_retry_count", 0)
-    remaining = state.get("remaining_calls", 6)
+    remaining = state.get("remaining_calls", profile.budget_n)
 
     if not isinstance(last_msg, AIMessage):
         return state
@@ -163,6 +168,15 @@ def thinking_guard(state: AgentState) -> dict:
     has_thinking = "<thinking>" in content and "</thinking>" in content
 
     if has_thinking:
+        return {
+            **state,
+            "thinking_retry_count": 0,
+            "is_thinking_correction": False,
+        }
+
+    # 轴 A（guard_mode）：soft = 缺 <thinking> 只记警告、不驳回，放行到 tool_node
+    if profile.guard_mode == "soft":
+        logger.warning("[guard:soft] 工具调用缺 <thinking>，soft 模式放行（不驳回、不纠正）")
         return {
             **state,
             "thinking_retry_count": 0,
@@ -208,7 +222,7 @@ def thinking_guard(state: AgentState) -> dict:
         "messages": messages + fake_tool_messages,
         "pending_correction": correction_text,
         "thinking_retry_count": retry_count + 1,
-        "remaining_calls": min(remaining + 1, 6),
+        "remaining_calls": min(remaining + 1, profile.budget_n),
         "is_thinking_correction": True,
     }
 
@@ -238,7 +252,7 @@ def after_guard(state: AgentState) -> str:
     return END
 
 
-async def final_answer(state: AgentState) -> dict:
+async def final_answer(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
     messages = list(state["messages"])
     last_msg = messages[-1]
 
@@ -250,7 +264,7 @@ async def final_answer(state: AgentState) -> dict:
                     tool_call_id=tc["id"],
                 )
             )
-    final_prefill = build_final_prefill()
+    final_prefill = build_final_prefill(profile)
     invoke_messages = messages + [AIMessage(content=final_prefill)]
     response = await ainvoke_with_retry(llm, invoke_messages)
 
@@ -258,8 +272,12 @@ async def final_answer(state: AgentState) -> dict:
 
 
 def build_prefill(
-    remaining: int, is_after_tool: bool, is_thinking_correction: bool = False
+    remaining: int,
+    is_after_tool: bool,
+    is_thinking_correction: bool = False,
+    profile: HarnessProfile = FLASH,
 ) -> str:
+    budget_n = profile.budget_n
     if remaining == 1:
         warning = (
             "⚠️ CRITICAL: FINAL_OPPORTUNITY. "
@@ -277,10 +295,25 @@ def build_prefill(
     warning_line = f"\n- {warning}" if warning else ""
     runtime_status = (
         f"[RUNTIME_STATUS]\n"
-        f"- Remaining_Tool_Calls: {max(remaining, 0)}/6{warning_line}\n"
+        f"- Remaining_Tool_Calls: {max(remaining, 0)}/{budget_n}{warning_line}\n"
         f"[/RUNTIME_STATUS]"
     )
 
+    # 轴 C2（prefill_level）：light/minimal 只降 prefill 逼迫强度；
+    # RUNTIME_STATUS（轴 D，纯信息）与 [start] 锚点、C1 标记契约均保留。
+    if profile.prefill_level == "light":
+        note = "工具额度已用尽，仅基于已有证据推导。" if remaining <= 0 else ""
+        lead = (
+            f"<think>\n"
+            f"{note}按流程：先输出 <thinking> 完成评估，再决定是否调用工具。现在输出 [start]。\n"
+            f"</think>\n"
+            f"[start]"
+        )
+        return f"{runtime_status}\n\n{lead}"
+    if profile.prefill_level == "minimal":
+        return f"{runtime_status}\n\n[start]"
+
+    # prefill_level == "full"（现状）：按预算/纠正/是否工具后分支催眠
     if remaining <= 0:
         # 协议 C：调用循环结束，进入最终输出
         lead = (
@@ -321,10 +354,28 @@ def build_prefill(
     return f"{runtime_status}\n\n{lead}"
 
 
-def build_final_prefill() -> str:
+def build_final_prefill(profile: HarnessProfile = FLASH) -> str:
+    budget_n = profile.budget_n
+    # 轴 E（final_prefill）：light = 中性收尾，去掉终局威胁话术
+    if profile.final_prefill == "light":
+        runtime_status = (
+            "[RUNTIME_STATUS]\n"
+            f"- Remaining_Tool_Calls: 0/{budget_n}\n"
+            "- 工具调用循环已结束，进入最终作答。\n"
+            "[/RUNTIME_STATUS]"
+        )
+        lead = (
+            "<think>\n"
+            "工具阶段已结束，我基于已掌握的证据组织最终回答，标注结论的依据与局限。现在输出 [start]。\n"
+            "</think>\n"
+            "[start]"
+        )
+        return f"{runtime_status}\n\n{lead}"
+
+    # final_prefill == "full"（现状）
     runtime_status = (
         "[RUNTIME_STATUS]\n"
-        "- Remaining_Tool_Calls: 0/6\n"
+        f"- Remaining_Tool_Calls: 0/{budget_n}\n"
         "- 🚫 PIPELINE TERMINATED: 工具调用循环已终止（额度耗尽或违规次数超限）。\n"
         "- ⚠️ CRITICAL WARNING: 当前处于最终兜底节点。\n"
         "  若本轮仍输出工具调用，pipeline 将直接终止，用户将收到空回复。\n"
@@ -341,7 +392,7 @@ def build_final_prefill() -> str:
     return f"{runtime_status}\n\n{lead}"
 
 
-def build_agent(user_id: str):
+def build_agent(user_id: str, profile: HarnessProfile = FLASH):
     paper_id_search_tool = make_paper_id_search_tool(user_id)
     rag_tool = make_rag_tool(user_id)
 
@@ -382,13 +433,14 @@ def build_agent(user_id: str):
             "is_thinking_correction", False
         )
         # 用完立刻重置
-        remaining = state.get("remaining_calls", 6)
+        remaining = state.get("remaining_calls", profile.budget_n)
 
         # 实时生成，不从 state 读
         prefill = build_prefill(
             remaining,
             is_after_tool,
             is_thinking_correction=state.get("is_thinking_correction", False),
+            profile=profile,
         )
         # 用完立刻重置
 
@@ -445,11 +497,19 @@ def build_agent(user_id: str):
             "pending_correction": "",  # 清除
         }
 
+    # thinking_guard / final_answer 是模块级函数（便于单测），此处闭包注入 profile。
+    # after_guard 路由不依赖 profile（soft/off 不 set is_thinking_correction，路由不变）。
+    def _guard(state):
+        return thinking_guard(state, profile)
+
+    async def _final(state):
+        return await final_answer(state, profile)
+
     graph = StateGraph(AgentState)
     graph.add_node("call_llm", call_llm)
-    graph.add_node("thinking_guard", thinking_guard)
+    graph.add_node("thinking_guard", _guard)
     graph.add_node("tool_node", tool_node)
-    graph.add_node("final_answer", final_answer)
+    graph.add_node("final_answer", _final)
 
     graph.set_entry_point("call_llm")
 
@@ -482,9 +542,11 @@ def _prepare(
     translation: bool,
     mode: str,
     parent_id: int,
+    profile: HarnessProfile = FLASH,
 ):
     """共享构建：system_prompt + history + agent + initial_state。
     供 chat()/regenerate()（非流式兜底）与 chat_stream()/regenerate_stream()（流式）复用。
+    profile 默认 FLASH（现状），生产路径不传即零行为变化；开发态实验从此处注入。
     """
     history = format_history(memory.get(leaf_message_id=parent_id, explicit=True))
     system_prompt = build_prompt(
@@ -493,7 +555,7 @@ def _prepare(
         citation_plugin=CITATION_TRANSLATION if translation else CITATION_DEFAULT,
         debug=False,
     )
-    agent = build_agent(user_id)
+    agent = build_agent(user_id, profile)
     initial_state = {
         "messages": [
             SystemMessage(content=system_prompt),
@@ -502,7 +564,7 @@ def _prepare(
         "conv_id": conv_id,
         "user_id": user_id,
         "translation": translation,
-        "remaining_calls": 6,
+        "remaining_calls": profile.budget_n,
         "next_prefill": None,
     }
     return agent, initial_state

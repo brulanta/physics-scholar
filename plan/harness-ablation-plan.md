@@ -100,8 +100,9 @@ graph.py 内的接线（改动集中、默认 FLASH 即现状）：
 - ✅ 原生思维链（G）保持关闭（控温决策），作为实验外层变量记录，不进 profile 结构。
 - ✅ 接线风险分级：真安全只有 A/C2/D/E/H；B/F 属「改动扩散出 graph.py」的黄区；C1 红区。首刀 PR 只上真安全轴。
 - ✅ 优先级：真正动代码的第一步是 **②行为量具**（现有 eval_framework 是内容打分、无法复用），不是接线；**A1/A4 与②同级并行**（正交、独立见效、练手价值最高）。①拆分诊断（本文档）已作为纯文档完成。
-- ⏳ 待定：`STRONG` 档 `serial_tools` 取值（需单独测强模型并行工具正确性）。
-- ⏳ 待定：字段命名、profile 存放位置（独立模块 vs 并入 config）。
+- ✅ 已定：profile 存放于独立模块 `src/rag/harness_profile.py`（非并入 config——它是开发态实验旋钮，不进 yaml/前端/reload）。字段名：`guard_mode`/`prefill_level`/`final_prefill`/`budget_n`。
+- ✅ 已定（③首刀）：只落地真安全轴的 4 个字段（A/C2/E/H）；**不预置 B/F 的空字段**——「已声明未接线」对实验 rig 是陷阱（翻了没反应）。D（RUNTIME_STATUS）判定为恒开纯信息，不设开关。
+- ⏳ 待定：`STRONG` 档 `serial_tools` 取值（需单独测强模型并行工具正确性）——F 落地时补字段。
 
 ---
 
@@ -118,8 +119,8 @@ graph.py 内的接线（改动集中、默认 FLASH 即现状）：
 3. **[A1+A4 工具信息瘦身 + 分层披露，未开工 — 与②并行]** 独立于松绑实验、独立见效、练手价值最高：
    - 审计 s2/arxiv/jina 三个重工具的 docstring↔pydantic schema↔TOOL_USAGE prompt 三处冗余，砍重叠。
    - 探索自建 LangGraph agent 里「按需披露」的落地路径（工具信息分层：精简签名常驻 + 详细 schema/降级逻辑延迟注入）。
-4. **[③ 接线，未开工，依赖②]** 按 Part 2 接线 HarnessProfile（默认 FLASH，零行为变化）。首刀 PR 只上真安全轴 A/C2/D/E/H；B、F 各自单独小 PR。
-5. **[④ 实验，未开工]** 同一强模型跑 FLASH vs 单变量松绑，比行为指标，验证过约束假设。
+4. **[③ 接线，首刀已完成]** `src/rag/harness_profile.py`（`HarnessProfile` + `FLASH`/`STRONG`/`PRESETS`）；graph.py 把 profile（默认 FLASH）串进 `thinking_guard`/`build_prefill`/`build_final_prefill`/`final_answer`/`build_agent`/`_prepare`。已接真安全轴 **A（guard_mode strict/soft/off）/ C2（prefill_level full/light/minimal）/ E（final_prefill full/light）/ H（budget_n）**；D 恒开不设开关。`harness_probe.py` 加 `--profile FLASH|STRONG`。离线验证：FLASH 文本与旧硬编码逐分支一致（零行为变化）、STRONG 各轴翻转、guard 三态、graph 编译、生产默认=FLASH；Q01 实机 FLASH/STRONG 均端到端通过。**待办：B（correction_tone）/ F（serial_tools）各自单独小 PR（黄区，改动扩散出 graph.py）。**
+5. **[④ 实验，未开工，依赖③]** 同一强模型跑 `--profile FLASH` vs `--profile STRONG`（全 20 题，需含触发工具的题以考验 guard:soft/marker），比行为指标，验证过约束假设。
 6. **[⑤ 备选]** 若需砍到 minimal，再评估 Part 3 的 C1 解耦。
 
 > ⚠️ 跨机提醒：本计划纯代码层，不依赖 `data/`（gitignored）。②的评测题库复用已入库的 `eval_framework/test_cases.json`，随 git 走，无额外跨机依赖。
