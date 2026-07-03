@@ -110,7 +110,7 @@ graph.py 内的接线（改动集中、默认 FLASH 即现状）：
 优先级：**② ≈ A1/A4（可并行）＞ ③接线 ＞ ④实验**；①已完成。
 
 1. **[① 已完成]** 诊断表 + HarnessProfile 设计固化（本文件）。
-2. **[② 量具，未开工 — 真正的第一步]** 建「自动 + 行为感知」评测回路，**是任何松绑实验的前置**：
+2. **[② 量具，进行中 — 真正的第一步]** 建「自动 + 行为感知」评测回路，**是任何松绑实验的前置**。**详细实施计划见 [harness-behavior-runner-plan.md](./harness-behavior-runner-plan.md)**：
    - 自动跑 agent 端到端（自动喂问题、抓答案、抓工具日志、组表），替代 eval_framework 的全手动流程。现有 `eval_framework/evaluator.py` 是内容打分（手动喂 answer/tool_log 给 LLM 评委），不自动跑 agent、不产行为指标，**无法复用，基本从零造 runner**（评委宪法/意图模板设计可参考）。
    - **行为指标**（不是内容打分）：guard 命中率、纠正循环触发次数、空答率、工具调用轮数、是否撞 budget 上限、`[TOOL_LOOP]` 标记吐出率。一翻开关就见分晓，不需要 LLM 评委。
    - 题库：复用 `eval_framework/test_cases.json`（20 题，随 git 走）。②如只需问题，读 list→dict 的 `question` 字段即可。
