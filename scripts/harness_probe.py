@@ -12,6 +12,11 @@
 - **指标从最终 transcript 推导**：guard 注入的假 ToolMessage（哨兵串「未检测到必要的
   <thinking>」）与预算兜底哨兵（「已达最大调用次数上限」）都留在 state，无需脆弱的
   流式增量重建。单次 ainvoke 即可。
+- **soft 档合规真值**（`missing_thinking_calls`）：`guard_hits` 数的是 **strict 哨兵**——
+  soft/off 档 guard 不注入哨兵、只打日志放行，故 `guard_hits` 在 soft 恒 0，是**假阴性**
+  （⑤ 暴露的量具缺口）。guard 的违规谓词只是「带 tool_calls 却缺 <thinking>」，而违规的
+  AIMessage 在 strict/soft/off **每种模式都留在 transcript**；故直接数它，profile 无关，
+  才是 soft 档真合规度。strict 档二者应一致（每次驳回对应一条违规 AIMessage）。
 - **复用不 fork**：build_agent/build_prompt/_detect_marker/process_llm_output 全部从
   src.rag.graph import。
 
@@ -112,8 +117,9 @@ def collect_metrics(result: dict) -> dict:
     guard_hits = 0
     tool_rounds = 0
     budget_forced = False
-    tool_turns = 0          # 带 tool_calls 的 AIMessage 轮数
-    marker_emitted = 0      # 其中吐出了 [TOOL_LOOP: DONE/PENDING] 的轮数
+    tool_turns = 0              # 带 tool_calls 的 AIMessage 轮数
+    marker_emitted = 0          # 其中吐出了 [TOOL_LOOP: DONE/PENDING] 的轮数
+    missing_thinking_calls = 0  # 其中缺 <thinking>…</thinking> 的轮数（合规真值，profile 无关）
 
     for m in messages:
         if isinstance(m, ToolMessage):
@@ -127,8 +133,15 @@ def collect_metrics(result: dict) -> dict:
         elif isinstance(m, AIMessage):
             if getattr(m, "tool_calls", None):
                 tool_turns += 1
-                if _detect_marker(m.content or "") is not None:
+                ai_content = m.content or ""
+                if _detect_marker(ai_content) is not None:
                     marker_emitted += 1
+                # 合规真值：guard 的违规谓词就是「带 tool_calls 却缺 <thinking>」，
+                # 而违规的 AIMessage 在 strict/soft/off **每种模式都留在 transcript**。
+                # guard_hits（strict 哨兵计数）在 soft/off 恒 0——是假阴性；本计数直接
+                # 数违规 AIMessage，profile 无关，才是 soft 档合规度的真信号（⑤ 量具缺口）。
+                if "<thinking>" not in ai_content or "</thinking>" not in ai_content:
+                    missing_thinking_calls += 1
 
     # 最终答案取末条消息内容，过 process_llm_output 判空
     final_content = messages[-1].content if messages else ""
@@ -136,10 +149,15 @@ def collect_metrics(result: dict) -> dict:
 
     budget_hit = budget_forced or (remaining is not None and remaining <= 0)
     marker_rate = round(marker_emitted / tool_turns, 3) if tool_turns else None
+    compliance_rate = (
+        round(1 - missing_thinking_calls / tool_turns, 3) if tool_turns else None
+    )
 
     return {
         "guard_hits": guard_hits,
-        "correction_loops": guard_hits,  # 每次 guard 违规=一次纠正循环
+        "correction_loops": guard_hits,  # 每次 guard 违规=一次纠正循环（strict 机构活动）
+        "missing_thinking_calls": missing_thinking_calls,  # profile 无关的违规真值
+        "thinking_compliance_rate": compliance_rate,       # 1 - 违规率；soft 档真合规度
         "tool_rounds": tool_rounds,
         "tool_turns": tool_turns,
         "marker_emit_rate": marker_rate,
@@ -204,7 +222,7 @@ async def run_one(
 COLUMNS = [
     ("id", "id", 6),
     ("guard_hits", "guard", 6),
-    ("correction_loops", "corr", 5),
+    ("missing_thinking_calls", "noThk", 6),
     ("tool_rounds", "tools", 6),
     ("marker_emit_rate", "mark%", 6),
     ("budget_hit", "budget", 7),
@@ -248,8 +266,12 @@ def summarize(rows: list[dict]) -> dict:
     return {
         "n_ok": n,
         "n_error": len(rows) - n,
+        # guard_hits 只在 strict 档非零（哨兵计数）；soft/off 恒 0（假阴性）。
         "guard_hits_total": sum(r.get("guard_hits", 0) for r in ok),
-        "correction_loops_total": sum(r.get("correction_loops", 0) for r in ok),
+        # missing_thinking_calls 是 profile 无关的合规真值——soft/off 档看这个，不看 guard。
+        "missing_thinking_total": sum(r.get("missing_thinking_calls", 0) for r in ok),
+        "tool_turns_total": sum(r.get("tool_turns", 0) for r in ok),
+        "avg_thinking_compliance_rate": avg("thinking_compliance_rate"),
         "empty_answer_rate": round(sum(1 for r in ok if r.get("empty_answer")) / n, 3),
         "budget_hit_rate": round(sum(1 for r in ok if r.get("budget_hit")) / n, 3),
         "avg_tool_rounds": avg("tool_rounds"),

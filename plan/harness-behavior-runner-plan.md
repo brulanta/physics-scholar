@@ -68,3 +68,11 @@
   - `--pace`（默认 5s）：题间静置，缓 RPM=5 开头撞限流。
 - ⚠️ **运维事实**：S2 429 是主要墙钟成本源（bulk 端点瞬时限流，非 key 问题；key 有效），被工具 60s 冷却 + 上述 timeout/retry 吸收，不丢数据但拉长时间。`[Discuss模式]` 题（Q19/Q20）全量须 `--mode discuss`。
 - ⚠️ **环境注意**：`requirements.txt` 是 UTF-16 编码（ASCII grep 会误判"查无此包"）；`rank_bm25`、`langchain-mcp-adapters`（graph.py import 链依赖）均已在册，本机 env 未同步而已，`pip install -r requirements.txt` 补齐。
+
+## soft-violation 计数器（2026-07-04，补 ⑤ 量具缺口）
+
+⑤ 暴露：`guard_hits` 只数 **strict 驳回哨兵 ToolMessage**，soft/off 档 guard 只打 `[guard:soft]` 日志、不注入哨兵 → `guard_hits` 在 soft 恒 0，是**假阴性**。故 ④/⑤ 的「STRONG guard=0」当时无法与真合规区分。
+
+- **修复**：`collect_metrics` 加 **profile 无关**的 `missing_thinking_calls` —— 直接数「带 tool_calls 却缺 `<thinking>…</thinking>`」的 AIMessage。这正是 guard 的违规谓词，而违规 AIMessage 在 strict/soft/off **每种模式都留在最终 transcript**（延续本计划「指标全从 transcript 推导」的原则，不解析日志）。附 `thinking_compliance_rate`（1−违规率）+ 汇总 `missing_thinking_total`/`avg_thinking_compliance_rate`；表格加 `noThk` 列（换下冗余的 `corr`，因 `correction_loops==guard_hits`）。
+- **语义**：strict 档 `missing_thinking_calls == guard_hits`（每次驳回对应一条违规 AIMessage）；soft/off 档 `guard_hits=0` 而本计数抓真违规。**将 ④/⑤ 的「STRONG guard=0」从假阴性升级为可信真零。**
+- **验证**：`tests/test_harness_probe_metrics.py`（离线，合成 transcript，无网络/无 agent）—— STRONG(全合规→missing=0/compliance=1.0/guard=0)、MINIMAL(违规→guard=0 但 missing=1/compliance=0.5)、strict 一致性、哨兵不计入 tool_rounds、纯直答率为 None。5 passed。

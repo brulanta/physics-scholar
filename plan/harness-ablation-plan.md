@@ -136,6 +136,7 @@ graph.py 内的接线（改动集中、默认 FLASH 即现状）：
    - **结论（修正 ④ 的朴素说法）**：**prefill(C2) 分两层，在 light 处干净切开**——`full→light` 免费（只卸自我催眠/威胁措辞，模型仍全合规）；`light→minimal` **不免费**（砍掉 light 里那句「按流程：先输出 <thinking>…[start]」残留提醒，合规即崩）。**那句一行提醒是承重的；plugins.py 标记教学独木难支。** → 计划原假设「保留 plugins.py 教学则 minimal 仍安全」**证伪**。
    - **guard 角色精确化**：guard 是**冗余兜底**，仅在 prefill≥light 时永不触发（FLASH strict 0 驳回、STRONG soft 0 警告）；prefill 一旦弱到 minimal，正是 guard（strict）该抓的 6 次违规现形。即「guard 死重」的前提是 **prefill 守住合规**，二者非独立。
    - **量具缺口（actionable）**：`harness_probe` 的 `guard_hits` 只数 **strict 驳回哨兵**，**soft 模式违规对 transcript 指标不可见**（只在 `[guard:soft]` 日志里）。soft 档 profile 的合规度须解析日志或给量具加 soft-violation 计数器——否则 soft 档「guard=0」是假阴性。
+     - **[已修复 2026-07-04]** `collect_metrics` 加 profile 无关的 `missing_thinking_calls`（直接数「带 tool_calls 却缺 `<thinking>`」的 AIMessage——违规消息在 strict/soft/off 每种模式都留在 transcript）+ `thinking_compliance_rate`（1−违规率）+ 汇总 `missing_thinking_total`/`avg_thinking_compliance_rate`。strict 档二者与 `guard_hits` 一致；soft/off 档 `guard_hits` 恒 0 而本计数抓真违规。离线单测 `tests/test_harness_probe_metrics.py`（合成 transcript，无网络）复刻 STRONG(合规)/MINIMAL(违规) 两景 + strict 一致性 + 哨兵分类，5 passed。**这把 ④/⑤ 里「STRONG guard=0」从假阴性升级为可信真零。**
    - **产品建议**：**生产上 gemini 用 STRONG(light)**——Pareto 最优地板。若仍想要 minimal，须先做 Part 3（把 `_consume_events` 的 answer_start 从 `[TOOL_LOOP: DONE]` 解耦），否则 prod 流式会空答。
    - 数据存档：`behavior_MINIMAL{norm,disc}_*.json` + `behavior_STRONGrecheck_*.json`。
 
