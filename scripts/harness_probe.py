@@ -65,6 +65,9 @@ GUARD_SENTINEL = "未检测到必要的 <thinking>"
 # final_answer 达预算上限时注入的取消哨兵（graph.py:249）
 BUDGET_SENTINEL = "已达最大调用次数上限"
 
+# 题级重试之间的退避（秒）——RPM=5 下给限流窗口喘息
+RETRY_BACKOFF_S = 8.0
+
 
 def load_questions(only: list[str] | None) -> list[dict]:
     """读题库，只取 id+question。文件是合法 UTF-8。"""
@@ -147,20 +150,55 @@ def collect_metrics(result: dict) -> dict:
     }
 
 
-async def run_one(item: dict, user_id: str, mode: str, profile) -> dict:
-    """跑单题，返回 {id, metrics..., latency, error}。"""
-    agent = build_agent(user_id, profile)
-    state = build_initial_state(item["question"], user_id, mode, profile)
+async def run_one(
+    item: dict,
+    user_id: str,
+    mode: str,
+    profile,
+    timeout: float,
+    retries: int,
+) -> dict:
+    """跑单题，返回 {id, metrics..., latency, error, attempts}。
+
+    针对 gemini-3.1-pro（RPM=5 + Google GLI 上游抖动）的兜底：
+    - **硬超时**：`ainvoke` 无 request_timeout，上游挂起会无限 stall。用 asyncio.wait_for
+      给每题一个墙钟上限，超时即判失败进入重试（不 stall 整轮）。
+    - **题级重试**：对「超时 / 抛异常 / 空答」重试 `retries` 次。空答在强模型的工具题上
+      多半是上游 200-空 body 的哑火，值得重试；attempts 如实记录，最后一次仍空则 empty_answer=True。
+    每次重试重建 agent+state，避免脏状态复用。
+    """
+    error = None
+    metrics: dict = {}
     t0 = time.perf_counter()
-    try:
-        result = await agent.ainvoke(state)
-        metrics = collect_metrics(result)
-        error = None
-    except Exception as e:  # 网络/模型异常：记录，继续下一题
-        metrics = {}
-        error = f"{type(e).__name__}: {e}"
+    attempts = 0
+    for attempt in range(retries + 1):
+        attempts = attempt + 1
+        agent = build_agent(user_id, profile)
+        state = build_initial_state(item["question"], user_id, mode, profile)
+        try:
+            result = await asyncio.wait_for(agent.ainvoke(state), timeout=timeout)
+            metrics = collect_metrics(result)
+            error = None
+        except asyncio.TimeoutError:
+            metrics = {}
+            error = f"TimeoutError: 超过 {timeout}s 无响应"
+        except Exception as e:  # 网络/模型异常
+            metrics = {}
+            error = f"{type(e).__name__}: {e}"
+
+        # 干净非空结果 → 收工；否则（异常 / 超时 / 空答）还有配额就重试
+        if error is None and not metrics.get("empty_answer", True):
+            break
+        if attempt < retries:
+            reason = error or "空答"
+            print(
+                f"    ↳ {item['id']} 第 {attempts} 次不理想（{reason}），重试…",
+                file=sys.stderr,
+            )
+            await asyncio.sleep(RETRY_BACKOFF_S)
+
     latency = round(time.perf_counter() - t0, 2)
-    return {"id": item["id"], "latency_s": latency, "error": error, **metrics}
+    return {"id": item["id"], "latency_s": latency, "error": error, "attempts": attempts, **metrics}
 
 
 COLUMNS = [
@@ -172,6 +210,7 @@ COLUMNS = [
     ("budget_hit", "budget", 7),
     ("empty_answer", "empty", 6),
     ("remaining_calls", "rem", 4),
+    ("attempts", "try", 4),
     ("latency_s", "lat_s", 7),
 ]
 
@@ -237,8 +276,13 @@ async def main_async(args) -> None:
     rows: list[dict] = []
     for i, item in enumerate(items, 1):
         print(f"[{i}/{len(items)}] {item['id']} 跑中…", file=sys.stderr)
-        row = await run_one(item, args.user_id, args.mode, profile)
+        row = await run_one(
+            item, args.user_id, args.mode, profile, args.timeout, args.retries
+        )
         rows.append(row)
+        # RPM=5：题间静置，避免下一题开头就撞限流
+        if i < len(items) and args.pace > 0:
+            await asyncio.sleep(args.pace)
 
     print()
     print_table(rows)
@@ -281,6 +325,18 @@ def main() -> None:
     p.add_argument("--label", default=None, help="运行标签（入存档名）；缺省=profile 名")
     p.add_argument("--mode", default="normal", choices=["normal", "discuss"])
     p.add_argument("--user-id", dest="user_id", default="default", help="rag_tool 语料所属 user_id")
+    p.add_argument(
+        "--timeout", type=float, default=360.0,
+        help="每题墙钟上限（秒）；上游挂起超时即判失败进入重试。默认 360",
+    )
+    p.add_argument(
+        "--retries", type=int, default=1,
+        help="题级重试次数（对超时/异常/空答）。默认 1（即最多跑 2 次）",
+    )
+    p.add_argument(
+        "--pace", type=float, default=5.0,
+        help="题间静置秒数，缓解 RPM=5 限流。默认 5",
+    )
     args = p.parse_args()
     asyncio.run(main_async(args))
 

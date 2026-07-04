@@ -102,6 +102,8 @@ graph.py 内的接线（改动集中、默认 FLASH 即现状）：
 - ✅ 优先级：真正动代码的第一步是 **②行为量具**（现有 eval_framework 是内容打分、无法复用），不是接线；**A1/A4 与②同级并行**（正交、独立见效、练手价值最高）。①拆分诊断（本文档）已作为纯文档完成。
 - ✅ 已定：profile 存放于独立模块 `src/rag/harness_profile.py`（非并入 config——它是开发态实验旋钮，不进 yaml/前端/reload）。字段名：`guard_mode`/`prefill_level`/`final_prefill`/`budget_n`。
 - ✅ 已定（③首刀）：只落地真安全轴的 4 个字段（A/C2/E/H）；**不预置 B/F 的空字段**——「已声明未接线」对实验 rig 是陷阱（翻了没反应）。D（RUNTIME_STATUS）判定为恒开纯信息，不设开关。
+- ✅ 已测（④冒烟，2026-07-04，模型 gemini-3.1-pro-preview）：guard/correction 轴 0/10 命中（含工具题）→ 轴 A 过约束在强模型上实证成立；C2 降级下 marker=1.0/空答=0 → 「松 C2 不动 C1」实证安全。工具用量方向 n 太小未定，留全量。
+- ✅ 已定：量具 `harness_probe.py` 加兜底三件套 `--timeout`（每题墙钟 wait_for）/`--retries`（题级重试：超时/异常/空答）/`--pace`（题间静置，缓 RPM=5）；应对 gemini RPM=5 + Google GLI/S2 上游抖动。Q03/STRONG 首次撞 300s 超时被重试救回，实证有效。
 - ⏳ 待定：`STRONG` 档 `serial_tools` 取值（需单独测强模型并行工具正确性）——F 落地时补字段。
 
 ---
@@ -120,8 +122,15 @@ graph.py 内的接线（改动集中、默认 FLASH 即现状）：
    - 审计 s2/arxiv/jina 三个重工具的 docstring↔pydantic schema↔TOOL_USAGE prompt 三处冗余，砍重叠。
    - 探索自建 LangGraph agent 里「按需披露」的落地路径（工具信息分层：精简签名常驻 + 详细 schema/降级逻辑延迟注入）。
 4. **[③ 接线，首刀已完成]** `src/rag/harness_profile.py`（`HarnessProfile` + `FLASH`/`STRONG`/`PRESETS`）；graph.py 把 profile（默认 FLASH）串进 `thinking_guard`/`build_prefill`/`build_final_prefill`/`final_answer`/`build_agent`/`_prepare`。已接真安全轴 **A（guard_mode strict/soft/off）/ C2（prefill_level full/light/minimal）/ E（final_prefill full/light）/ H（budget_n）**；D 恒开不设开关。`harness_probe.py` 加 `--profile FLASH|STRONG`。离线验证：FLASH 文本与旧硬编码逐分支一致（零行为变化）、STRONG 各轴翻转、guard 三态、graph 编译、生产默认=FLASH；Q01 实机 FLASH/STRONG 均端到端通过。**待办：B（correction_tone）/ F（serial_tools）各自单独小 PR（黄区，改动扩散出 graph.py）。**
-5. **[④ 实验，未开工，依赖③]** 同一强模型跑 `--profile FLASH` vs `--profile STRONG`（全 20 题，需含触发工具的题以考验 guard:soft/marker），比行为指标，验证过约束假设。
-6. **[⑤ 备选]** 若需砍到 minimal，再评估 Part 3 的 C1 解耦。
+5. **[④ 实验，工具题子集已完成 — 假设已 settle]** 当前配置模型 = `gemini-3.1-pro-preview`（强模型，④前提成立）。共跑 **19 次真机 agent** 对照（冒烟 Q01/Q07/Q20 + 工具题 Q03/Q18 + 子集 Q02/Q14/Q19/Q20，覆盖 normal+discuss，各 FLASH vs STRONG）。三条不变量 + 一条开放轴均已定论：
+   - **轴 A（guard/correction）0 命中（0/19）**，含 2–4 轮真实工具调用 → `thinking_guard` 全套对 gemini 是**纯冗余/死重**（过约束假设 A 轴证实）。
+   - **C2 降级实证「免费」**：STRONG（`prefill_level=light`）下 marker 命中率恒 **1.0**、空答率 **0/19** → C1 契约由 `plugins.py` 撑住、不受 C2 影响，「松 C2 不动 C1」证实。
+   - **工具用量 vs prefill 强度：无系统效应**。仅 5 题用到工具，方向对称（STRONG>FLASH: Q03/Q20；FLASH>STRONG: Q18/Q19），是 run-to-run 方差（S2 429 结果 + temp=0.15 随机），非 prefill 效应。**冒烟阶段「light prefill→更多检索」（Q20, n=1）是噪声，n=9 下不成立。**
+   - **结论**：过约束在 gemini 上体现为**惰性机构（guard 死重）+ 可免费下调的 prefill 强度（C2）**，**不**体现为 prefill 扭曲工具行为。→ **STRONG 是安全净收益**：卸掉 guard/prefill 开销，各行为轴零回归。
+   - **运维事实**：S2 key 有效且已生效（curl 复测 with-key=200/without-key=429）；跑中 429 是 **bulk 端点瞬时限流**（复测 bulk+key 立即 200），非 key 问题，被工具 60s 冷却 + 量具 timeout/retry 吸收，仅拉长墙钟。
+   - **环境注意**：`requirements.txt` 是 **UTF-16 编码**（ASCII grep/部分工具会误判"查无此包"）；`rank_bm25`、`langchain-mcp-adapters` 均已在册，本机是 env 未与之同步，`pip install -r requirements.txt` 即可补齐，非仓库缺失。
+   - **可选后续**：若要发表级证据可补跑余下直答题（Q04-06/08-10/12-13/15-17）凑满 20×2，但仅会再确认「guard 0 命中/0 空答」，不改结论。数据存档于 `eval_framework/results/behavior/behavior_*.json`。
+6. **[⑤ 备选]** 若需砍到 minimal，再评估 Part 3 的 C1 解耦。既然 STRONG（light）已被证实零回归，**下一刀可试 `prefill_level=minimal`**——但 minimal 若连标记指令一起砍则触发 C1 红区（Part 3），仅降 prefill 复读强度、保留 plugins.py 标记教学则仍安全。
 
 > ⚠️ 跨机提醒：本计划纯代码层，不依赖 `data/`（gitignored）。②的评测题库复用已入库的 `eval_framework/test_cases.json`，随 git 走，无额外跨机依赖。
 

@@ -58,3 +58,13 @@
 1. [本文件] 计划同步入 `plan/`。
 2. 建 `scripts/harness_probe.py`。
 3. `--only Q01` 冒烟测 1–2 题，确认收集器正确读 transcript，再全量。
+
+## 实机验证 & 加固（2026-07-04，gemini-3.1-pro-preview）
+
+- ✅ 量具在真机跑通 10 次 agent（FLASH/STRONG 各 5 题），收集器从最终 transcript 正确产出 guard/marker/tool_rounds/empty 等指标；含 2–4 轮真实工具调用的 transcript 也解析无误。
+- ✅ **兜底三件套**（应对 RPM=5 + Google GLI/S2 上游抖动，见 `run_one`）：
+  - `--timeout`（默认 360s）：`asyncio.wait_for` 给每题墙钟上限——`ainvoke` 无 request_timeout，上游挂起本会无限 stall，超时即判失败进重试。
+  - `--retries`（默认 1）：对**超时/异常/空答**题级重试，每次重建 agent+state；`attempts` 列如实记录。Q03/STRONG 首次撞 300s 超时→重试救回，实证有效。
+  - `--pace`（默认 5s）：题间静置，缓 RPM=5 开头撞限流。
+- ⚠️ **运维事实**：S2 429 是主要墙钟成本源（bulk 端点瞬时限流，非 key 问题；key 有效），被工具 60s 冷却 + 上述 timeout/retry 吸收，不丢数据但拉长时间。`[Discuss模式]` 题（Q19/Q20）全量须 `--mode discuss`。
+- ⚠️ **环境注意**：`requirements.txt` 是 UTF-16 编码（ASCII grep 会误判"查无此包"）；`rank_bm25`、`langchain-mcp-adapters`（graph.py import 链依赖）均已在册，本机 env 未同步而已，`pip install -r requirements.txt` 补齐。

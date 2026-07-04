@@ -1,0 +1,56 @@
+{
+  "label": "STRONGdisc",
+  "profile": "STRONG",
+  "profile_fields": {
+    "guard_mode": "soft",
+    "prefill_level": "light",
+    "final_prefill": "light",
+    "budget_n": 6
+  },
+  "mode": "discuss",
+  "user_id": "default",
+  "timestamp": "20260704_105310",
+  "summary": {
+    "n_ok": 2,
+    "n_error": 0,
+    "guard_hits_total": 0,
+    "correction_loops_total": 0,
+    "empty_answer_rate": 0.0,
+    "budget_hit_rate": 0.0,
+    "avg_tool_rounds": 0.0,
+    "avg_marker_emit_rate": null,
+    "avg_latency_s": 15.205
+  },
+  "rows": [
+    {
+      "id": "Q19",
+      "latency_s": 16.05,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "tool_rounds": 0,
+      "tool_turns": 0,
+      "marker_emit_rate": null,
+      "budget_hit": false,
+      "remaining_calls": 6,
+      "empty_answer": false,
+      "answer_chars": 363
+    },
+    {
+      "id": "Q20",
+      "latency_s": 14.36,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "tool_rounds": 0,
+      "tool_turns": 0,
+      "marker_emit_rate": null,
+      "budget_hit": false,
+      "remaining_calls": 6,
+      "empty_answer": false,
+      "answer_chars": 524
+    }
+  ]
+}

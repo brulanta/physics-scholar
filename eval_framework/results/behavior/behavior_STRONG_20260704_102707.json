@@ -1,0 +1,56 @@
+{
+  "label": "STRONG",
+  "profile": "STRONG",
+  "profile_fields": {
+    "guard_mode": "soft",
+    "prefill_level": "light",
+    "final_prefill": "light",
+    "budget_n": 6
+  },
+  "mode": "normal",
+  "user_id": "default",
+  "timestamp": "20260704_102707",
+  "summary": {
+    "n_ok": 2,
+    "n_error": 0,
+    "guard_hits_total": 0,
+    "correction_loops_total": 0,
+    "empty_answer_rate": 0.0,
+    "budget_hit_rate": 0.0,
+    "avg_tool_rounds": 2.0,
+    "avg_marker_emit_rate": 1.0,
+    "avg_latency_s": 190.29
+  },
+  "rows": [
+    {
+      "id": "Q03",
+      "latency_s": 350.23,
+      "error": null,
+      "attempts": 2,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "tool_rounds": 3,
+      "tool_turns": 3,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 3,
+      "empty_answer": false,
+      "answer_chars": 1573
+    },
+    {
+      "id": "Q18",
+      "latency_s": 30.35,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "tool_rounds": 1,
+      "tool_turns": 1,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 5,
+      "empty_answer": false,
+      "answer_chars": 2780
+    }
+  ]
+}
