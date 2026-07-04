@@ -130,7 +130,14 @@ graph.py 内的接线（改动集中、默认 FLASH 即现状）：
    - **运维事实**：S2 key 有效且已生效（curl 复测 with-key=200/without-key=429）；跑中 429 是 **bulk 端点瞬时限流**（复测 bulk+key 立即 200），非 key 问题，被工具 60s 冷却 + 量具 timeout/retry 吸收，仅拉长墙钟。
    - **环境注意**：`requirements.txt` 是 **UTF-16 编码**（ASCII grep/部分工具会误判"查无此包"）；`rank_bm25`、`langchain-mcp-adapters` 均已在册，本机是 env 未与之同步，`pip install -r requirements.txt` 即可补齐，非仓库缺失。
    - **可选后续**：若要发表级证据可补跑余下直答题（Q04-06/08-10/12-13/15-17）凑满 20×2，但仅会再确认「guard 0 命中/0 空答」，不改结论。数据存档于 `eval_framework/results/behavior/behavior_*.json`。
-6. **[⑤ 备选]** 若需砍到 minimal，再评估 Part 3 的 C1 解耦。既然 STRONG（light）已被证实零回归，**下一刀可试 `prefill_level=minimal`**——但 minimal 若连标记指令一起砍则触发 C1 红区（Part 3），仅降 prefill 复读强度、保留 plugins.py 标记教学则仍安全。
+6. **[⑤ minimal 探针，已跑 — 假设被证伪，minimal 不安全]** 加 `MINIMAL` 预置（STRONG 的**单变量**：仅 `prefill_level` light→minimal），在 gemini-3.1-pro 上跑 Q03/Q18（normal）+ Q19/Q20（discuss）+ STRONG Q18 compliance 复检：
+   - **契约崩了**：MINIMAL 下 4/4 工具题 `marker_emit_rate` **1.0→0.0**；`[guard:soft] 缺 <thinking>` 触发 **6 次**（工具调用不再前置 `<thinking>`）；Q03 出现 **1 次真空答**（被量具 retry 救回）。
+   - **对照 STRONG 复检**：light 下 `[guard:soft]` **0 次**、`[TOOL_LOOP: PENDING]` 正常吐、marker 1.0 → light **确实守住契约**。
+   - **结论（修正 ④ 的朴素说法）**：**prefill(C2) 分两层，在 light 处干净切开**——`full→light` 免费（只卸自我催眠/威胁措辞，模型仍全合规）；`light→minimal` **不免费**（砍掉 light 里那句「按流程：先输出 <thinking>…[start]」残留提醒，合规即崩）。**那句一行提醒是承重的；plugins.py 标记教学独木难支。** → 计划原假设「保留 plugins.py 教学则 minimal 仍安全」**证伪**。
+   - **guard 角色精确化**：guard 是**冗余兜底**，仅在 prefill≥light 时永不触发（FLASH strict 0 驳回、STRONG soft 0 警告）；prefill 一旦弱到 minimal，正是 guard（strict）该抓的 6 次违规现形。即「guard 死重」的前提是 **prefill 守住合规**，二者非独立。
+   - **量具缺口（actionable）**：`harness_probe` 的 `guard_hits` 只数 **strict 驳回哨兵**，**soft 模式违规对 transcript 指标不可见**（只在 `[guard:soft]` 日志里）。soft 档 profile 的合规度须解析日志或给量具加 soft-violation 计数器——否则 soft 档「guard=0」是假阴性。
+   - **产品建议**：**生产上 gemini 用 STRONG(light)**——Pareto 最优地板。若仍想要 minimal，须先做 Part 3（把 `_consume_events` 的 answer_start 从 `[TOOL_LOOP: DONE]` 解耦），否则 prod 流式会空答。
+   - 数据存档：`behavior_MINIMAL{norm,disc}_*.json` + `behavior_STRONGrecheck_*.json`。
 
 > ⚠️ 跨机提醒：本计划纯代码层，不依赖 `data/`（gitignored）。②的评测题库复用已入库的 `eval_framework/test_cases.json`，随 git 走，无额外跨机依赖。
 

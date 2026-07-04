@@ -49,5 +49,19 @@ STRONG = HarnessProfile(
     budget_n=6,
 )
 
+# ⑤ 探针（已跑，结论：**不安全，勿上生产**）：STRONG 的单变量再进一步——仅把
+# prefill_level 从 light 降到 minimal，隔离「prefill 复读强度」这根轴。
+# 实测（gemini-3.1-pro，Q03/Q18/Q19/Q20）：只留 RUNTIME_STATUS + [start]、砍掉那句
+# 「按流程：先输出 <thinking>…」后，契约**崩了**——6 次 [guard:soft] 缺 <thinking>、
+# marker_emit_rate 1.0→0.0、1 次真空答。即 plugins.py 的标记教学**独木难支**，
+# light 里那句残留提醒是**承重**的。故 light(STRONG) 是 Pareto 最优地板：full 只多死重、
+# minimal 破契约。本预置保留仅作复现/回归探针，非可发布档。详见 plan ⑤。
+MINIMAL = HarnessProfile(
+    guard_mode="soft",
+    prefill_level="minimal",
+    final_prefill="light",
+    budget_n=6,
+)
+
 # 名字 → 预置，供开发态脚本（如 scripts/harness_probe.py）按 --profile 选择
-PRESETS = {"FLASH": FLASH, "STRONG": STRONG}
+PRESETS = {"FLASH": FLASH, "STRONG": STRONG, "MINIMAL": MINIMAL}
