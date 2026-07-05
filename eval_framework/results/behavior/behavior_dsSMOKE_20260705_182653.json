@@ -1,0 +1,51 @@
+{
+  "label": "dsSMOKE",
+  "profile": "FLASH",
+  "profile_fields": {
+    "guard_mode": "strict",
+    "prefill_level": "full",
+    "final_prefill": "full",
+    "budget_n": 6
+  },
+  "mode": "normal",
+  "user_id": "default",
+  "timestamp": "20260705_182653",
+  "summary": {
+    "n_ok": 1,
+    "n_error": 0,
+    "guard_hits_total": 0,
+    "missing_thinking_total": 0,
+    "tool_turns_total": 0,
+    "tool_err_request_total": 0,
+    "tool_err_transient_total": 0,
+    "avg_thinking_compliance_rate": null,
+    "empty_answer_rate": 1.0,
+    "budget_hit_rate": 0.0,
+    "avg_tool_rounds": 0.0,
+    "avg_marker_emit_rate": null,
+    "avg_latency_s": 20.09
+  },
+  "rows": [
+    {
+      "id": "Q03",
+      "latency_s": 20.09,
+      "error": null,
+      "attempts": 2,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "missing_thinking_calls": 0,
+      "thinking_compliance_rate": null,
+      "tool_rounds": 0,
+      "tool_err_request": 0,
+      "tool_err_transient": 0,
+      "tool_err_other": 0,
+      "tool_errors": [],
+      "tool_turns": 0,
+      "marker_emit_rate": null,
+      "budget_hit": false,
+      "remaining_calls": 6,
+      "empty_answer": true,
+      "answer_chars": 0
+    }
+  ]
+}

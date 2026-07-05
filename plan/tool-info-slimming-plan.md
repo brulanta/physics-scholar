@@ -79,6 +79,35 @@ A1/A4 **无开关**——一份瘦身文本发给所有模型，故**最弱模�
 ### n=1 诚实边界
 Q18 的三连空是 1 次运行，505s/3-attempts 模式偏系统性但 n=1 不下定论；Q11 的 errR=2 是真信号（classifier 只抓 bad_request/invalid_arguments 类，不含 429），但同样 n=1。要发表率证据需每题多跑几次比分布。
 
+## 渠道切换与 DS-official flash 现状（2026-07-05，本日收尾发现）
+
+作者提醒：开发时 harness 是基于 **DS 官方 v4-flash** 调出来的，疑 SiliconFlow 渠道的 flash 非满血。故本日切换到 DS 官方 flash 重测 Q03——**结果比 SiliconFlow 更坏，且坏在更底层**：
+
+### 诊断链（逐层隔离，确认非瘦身、非代理、非配置问题）
+1. **裸 DS flash 调用**（无 harness）→ `reasoning_content` 非空（694 token），原生思维链在跑。
+2. **裸调用 + `extra_body={'thinking':{'type':'disabled'}}`** → `reasoning_content` 清空、content 1801 字、`finish=stop`。→ **harness 的禁用字段在 DS 官方渠道有效**（config.py:98 `DEEPSEEK_EXTRA_BODY` 经 llm.py:19 注入，G 轴接线正常）。
+3. **agent 内跑 Q03（FLASH 全 strict）** → 2 次 attempts 全空答、0 工具调用、`error=None`、`remaining_calls=6`（预算未动）。抓 transcript 看到根因：flash 写对了 `<thinking>` 块、计划了工具调用，但**把 tool_call 序列化成乱码标签输出在 content 里**（`</思维DSMLparameter>`、`</invoke>` 等），**未产出合法的 `tool_calls` 结构**。`AIMessage.tool_calls` 为空 → 路由当最终答案 → `process_llm_output` 剥掉 `<thinking>` → 0 字 = 空答。
+
+### 含义（对 A1/A4 的影响）
+- **DS 官方 flash 在 Q03 上、未瘦身时就已经坏**——坏在「模型不吐合法 `tool_calls` 结构」（C1 协议的输出层失败），与工具文本冗余无关。
+- **两个 flash 渠道对 A1/A4 都已失格**：
+  - SiliconFlow flash：Q03 ok、Q18 空答×3。
+  - DS 官方 flash：Q03 直接空答（连 Q03 这种「应检索」题都不调工具）。
+- 故 **任何 flash 基线都混入「pre-existing flash×harness 不兼容」噪声**，不是瘦身引入的信号。「flash=下界」在此 harness 上**不能成立**——flash 本就边缘/坏掉，不能当 A1/A4 的验收地板。
+- 这与原假设方向**相反**：作者疑 SiliconFlow 非满血，实测是 **DS 官方在此 harness 上更坏**（DSML 乱码 vs SiliconFlow 的 Q18 空答）。可能涉及 DS 官方对 `bind_tools` 结构化输出的兼容差异，或 `<thinking>` 文本契约与 DS 原生 thinking 通道的某种残留冲突——**未深挖**（本日收尾，留 G 轴独立 bug）。
+
+### 收尾时的环境状态
+- `.env` 已切回 **gemini-3.1-pro-preview**（gcli 渠道）——验证可用的干净渠道。
+- 探针 `error_type` 明细补丁已合入并 push（commit `6c5b2d4`）：`classify_tool_message` 返回 `(kind, error_type)`、row 落 `tool_errors` 列表。
+- 本日新增 4 个 behavior 存档（`behavior_dsSMOKE_*` / `behavior_flashBASE_*` / `behavior_flashBASE_before_*` / `behavior_flashSMOKE_*`）入 `eval_framework/results/behavior/`，连同本计划更新一起提交。
+
+### 下一会话起点（三选一，未决）
+1. **Gemini-only 基线**：放弃 flash 作下界（它本就坏），只在 gemini 上跑 A1/A4 before/after。最短路径得真瘦身结论，但失去弱模型覆盖。
+2. **先修 flash 的 tool_call 乱码**（G 轴独立 bug：DS 官方吐 DSML 标签而非结构化 tool_calls），再重基线 flash。绕路，但恢复 flash 下界。
+3. **就此搁置 A1/A4**，记录发现、换方向。
+
+> ⚠️ 本日工作未推进到「实际瘦身」——Tier 1 量具加固（error_type 明细）完成、基线尝试暴露出渠道问题而非瘦身问题。下次开工前需先定方向（上面三选一）。
+
 ## 落地步骤（保守单 PR）
 
 1. **[本文件] 计划入 `plan/`。**

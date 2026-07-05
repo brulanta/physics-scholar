@@ -1,0 +1,25 @@
+{
+  "label": "flashBASE",
+  "profile": "FLASH",
+  "profile_fields": {
+    "guard_mode": "strict",
+    "prefill_level": "full",
+    "final_prefill": "full",
+    "budget_n": 6
+  },
+  "mode": "normal",
+  "user_id": "default",
+  "timestamp": "20260705_170451",
+  "summary": {
+    "n_ok": 0,
+    "n_error": 1
+  },
+  "rows": [
+    {
+      "id": "Q03",
+      "latency_s": 300.91,
+      "error": "APIConnectionError: Connection error.",
+      "attempts": 2
+    }
+  ]
+}

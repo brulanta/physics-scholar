@@ -1,0 +1,50 @@
+{
+  "label": "flashSMOKE",
+  "profile": "FLASH",
+  "profile_fields": {
+    "guard_mode": "strict",
+    "prefill_level": "full",
+    "final_prefill": "full",
+    "budget_n": 6
+  },
+  "mode": "normal",
+  "user_id": "default",
+  "timestamp": "20260705_171243",
+  "summary": {
+    "n_ok": 1,
+    "n_error": 0,
+    "guard_hits_total": 0,
+    "missing_thinking_total": 0,
+    "tool_turns_total": 1,
+    "tool_err_request_total": 0,
+    "tool_err_transient_total": 0,
+    "avg_thinking_compliance_rate": 1.0,
+    "empty_answer_rate": 0.0,
+    "budget_hit_rate": 0.0,
+    "avg_tool_rounds": 1.0,
+    "avg_marker_emit_rate": 1.0,
+    "avg_latency_s": 20.65
+  },
+  "rows": [
+    {
+      "id": "Q03",
+      "latency_s": 20.65,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "missing_thinking_calls": 0,
+      "thinking_compliance_rate": 1.0,
+      "tool_rounds": 1,
+      "tool_err_request": 0,
+      "tool_err_transient": 0,
+      "tool_err_other": 0,
+      "tool_turns": 1,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 5,
+      "empty_answer": false,
+      "answer_chars": 1383
+    }
+  ]
+}
