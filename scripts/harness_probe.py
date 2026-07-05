@@ -89,8 +89,12 @@ REQUEST_ERROR_TYPES = {
 }
 
 
-def classify_tool_message(m: ToolMessage) -> str:
-    """把一条 ToolMessage 归类：guard | budget | ok | err_transient | err_request | err_other。
+def classify_tool_message(m: ToolMessage) -> tuple[str, str | None]:
+    """把一条 ToolMessage 归类，返回 (kind, error_type)。
+
+    kind ∈ {guard, budget, ok, err_transient, err_request, err_other}；
+    error_type 为工具自报的 error_type 字符串（ok/guard/budget 时为 None），供 diff 诊断
+    「是哪个字段/哪类错误」——A1/A4 before/after 验收的可操作信号。
 
     双信号：① 框架层 `status=="error"`（ToolNode handle_tool_errors 捕获的异常/参数校验，
     graph.py:426）→ 归 request；② 5 个工具自报的 `{"success": false, "error_type": ...}`
@@ -99,25 +103,26 @@ def classify_tool_message(m: ToolMessage) -> str:
     """
     content = m.content or ""
     if GUARD_SENTINEL in content:
-        return "guard"
+        return "guard", None
     if BUDGET_SENTINEL in content:
-        return "budget"
+        return "budget", None
     # ① 框架层硬错误（异常 / pydantic 校验失败）——直接归 agent 侧 request
     if getattr(m, "status", None) == "error":
-        return "err_request"
+        return "err_request", "framework_error"
     # ② 工具自报失败：解析 JSON 的 success/error_type
     try:
         data = json.loads(content)
     except (ValueError, TypeError):
         data = None
     if isinstance(data, dict) and data.get("success") is False:
-        et = str(data.get("error_type", "")).lower()
-        if et in TRANSIENT_ERROR_TYPES:
-            return "err_transient"
-        if et in REQUEST_ERROR_TYPES:
-            return "err_request"
-        return "err_other"
-    return "ok"
+        et = str(data.get("error_type", "") or "").lower() or None
+        kind_et = (et or "").lower()
+        if kind_et in TRANSIENT_ERROR_TYPES:
+            return "err_transient", et
+        if kind_et in REQUEST_ERROR_TYPES:
+            return "err_request", et
+        return "err_other", et
+    return "ok", None
 
 # 题级重试之间的退避（秒）——RPM=5 下给限流窗口喘息
 RETRY_BACKOFF_S = 8.0
@@ -172,10 +177,13 @@ def collect_metrics(result: dict) -> dict:
     tool_err_request = 0        # Tier 1 门信号：参数/校验类失败（归因 agent arg-fill）
     tool_err_transient = 0      # 上游/限流失败（旁观，非门）
     tool_err_other = 0          # auth/not_found 等（旁观，非门）
+    # 每次失败调用的 (kind, error_type) 列表——A1/A4 before/after diff 的可操作诊断：
+    # 「errR 2→3」不说明哪个字段退化，本列表答「是 invalid_arguments 还是 bad_request」。
+    tool_errors: list[list[str]] = []
 
     for m in messages:
         if isinstance(m, ToolMessage):
-            kind = classify_tool_message(m)
+            kind, et = classify_tool_message(m)
             if kind == "guard":
                 guard_hits += 1
             elif kind == "budget":
@@ -185,10 +193,13 @@ def collect_metrics(result: dict) -> dict:
                 tool_rounds += 1
                 if kind == "err_request":
                     tool_err_request += 1
+                    tool_errors.append([kind, et or ""])
                 elif kind == "err_transient":
                     tool_err_transient += 1
+                    tool_errors.append([kind, et or ""])
                 elif kind == "err_other":
                     tool_err_other += 1
+                    tool_errors.append([kind, et or ""])
         elif isinstance(m, AIMessage):
             if getattr(m, "tool_calls", None):
                 tool_turns += 1
@@ -221,6 +232,7 @@ def collect_metrics(result: dict) -> dict:
         "tool_err_request": tool_err_request,      # Tier 1 门：应为 0
         "tool_err_transient": tool_err_transient,  # 旁观：429/超时等上游噪声
         "tool_err_other": tool_err_other,          # 旁观：auth/not_found 等
+        "tool_errors": tool_errors,                # [[kind, error_type], …] 诊断明细
         "tool_turns": tool_turns,
         "marker_emit_rate": marker_rate,
         "budget_hit": budget_hit,
