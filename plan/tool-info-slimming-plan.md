@@ -60,6 +60,25 @@ A1/A4 **无开关**——一份瘦身文本发给所有模型，故**最弱模�
 ### 推论：第一刀保守
 先砍最安全的重复（docstring 里与 prompt 重复的「调用时机」段、模式教学），**返回 schema 与防呆句一律先留**，把 token 削一部分、风险压到最低；Tier 1 绿 + Tier 2 无退化后，再考虑第二刀。
 
+## Flash 基线实测（2026-07-05，SiliconFlow v4-flash，FLASH profile）
+
+| id | tools | errR | errT | mark% | budget | empty | try | lat |
+|---|---|---|---|---|---|---|---|---|
+| Q03 | 6 | 0 | 1 | 1.0 | Y | . | 1 | 161s |
+| Q11 | 6 | **2** | 1 | 1.0 | Y | . | 1 | 140s |
+| Q18 | **0** | 0 | 0 | - | . | **Y** | 3 | 505s |
+
+汇总：`errR=2, errT=2, empty=1/3, budget_hit=2/3, marker=1.0, guard=0`。存档 `eval_framework/results/behavior/behavior_flashBASE_before_20260705_172933.json`。
+
+### 基线暴露三件事，改了上面的验证设计
+
+1. **门是「非回归」不是「零」**：flash 瘦身前就 `errR=2`——「errR 应为 0」是 naive。真门 = `errR_after ≤ errR_before(2)`、`empty_after ≤ 1/3`、`budget_after ≤ 2/3`。flash 是下界正因为它不完美，预期它完美本就错。
+2. **Q18 是 flash 的既有失败，与瘦身无关**：3 次尝试 0 工具调用、全空答、505s，`error=None`（非代理/异常，是 run 完了 flash 啥也没产出）。瘦身还没动 → 这是 flash 在 Q18 上**本就垮**。「flash 是下界」比预想更咬人：flash 在部分工具题上**本就边缘**。
+3. **量具缺口（actionable）**：probe 计了 `errR=2` 但**没存 error_type**——「flash 填错 2 次参」却不知是哪个字段/哪种 error_type，对 A1/A4 验收不可操作。classifier 已解析出 error_type，只是没写进 row。**「after」跑前须补**：把每次调用的 error_type 列表写进 row，否则 before/after diff 不可读。
+
+### n=1 诚实边界
+Q18 的三连空是 1 次运行，505s/3-attempts 模式偏系统性但 n=1 不下定论；Q11 的 errR=2 是真信号（classifier 只抓 bad_request/invalid_arguments 类，不含 429），但同样 n=1。要发表率证据需每题多跑几次比分布。
+
 ## 落地步骤（保守单 PR）
 
 1. **[本文件] 计划入 `plan/`。**
