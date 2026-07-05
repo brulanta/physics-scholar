@@ -15,6 +15,7 @@ collect_metrics 只吃 `result` dict（{"messages":[...], "remaining_calls":n}�
 """
 
 import importlib.util
+import json
 from pathlib import Path
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -26,6 +27,7 @@ harness_probe = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(harness_probe)
 
 collect_metrics = harness_probe.collect_metrics
+classify_tool_message = harness_probe.classify_tool_message
 GUARD_SENTINEL = harness_probe.GUARD_SENTINEL
 BUDGET_SENTINEL = harness_probe.BUDGET_SENTINEL
 
@@ -145,3 +147,81 @@ def test_no_tool_turns_yields_none_rates():
     assert m["marker_emit_rate"] is None
     assert m["missing_thinking_calls"] == 0
     assert m["empty_answer"] is False
+
+
+# --- Tier 1：工具错误分类（A1/A4 瘦身验收门） -------------------------------
+
+
+def _err_payload(error_type: str, cid="c1") -> ToolMessage:
+    """复刻工具自报失败报文：{"success": false, "error_type": ...}（status 仍为 success）。"""
+    return ToolMessage(
+        content=json.dumps(
+            {"success": False, "error_type": error_type, "error": "…", "papers": []},
+            ensure_ascii=False,
+        ),
+        tool_call_id=cid,
+    )
+
+
+def _ok_payload(cid="c1") -> ToolMessage:
+    return ToolMessage(
+        content=json.dumps({"success": True, "count": 3, "papers": [{}]}, ensure_ascii=False),
+        tool_call_id=cid,
+    )
+
+
+def test_classify_success_and_plain_text_are_ok():
+    """success:true JSON 与 rag_tool 纯文本（无 success 字段）都归 ok。"""
+    assert classify_tool_message(_ok_payload()) == "ok"
+    assert classify_tool_message(_real_tool_msg()) == "ok"  # 纯文本 → 解析不出 → ok
+
+
+def test_classify_transient_vs_request_vs_other():
+    """error_type 词表分桶：限流=transient、参数=request、auth=other。"""
+    # 上游/限流 → transient（旁观，非门）——④ 主噪声源，务必隔离
+    for et in ("rate_limited", "timeout", "request_failed", "server_error", "recent_failed_query"):
+        assert classify_tool_message(_err_payload(et)) == "err_transient", et
+    # 参数/校验 → request（门信号，归因 agent arg-fill）
+    for et in ("bad_request", "invalid_arguments", "invalid_params", "parse_error"):
+        assert classify_tool_message(_err_payload(et)) == "err_request", et
+    # 环境/语义 → other（旁观，非门）
+    for et in ("auth_error", "access_denied", "not_found"):
+        assert classify_tool_message(_err_payload(et)) == "err_other", et
+
+
+def test_classify_framework_status_error_is_request():
+    """框架层 status=='error'（ToolNode 捕获的异常/pydantic 校验）→ request。"""
+    m = ToolMessage(content="ValidationError: keywords 字段类型错误", tool_call_id="c1", status="error")
+    assert classify_tool_message(m) == "err_request"
+
+
+def test_sentinels_still_classified_first():
+    """哨兵优先级最高：即便未来哨兵串里带 JSON 也先判 guard/budget。"""
+    g = ToolMessage(content=f"[工具调用已被取消：{GUARD_SENTINEL} …]", tool_call_id="c1")
+    b = ToolMessage(content=f"…{BUDGET_SENTINEL}…", tool_call_id="c2")
+    assert classify_tool_message(g) == "guard"
+    assert classify_tool_message(b) == "budget"
+
+
+def test_collect_metrics_error_buckets_and_gate():
+    """端到端：一轮 request 错 + 一轮 transient 错 + 一轮成功。
+
+    门信号 tool_err_request=1；transient 隔到旁观桶不污染门；三者都计入 tool_rounds。
+    """
+    msgs = [
+        SystemMessage(content="sys"),
+        HumanMessage(content="q"),
+        _ai_with_tools(f"{THINK} a", cid="c1"),
+        _err_payload("invalid_arguments", cid="c1"),   # request（门）
+        _ai_with_tools(f"{THINK} b", cid="c2"),
+        _err_payload("rate_limited", cid="c2"),         # transient（旁观）
+        _ai_with_tools(f"{THINK} c", cid="c3"),
+        _ok_payload(cid="c3"),                          # ok
+        AIMessage(content="最终答案。"),
+    ]
+    m = collect_metrics(_result(msgs))
+    assert m["tool_err_request"] == 1      # 门：抓到 arg-fill 退化
+    assert m["tool_err_transient"] == 1    # 旁观：429 不进门
+    assert m["tool_err_other"] == 0
+    assert m["tool_rounds"] == 3           # ok + 两类错误都算真实执行轮
+    assert m["guard_hits"] == 0            # 无哨兵

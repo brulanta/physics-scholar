@@ -17,6 +17,11 @@
   （⑤ 暴露的量具缺口）。guard 的违规谓词只是「带 tool_calls 却缺 <thinking>」，而违规的
   AIMessage 在 strict/soft/off **每种模式都留在 transcript**；故直接数它，profile 无关，
   才是 soft 档真合规度。strict 档二者应一致（每次驳回对应一条违规 AIMessage）。
+- **Tier 1 工具错误门**（`tool_err_request`）：A1/A4 工具信息瘦身的验收门（见
+  plan/tool-info-slimming-plan.md）。把工具执行分成 request（参数/校验失败=agent arg-fill
+  退化，**门信号**）/ transient（429/超时=上游噪声，旁观）/ other（auth/not_found，旁观）。
+  瘦身若删掉承重的防呆字段描述 → agent 填错参 → `tool_err_request` 抬头。**429 主噪声被隔到
+  transient 桶，不污染门**（④ 教训）。分类纯逻辑、离线可测（tests/test_harness_probe_metrics.py）。
 - **复用不 fork**：build_agent/build_prompt/_detect_marker/process_llm_output 全部从
   src.rag.graph import。
 
@@ -70,6 +75,50 @@ GUARD_SENTINEL = "未检测到必要的 <thinking>"
 # final_answer 达预算上限时注入的取消哨兵（graph.py:249）
 BUDGET_SENTINEL = "已达最大调用次数上限"
 
+# Tier 1 工具错误分类（error_type 词表来自 src/rag/tools/*.py 实测枚举）：
+# - transient = 上游/网络/限流，**非 agent 的 arg-fill 问题**（④ 实证 429 是主噪声源，
+#   工具报文自己都写「绝非你的关键词不好」）→ 不作为 arg-fill 门的判据，仅旁观计数。
+# - request  = 参数/校验类，**归因于 agent 填错**（含框架层 status=="error"，即 pydantic
+#   校验/异常）→ 这才是 Tier 1 门要盯的信号；A1/A4 瘦身若删过头，此计数会抬头。
+# - 其余 success:false（auth/access/not_found 等）= 环境或语义，归 other，旁观不作门。
+TRANSIENT_ERROR_TYPES = {
+    "rate_limited", "timeout", "request_failed", "server_error", "recent_failed_query",
+}
+REQUEST_ERROR_TYPES = {
+    "bad_request", "invalid_arguments", "invalid_params", "parse_error",
+}
+
+
+def classify_tool_message(m: ToolMessage) -> str:
+    """把一条 ToolMessage 归类：guard | budget | ok | err_transient | err_request | err_other。
+
+    双信号：① 框架层 `status=="error"`（ToolNode handle_tool_errors 捕获的异常/参数校验，
+    graph.py:426）→ 归 request；② 5 个工具自报的 `{"success": false, "error_type": ...}`
+    正常返回（status 仍为 success）→ 按 error_type 词表分桶。rag_tool 返回纯文本（无 success
+    字段）→ 解析不出 → 视为 ok（其空召回是语料问题，属 Tier 2 任务达成域，非 Tier 1 错误）。
+    """
+    content = m.content or ""
+    if GUARD_SENTINEL in content:
+        return "guard"
+    if BUDGET_SENTINEL in content:
+        return "budget"
+    # ① 框架层硬错误（异常 / pydantic 校验失败）——直接归 agent 侧 request
+    if getattr(m, "status", None) == "error":
+        return "err_request"
+    # ② 工具自报失败：解析 JSON 的 success/error_type
+    try:
+        data = json.loads(content)
+    except (ValueError, TypeError):
+        data = None
+    if isinstance(data, dict) and data.get("success") is False:
+        et = str(data.get("error_type", "")).lower()
+        if et in TRANSIENT_ERROR_TYPES:
+            return "err_transient"
+        if et in REQUEST_ERROR_TYPES:
+            return "err_request"
+        return "err_other"
+    return "ok"
+
 # 题级重试之间的退避（秒）——RPM=5 下给限流窗口喘息
 RETRY_BACKOFF_S = 8.0
 
@@ -120,16 +169,26 @@ def collect_metrics(result: dict) -> dict:
     tool_turns = 0              # 带 tool_calls 的 AIMessage 轮数
     marker_emitted = 0          # 其中吐出了 [TOOL_LOOP: DONE/PENDING] 的轮数
     missing_thinking_calls = 0  # 其中缺 <thinking>…</thinking> 的轮数（合规真值，profile 无关）
+    tool_err_request = 0        # Tier 1 门信号：参数/校验类失败（归因 agent arg-fill）
+    tool_err_transient = 0      # 上游/限流失败（旁观，非门）
+    tool_err_other = 0          # auth/not_found 等（旁观，非门）
 
     for m in messages:
         if isinstance(m, ToolMessage):
-            content = m.content or ""
-            if GUARD_SENTINEL in content:
+            kind = classify_tool_message(m)
+            if kind == "guard":
                 guard_hits += 1
-            elif BUDGET_SENTINEL in content:
+            elif kind == "budget":
                 budget_forced = True
             else:
+                # ok / err_* 都是真实工具执行轮（哨兵已在上面排除）
                 tool_rounds += 1
+                if kind == "err_request":
+                    tool_err_request += 1
+                elif kind == "err_transient":
+                    tool_err_transient += 1
+                elif kind == "err_other":
+                    tool_err_other += 1
         elif isinstance(m, AIMessage):
             if getattr(m, "tool_calls", None):
                 tool_turns += 1
@@ -159,6 +218,9 @@ def collect_metrics(result: dict) -> dict:
         "missing_thinking_calls": missing_thinking_calls,  # profile 无关的违规真值
         "thinking_compliance_rate": compliance_rate,       # 1 - 违规率；soft 档真合规度
         "tool_rounds": tool_rounds,
+        "tool_err_request": tool_err_request,      # Tier 1 门：应为 0
+        "tool_err_transient": tool_err_transient,  # 旁观：429/超时等上游噪声
+        "tool_err_other": tool_err_other,          # 旁观：auth/not_found 等
         "tool_turns": tool_turns,
         "marker_emit_rate": marker_rate,
         "budget_hit": budget_hit,
@@ -224,6 +286,8 @@ COLUMNS = [
     ("guard_hits", "guard", 6),
     ("missing_thinking_calls", "noThk", 6),
     ("tool_rounds", "tools", 6),
+    ("tool_err_request", "errR", 5),
+    ("tool_err_transient", "errT", 5),
     ("marker_emit_rate", "mark%", 6),
     ("budget_hit", "budget", 7),
     ("empty_answer", "empty", 6),
@@ -271,6 +335,9 @@ def summarize(rows: list[dict]) -> dict:
         # missing_thinking_calls 是 profile 无关的合规真值——soft/off 档看这个，不看 guard。
         "missing_thinking_total": sum(r.get("missing_thinking_calls", 0) for r in ok),
         "tool_turns_total": sum(r.get("tool_turns", 0) for r in ok),
+        # Tier 1 门：request 类工具错误总数——应为 0（arg-fill 无退化）。
+        "tool_err_request_total": sum(r.get("tool_err_request", 0) for r in ok),
+        "tool_err_transient_total": sum(r.get("tool_err_transient", 0) for r in ok),  # 旁观
         "avg_thinking_compliance_rate": avg("thinking_compliance_rate"),
         "empty_answer_rate": round(sum(1 for r in ok if r.get("empty_answer")) / n, 3),
         "budget_hit_rate": round(sum(1 for r in ok if r.get("budget_hit")) / n, 3),
