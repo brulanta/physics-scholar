@@ -1,0 +1,102 @@
+{
+  "label": "gemBASE_before",
+  "profile": "FLASH",
+  "profile_fields": {
+    "guard_mode": "strict",
+    "prefill_level": "full",
+    "final_prefill": "full",
+    "budget_n": 6
+  },
+  "mode": "normal",
+  "user_id": "default",
+  "timestamp": "20260706_110805",
+  "summary": {
+    "n_ok": 3,
+    "n_error": 0,
+    "guard_hits_total": 0,
+    "missing_thinking_total": 0,
+    "tool_turns_total": 10,
+    "tool_err_request_total": 0,
+    "tool_err_transient_total": 2,
+    "avg_thinking_compliance_rate": 1.0,
+    "empty_answer_rate": 0.0,
+    "budget_hit_rate": 0.0,
+    "avg_tool_rounds": 3.333,
+    "avg_marker_emit_rate": 1.0,
+    "avg_latency_s": 101.75
+  },
+  "rows": [
+    {
+      "id": "Q03",
+      "latency_s": 219.03,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "missing_thinking_calls": 0,
+      "thinking_compliance_rate": 1.0,
+      "tool_rounds": 5,
+      "tool_err_request": 0,
+      "tool_err_transient": 2,
+      "tool_err_other": 0,
+      "tool_errors": [
+        [
+          "err_transient",
+          "rate_limited"
+        ],
+        [
+          "err_transient",
+          "timeout"
+        ]
+      ],
+      "tool_turns": 5,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 1,
+      "empty_answer": false,
+      "answer_chars": 2378
+    },
+    {
+      "id": "Q11",
+      "latency_s": 34.39,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "missing_thinking_calls": 0,
+      "thinking_compliance_rate": 1.0,
+      "tool_rounds": 2,
+      "tool_err_request": 0,
+      "tool_err_transient": 0,
+      "tool_err_other": 0,
+      "tool_errors": [],
+      "tool_turns": 2,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 4,
+      "empty_answer": false,
+      "answer_chars": 2034
+    },
+    {
+      "id": "Q18",
+      "latency_s": 51.83,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "missing_thinking_calls": 0,
+      "thinking_compliance_rate": 1.0,
+      "tool_rounds": 3,
+      "tool_err_request": 0,
+      "tool_err_transient": 0,
+      "tool_err_other": 0,
+      "tool_errors": [],
+      "tool_turns": 3,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 3,
+      "empty_answer": false,
+      "answer_chars": 2727
+    }
+  ]
+}
