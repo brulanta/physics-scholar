@@ -1,130 +1,64 @@
 # 工具信息瘦身 + 分层披露（A1+A4）— 轻量计划
 
 > 派生自 [harness-ablation-plan.md](./harness-ablation-plan.md) 附录 A1（工具渐进式披露）+ A4（检索降级链抽 skill）。二者是「同一块骨头的两面」，合并为本子项目。
-> **定位**：唯一真正指向「让 agent 答得更好」而非「机器转不转」的续作，独立于 harness 松绑线。记于 2026-07-04，未开工。
+> **定位**：唯一真正指向「让 agent 答得更好」而非「机器转不转」的续作，独立于 harness 松绑线。
 
 ## 一句话目标
 
 砍掉 s2/arxiv/jina 三个重工具在 **docstring ↔ pydantic Field ↔ tool_usage.py prompt** 三处的重叠教学，靠一条「谁该讲什么」的分工规则，把每次调用都随 system prompt 发出的几 k 冗余 token 压下去——**不动任何代码逻辑，只动 LLM 可见文本**。
 
-## 复杂度判定（为什么是轻量计划）
+## 复杂度判定
 
 - **机械上 trivial**：只碰叶子文件的散文（docstring / `Field(description=...)` / `tool_usage.py`）。零控制流、零 schema-as-contract、零流式。
-- **判断上不 trivial**：见下「三条铁律」。冗余里**混着承重的防呆规则**，盲删会伤 arg-fill 正确性（= 你最看重的「行为」）。故要**有分寸地切**，不是批量删。
+- **判断上不 trivial**：冗余里**混着承重的防呆规则**，盲删会伤 arg-fill 正确性（= 最看重的「行为」）。故要**有分寸地切**，不是批量删。
 
-## 实测冗余（LLM 可见面，2026-07-04 量得）
+## 三条铁律（核心产出——「谁该讲什么」）
 
-| 工具 | docstring | Field 描述（字段数） | 备注 |
-|---|---|---|---|
-| **s2_search_tool** | 1893 chars | 2111 chars（13 字段） | **重灾区**；docstring 含「三种模式」教学 + 完整返回 schema；tool_usage.py 再讲一遍 s2 |
-| arxiv_tool | 1060 chars | 637 chars（7 字段） | 中等 |
-| jina_tool | 1612 chars | 659 chars（8 字段） | 中等；两种模式（有/无 query）教学 |
-
-> 合计 ≈ 8k chars（≈ 数 k token），**每次 LLM 调用都发**，跨 6 轮工具预算重复承载。这是 recurring cost，不是一次性。
-
-## 三条铁律（本项目的核心产出——「谁该讲什么」）
-
-现状问题：三处**都**在讲「模式 / 何时用 / 降级链」。分工规则：
+三处现状都在讲「模式 / 何时用 / 降级链」。分工规则：
 
 | 面 | **应独占** | **应删（与他处重复）** |
 |---|---|---|
 | `tool_usage.py`（prompt） | **WHEN** — 跨工具编排、降级链路、模式*选择*、调用时机 | 已很干净，作为**唯一真相源**保留 |
 | docstring | **WHAT it returns** — 返回 schema（唯一讲它的地方）+ 一行定位 | 模式教学、调用时机（与 prompt 重复）→ 砍 |
-| `Field.description` | **单参数格式 + 防呆规则**（如「年份填 year_range 别进 keyword」） | 模式选择再教学（属 prompt）→ 砍 |
+| `Field.description` | **单参数格式 + 防呆规则** | 模式选择再教学（属 prompt）→ 砍 |
 
-**承重红线（勿删）**：Field 里的防呆规则是**防具**不是废话——
-`s2_tool.py:292`「严禁包含年份数字，年份填 year_range」、「别把标题拆成碎词」等。删它们=直接放任 arg-fill 出错。**保留全部防呆句，只删模式/编排类重复。**
+**承重红线（勿删）**：Field 里的防呆规则是**防具**不是废话——`s2_tool.py`「严禁包含年份数字，年份填 year_range」「别把标题拆成碎词」「已知论文用完整标题作唯一元素」等。删它们=直接放任 arg-fill 出错。**保留全部防呆句，只删模式/编排类重复。**
 
-## 验证方案（两层，作者设计 2026-07-04）
+## 验证方案（两层：行为门在前、任务效率在后）
 
-现有量具的错配：`harness_probe` 量的是 guard/marker/tool_rounds = **harness 合规**；A1/A4 改的是**工具 arg-fill 质量**，两者不重叠；content eval 又有意未建（见 profile-selection-decision）。故本改动需专门的两层检验——**行为门（客观/便宜）在前，任务效率（贵）在后**：
+现有量具的错配：`harness_probe` 量的是 guard/marker/tool_rounds = **harness 合规**；A1/A4 改的是**工具 arg-fill 质量**，两者不重叠；content eval 又有意未建。故需专门两层——
 
-### Tier 1 — 基础行为门（objective，可自动化）
-- **判据**：工具函数不抛错 —— agent 填的参数合法、调用成功返回真实结果（非错误报文）。
-- **量具扩展（小改）**：`harness_probe` 现在只数 `tool_rounds`，**把「错误调用」和「成功调用」同等计数**。加一个 `tool_error` 计数器（解析 `ToolMessage` 内容里各工具的错误标记 vs 真实结果），本层即从「人眼」升级为**一行指标**。仍留在 behavior harness 内（错误调用属行为，非内容）。
-- **意义**：瘦身若删过头（删了承重防呆句 → arg 填错 → 调用报错），本门直接抓到。绿了才进 Tier 2。
+### Tier 1 — 基础行为门（objective、便宜、已用）
+- **判据**：工具函数不抛错——agent 填的参数合法、调用成功（非错误报文）。量具已扩展：probe 分 `tool_err_request`（进门）vs `tool_err_transient`（旁观），并落 `tool_errors=[[kind,error_type],…]` 明细。
+- **门 = 非回归**（不是零）：`errR_after ≤ errR_before`、`empty_after ≤ before`、marker/guard/noThk 逐格不回归。绿了才有资格进 Tier 2。
 
-### Tier 2 — 任务完成/效率测（作者设计，贵，Tier 1 绿后再跑）
-- **判据**：给一个**唯一可辨识、且训练库答不出**的目标（如检索某篇特定论文 / 某论文里独有的可辨识信息）——强制真检索，模型无法用参数化记忆蒙混。
-- **控制变量**：同模型、同 profile、同输入 prompt，只翻「瘦身前 / 瘦身后」。
-- **指标**（客观、非主观内容打分）：**是否达成（拿到/没拿到）** + **达成所需轮数（rounds-to-goal）**。这是**任务完成**度量，正好绕开「内容打分主观 + 未建」的盲区——是「arg-fill 质量是否退化」的可测代理。
-- ⚠️ **n=1 是噪声（④ 的教训）**：temp>0 + S2 429 抖动会让 rounds-to-goal run-to-run 晃动；④ 的「light→更多检索」信号在 n=9 下就蒸发了。故每侧跑**多次**，比分布不比单点。这也是本层贵、排在 Tier 1 之后的原因。
+### Tier 2 — 任务完成/效率测（贵，**当前挂起**，见「未来待办」）
+- **判据**：给一个**唯一可辨识、训练库答不出**的目标，强制真检索；指标为**是否达成 + rounds-to-goal**（客观代理，绕开内容打分主观 + 未建的盲区）。
+- **为何挂起**：n=1 是噪声（④教训），须每侧多跑比分布——贵。更根本地，其**判别力全在弱模型侧**（强模型不看防呆也填对，gemini-only 下 Tier-2 信息增量 ≈ Tier-1，为它显不出的信号付贵测量费）。故与「弱模型地板」一并挂起。
 
-### 模型矩阵：弱模型是下界（作者提醒 2026-07-05）～~已被 2026-07-06 决策推翻，见下「方向已定」；保留推理痕迹~~
-> ⚠️ **superseded**：本节结论「flash=下界、门收在 flash」已作废——实测两个 flash 渠道在此 harness 上均不能跑（无合法地板）。下面的「无开关 → 弱模型是绑定者」的**动机分析仍成立**（防呆句多为弱模型写、瘦身真风险在弱模型侧），只是「用 flash 当验收地板」的**执行方案**被弃。改为 gemini-only + 保守删除策略，理由见「方向已定」。
+## 当前决策：gemini-only 单模型基线（2026-07-06）
 
-A1/A4 **无开关**——一份瘦身文本发给所有模型，故**最弱模型是约束的绑定者**，不是最强。逻辑与 harness 线同构：那些防呆字段描述（`严禁包含年份…`、「别把标题拆碎词」）多半是**为弱模型写的**——强模型不看也填对，**flash 才真靠它**。
-- **只在 gemini 上测 = 对真风险失明**：删掉承重防呆句，gemini 不会退化（它不需要），但 flash 会。
-- ∴ **v4-flash = 下界/压力测试**：门收在「**连 flash 的 `tool_err_request` 与召回都 before==after**」。flash 活，强模型必活。
-- **可用配置**（.env，作者供，前两者额度充足可随意测）：Gemini 3.1 Pro（强）/ SiliconFlow v4-flash（弱，**主力下界**）/ DS 官方 v4-flash（弱）。
-- **矩阵**：`{v4-flash, gemini} × {before, after}`；flash 先跑、门收在 flash。这也把「保留防呆、只砍编排重复」的规则**锚定为「保护 flash 地板」**——可砍的是跨工具 when/mode 教学（flash 从 prompt 也拿得到），必留的是 per-arg 防呆。
+三选一（① gemini-only / ② 先修 flash 乱码 / ③ 搁置）**选 ①**。定案理由——不止「省事」，而是**当前没有合法地板**：
 
-### 推论：第一刀保守
-先砍最安全的重复（docstring 里与 prompt 重复的「调用时机」段、模式教学），**返回 schema 与防呆句一律先留**，把 token 削一部分、风险压到最低；Tier 1 绿 + Tier 2 无退化后，再考虑第二刀。
-
-## Flash 基线实测（2026-07-05，SiliconFlow v4-flash，FLASH profile）
-
-| id | tools | errR | errT | mark% | budget | empty | try | lat |
-|---|---|---|---|---|---|---|---|---|
-| Q03 | 6 | 0 | 1 | 1.0 | Y | . | 1 | 161s |
-| Q11 | 6 | **2** | 1 | 1.0 | Y | . | 1 | 140s |
-| Q18 | **0** | 0 | 0 | - | . | **Y** | 3 | 505s |
-
-汇总：`errR=2, errT=2, empty=1/3, budget_hit=2/3, marker=1.0, guard=0`。存档 `eval_framework/results/behavior/behavior_flashBASE_before_20260705_172933.json`。
-
-### 基线暴露三件事，改了上面的验证设计
-
-1. **门是「非回归」不是「零」**：flash 瘦身前就 `errR=2`——「errR 应为 0」是 naive。真门 = `errR_after ≤ errR_before(2)`、`empty_after ≤ 1/3`、`budget_after ≤ 2/3`。flash 是下界正因为它不完美，预期它完美本就错。
-2. **Q18 是 flash 的既有失败，与瘦身无关**：3 次尝试 0 工具调用、全空答、505s，`error=None`（非代理/异常，是 run 完了 flash 啥也没产出）。瘦身还没动 → 这是 flash 在 Q18 上**本就垮**。「flash 是下界」比预想更咬人：flash 在部分工具题上**本就边缘**。
-3. **量具缺口（actionable）**：probe 计了 `errR=2` 但**没存 error_type**——「flash 填错 2 次参」却不知是哪个字段/哪种 error_type，对 A1/A4 验收不可操作。classifier 已解析出 error_type，只是没写进 row。**「after」跑前须补**：把每次调用的 error_type 列表写进 row，否则 before/after diff 不可读。
-
-### n=1 诚实边界
-Q18 的三连空是 1 次运行，505s/3-attempts 模式偏系统性但 n=1 不下定论；Q11 的 errR=2 是真信号（classifier 只抓 bad_request/invalid_arguments 类，不含 429），但同样 n=1。要发表率证据需每题多跑几次比分布。
-
-## 渠道切换与 DS-official flash 现状（2026-07-05，本日收尾发现）
-
-作者提醒：开发时 harness 是基于 **DS 官方 v4-flash** 调出来的，疑 SiliconFlow 渠道的 flash 非满血。故本日切换到 DS 官方 flash 重测 Q03——**结果比 SiliconFlow 更坏，且坏在更底层**：
-
-### 诊断链（逐层隔离，确认非瘦身、非代理、非配置问题）
-1. **裸 DS flash 调用**（无 harness）→ `reasoning_content` 非空（694 token），原生思维链在跑。
-2. **裸调用 + `extra_body={'thinking':{'type':'disabled'}}`** → `reasoning_content` 清空、content 1801 字、`finish=stop`。→ **harness 的禁用字段在 DS 官方渠道有效**（config.py:98 `DEEPSEEK_EXTRA_BODY` 经 llm.py:19 注入，G 轴接线正常）。
-3. **agent 内跑 Q03（FLASH 全 strict）** → 2 次 attempts 全空答、0 工具调用、`error=None`、`remaining_calls=6`（预算未动）。抓 transcript 看到根因：flash 写对了 `<thinking>` 块、计划了工具调用，但**把 tool_call 序列化成乱码标签输出在 content 里**（`</思维DSMLparameter>`、`</invoke>` 等），**未产出合法的 `tool_calls` 结构**。`AIMessage.tool_calls` 为空 → 路由当最终答案 → `process_llm_output` 剥掉 `<thinking>` → 0 字 = 空答。
-
-### 含义（对 A1/A4 的影响）
-- **DS 官方 flash 在 Q03 上、未瘦身时就已经坏**——坏在「模型不吐合法 `tool_calls` 结构」（C1 协议的输出层失败），与工具文本冗余无关。
-- **两个 flash 渠道对 A1/A4 都已失格**：
-  - SiliconFlow flash：Q03 ok、Q18 空答×3。
-  - DS 官方 flash：Q03 直接空答（连 Q03 这种「应检索」题都不调工具）。
-- 故 **任何 flash 基线都混入「pre-existing flash×harness 不兼容」噪声**，不是瘦身引入的信号。「flash=下界」在此 harness 上**不能成立**——flash 本就边缘/坏掉，不能当 A1/A4 的验收地板。
-- 这与原假设方向**相反**：作者疑 SiliconFlow 非满血，实测是 **DS 官方在此 harness 上更坏**（DSML 乱码 vs SiliconFlow 的 Q18 空答）。可能涉及 DS 官方对 `bind_tools` 结构化输出的兼容差异，或 `<thinking>` 文本契约与 DS 原生 thinking 通道的某种残留冲突——**未深挖**（本日收尾，留 G 轴独立 bug）。
-
-### 收尾时的环境状态
-- `.env` 已切回 **gemini-3.1-pro-preview**（gcli 渠道）——验证可用的干净渠道。
-- 探针 `error_type` 明细补丁已合入并 push（commit `6c5b2d4`）：`classify_tool_message` 返回 `(kind, error_type)`、row 落 `tool_errors` 列表。
-- 本日新增 4 个 behavior 存档（`behavior_dsSMOKE_*` / `behavior_flashBASE_*` / `behavior_flashBASE_before_*` / `behavior_flashSMOKE_*`）入 `eval_framework/results/behavior/`，连同本计划更新一起提交。
-
-### 方向已定（2026-07-06）：采纳 ①，gemini-3.1 作单模型基线，弃 flash 下界
-
-三选一（① gemini-only / ② 先修 flash 乱码 / ③ 搁置）**选 ①**。定案理由——不止「省事不想引新模型」，而是**当前没有合法地板**：
-
-- **地板必须站得住**。"weak-as-floor" 偷偷假设单调性（强模型每轴弱优于弱模型），但强模型会**换一种方式**失败（DS flash 的 DSML 乱码是结构化输出层的**另一种**失败，不在 arg-fill 同一轴上），且一个在任务上**坏掉**的模型（flash Q03/Q18 空答）不是地板、是噪声。两个 flash 渠道在此 harness 上都不能跑 → **不存在合法地板**，gemini-only 不是妥协、是此刻唯一诚实的选项。
-- **代价（诚实记下）**：A1/A4 无开关，一份瘦身文本发给所有模型；弃 flash = 只在「强模型不看防呆句也填对」的样本上验证，**承重防呆句的真实价值观测不到**。
-- **缓解 = 用「不删防呆」替代「flash 门」**：既然没了 flash 门兜底，就把风险压在删除策略上——第一刀**只砍 docstring 里与 prompt 重复的 when/mode 教学，返回 schema + 防呆句一律全留**（见「推论：第一刀保守」）。规避「删过头伤弱模型」靠根本不删防呆，而非靠地板抓。
+- **地板必须站得住**。"weak-as-floor" 偷偷假设单调性（强模型每轴弱优于弱模型），但强模型会**换一种方式**失败，且一个在任务上**坏掉**的模型不是地板、是噪声。实测两个 flash 渠道在此 harness 上都不能跑（压缩自 07-05 取证）：
+  - **SiliconFlow v4-flash**：Q03 ok，但 Q18 三连空答（0 工具调用 / 505s / `error=None`，flash 在部分工具题上本就边缘）。
+  - **DS 官方 v4-flash**（harness 原始调校渠道）：Q03 直接空答——根因是 flash 把 `tool_call` 序列化成乱码标签（`</思维DSMLparameter>` 等）吐进 content，**未产出合法 `tool_calls` 结构**（C1 协议输出层失败），与工具文本冗余无关。裸调用取证确认 harness 的 `DEEPSEEK_EXTRA_BODY` 禁思维字段在该渠道有效（非接线问题），是模型侧 `bind_tools` 兼容退化。
+  - ∴ 两渠道都混入「pre-existing flash×harness 不兼容」噪声，**不存在合法地板** → gemini-only 不是妥协、是此刻唯一诚实选项。
+- **代价（诚实记下）**：A1/A4 无开关，一份文本发所有模型；弃 flash = 只在「强模型不看防呆也填对」的样本上验证，**承重防呆句的真实价值观测不到**。
+- **缓解 = 用「不删防呆」替代「flash 门」**：风险压在删除策略上——只砍编排/模式重复，返回 schema + 防呆句全留（第一刀），规避「删过头伤弱模型」靠根本不删，而非靠地板抓。
 - **找补**：今天的弱模型会被淘汰，未来模型平均水位大概率高过现在预设下限，"失去弱覆盖" 的代价随时间自我衰减。
 
-> 元决策（立足点，adopted 2026-07-06）：harness 分**矫正层**（guard/prefill 催眠/乱码兜底，拟合单模型失败模式、天生刻舟求剑）与**契约层**（工具集/降级链/引用格式/C1 显示协议，跨模型稳定）。目标是让矫正层默认关、契约层承重，使 harness 随模型变强**自然退化成无害死重而非主动错误**。既然 LLM 非平稳，**不校准最优点、只校准梯度**（`FLASH…STRONG…MINIMAL` 是斜率不是三个孤立设置）；真正的资产是**便宜的重测回路（② behavior probe）**——换模型时重测+翻 profile，不重新设计。这把「模型会变」从威胁转成设计约束。
+### 元决策立足点（矫正层 vs 契约层，adopted 2026-07-06）
+harness 分**矫正层**（guard/prefill 催眠/乱码兜底，拟合单模型失败模式、天生刻舟求剑）与**契约层**（工具集/降级链/引用格式/C1 显示协议，跨模型稳定）。目标：矫正层默认关、契约层承重，使 harness 随模型变强**自然退化成无害死重而非主动错误**。既然 LLM 非平稳，**不校准最优点、只校准梯度**（`FLASH…STRONG…MINIMAL` 是斜率不是三个孤立设置）；真正的资产是**便宜的重测回路（behavior probe）**——换模型时重测+翻 profile，不重新设计。这把「模型会变」从威胁转成设计约束。
 
-### ⚠️ 单模型基线的量具卫生（within-ID 降智防线）
-gemini 自己也可能被供应商悄悄量化（正是本轮 DS v4 系列「降智」的启发）。单渠道 before/after diff 会被「模型在脚下变了」污染，防线：
-- pin model id + 日期（`behavior_*.json` 已带日期，续用）；
-- before/after **交错跑、时间靠近**，别「先跑完一批 before 再跑 after」（否则漂移只砸一侧）；
-- 任何单渠道结果标 provisional，要发表率证据须每题多跑比分布（n=1 是噪声，④ 的教训）。
+### 量具卫生（within-ID 降智防线）
+gemini 自己也可能被供应商悄悄量化（正是本轮 DS v4 系列「降智」的启发）。单渠道 before/after diff 会被「模型在脚下变了」污染，防线：pin model id + 日期（`behavior_*.json` 已带）；before/after **交错跑、时间靠近**（别先跑完一批 before 再跑 after，否则漂移只砸一侧）；任何单渠道结果标 provisional。
 
-## 第一刀已落地（2026-07-06，gemini-only，Tier-1 门通过）
+## 进度
 
-保守第一刀完成并验非回归。三工具 docstring/Field 去编排重复，纯文本、零逻辑改动（commit `115bc71`）。
+### 第一刀已落地（2026-07-06，gemini-only，Tier-1 门通过）— commit `115bc71` / `a903b67`
 
-**LLM 可见面 char 账（headline win）**：
+三工具 docstring/Field 去编排重复，纯文本、零逻辑改动。
 
 | 工具 | doc | fld | sum | 削减 |
 |---|---|---|---|---|
@@ -133,48 +67,45 @@ gemini 自己也可能被供应商悄悄量化（正是本轮 DS v4 系列「降
 | jina | 1612→1399 | 659→511 | 2271→1910 | −361 (−15%) |
 | **合计** | | | **7972→7095** | **−877 (−11%)** |
 
-> 大头（返回 schema）**有意保留**——它正是 docstring 该独占的 WHAT。−11% 是保守值；更狠的第二刀（精简 schema 字段注释）留待 Tier-1 长期绿后。
+Tier-1 门（gemini Q03/Q11/Q18，FLASH，before 11:08 / after 11:26 交错紧跑）：`errR` 0→0、`empty` 0→0、`marker/guard/noThk` 全 1.0/0/0 逐格无回归、`budget_hit` 0→0。after 侧 request 桶空（Q11 仅 1 条 `recent_failed_query`=transient 旁观）。
+- **诚实标注**：`avg_tool_rounds` 3.33→2.0 **是噪声不是信号**（before-Q03 5 轮含 transient 触发的重试，n=1）。真信号只有「门绿」。
+- **门的边界**：gemini-only 下 `errR` 本就恒 0，故本门证的是「**没删过头**」，**非**「防呆无用」——防呆真值在弱模型侧，本轮观测不到（gemini-only 固有代价）。存档 `behavior_gemBASE_{before,after}_20260706_*.json`。
 
-**Tier-1 门（gemini Q03/Q11/Q18，FLASH，before 11:08 / after 11:26 交错紧跑）**：
+### 第二刀已落地（2026-07-06，gemini-only，Tier-1 门通过）
 
-| 门指标 | before | after | 判定 |
-|---|---|---|---|
-| `errR`(request 错) | 0 | 0 | ✅ 非回归（arg-fill 零退化） |
-| `empty` | 0/3 | 0/3 | ✅ |
-| `marker%` / `guard` / `noThk` | 1.0/0/0 | 1.0/0/0 | ✅ 契约逐格无回归 |
-| `budget_hit` | 0/3 | 0/3 | ✅ |
+压 docstring 返回 schema 的逐字段 gloss：保留字段名 + 非显然语义（abstract 截断规则 / tldr 何时为空 / venue 预印本为空 / content_warning），删自证 gloss（`"title": 论文标题`）+ 跨工具编排泄漏（`open_access_pdf` 的「可传给 jina_tool」，按铁律移交 prompt）。**fld（防呆）一格未动、arg-fill 输入面零触碰**。
 
-- `tool_errors` 明细：after 侧 request 桶为空（Q11 仅 1 条 `recent_failed_query`，属 transient 旁观桶，不进门）。→ 保守删除**没删到承重项**，防呆保护策略成立。
-- **诚实标注**：`avg_tool_rounds` 3.33→2.0 **是噪声不是信号**——before-Q03 那 5 轮含 2 次 transient 触发的工具重试，after 上游没抖故 2 轮。n=1，run-to-run 方差（④教训）。真信号只有「门绿」。
-- **门的边界**：gemini-only 下 `errR` 本就恒 0（强模型不靠防呆），故本门证的是「**没删过头**」，**非**「防呆无用」——防呆真实价值在弱模型侧，本轮观测不到（gemini-only 固有代价，已记于「方向已定」）。存档 `behavior_gemBASE_{before,after}_20260706_*.json`。
+| 工具 | doc | fld(未动) | sum | 本刀 | 累计(原始起) |
+|---|---|---|---|---|---|
+| s2 | 1513→906 | 2062 | 3575→2968 | −607 | 4004→2968 |
+| arxiv | 973→589 | 637 | 1610→1226 | −384 | 1697→1226 |
+| jina | 1399→924 | 511 | 1910→1435 | −475 | 2271→1435 |
+| **合计** | | | **7095→5629** | **−1466** | **7972→5629（−29%）** |
 
-### 下一步（三选一，未决）
-1. **第二刀**：压返回 schema 字段注释（s2 的 papers[] 逐字段中文注解是下一块可削处），再跑 Tier-1 门。收益递增、风险仍低。
-2. **Tier-2 任务完成测**：给唯一可辨识、训练库答不出的目标，比 before/after 的 rounds-to-goal（每侧多跑比分布）。贵，验的是「达成度」而非「机器转不转」。
-3. **就此收口**：−11% 已落袋、门绿，记为 A1/A4 里程碑，转其他方向。
+Tier-1 门（gem2_before 12:27 / gem2_after 12:33 交错紧跑）：`errR` 0→0、`empty` 0→0、`marker/guard/noThk` 全 1.0/0/0 逐格无回归、`budget_hit` 0→0。`errT` 3→2（全 transient 旁观桶，不进门）。
+- **诚实标注**：`avg_tool_rounds` 4.33→3.0 **是噪声**（transient 触发的工具重试波动，n=1）。真信号只有「门绿」。
+- 第二刀只削 docstring 的**输出面**，arg-fill 的**输入面**（Field/防呆）一格未动 → `errR` 恒 0 符合预期；门证「没删过头」比第一刀更强（连可能扰动 arg-fill 的模式选择段都没碰）。存档 `behavior_gem2_{before,after}_20260706_*.json`。
 
-> ⚠️ 原始收尾备注（已由上文覆盖）：本日推进到实际瘦身第一刀 + Tier-1 非回归验证通过。
+## 待办
 
-## 落地步骤（保守单 PR）
+### 即将（gemini-only 可独立推进）
+1. **翻 transcript 定性 spot-check**（免费）：现有 after 存档已在手，人眼看 gemini 砍编排/gloss 后是否仍选对工具/模式、arg 无退化。拿到 bespoke 想要的定性判断、零新开销。
+2. **（可选）第三刀 / 收口**：docstring 已 −29%，大头（防呆 fld + 定位/模式段）有意保留；若无更多低风险可削处，即记为 A1/A4 里程碑收口。
 
-1. **[本文件] 计划入 `plan/`。**
-2. **建改前基线**：`python scripts/harness_probe.py --only Q03 Q18 --profile FLASH`（工具题），存档 `tool_log`/transcript 作为人眼比对基线。
-   - ⚠️ 真烧 token + 依赖 gemini RPM=5，见 harness-behavior-runner-plan 的兜底三件套（--timeout/--retries/--pace）。
-3. **s2 先行（重灾区，收益最大）**：
-   - docstring：删「三种查询模式」里与 `tool_usage.py` 重复的*何时用/怎么选*，**保留返回 schema + 一行定位**。
-   - Field：删各字段里的模式选择再教学，**保留防呆规则**。
-4. **arxiv / jina 同法**：jina 重点是「有/无 query 两模式选择」——该教学归 prompt 还是 docstring？定为 **prompt 主讲、docstring 只留 WHAT**。
-5. **改后复跑同题**，人眼比对 `tool_log`：工具选择对不对、arg 填写有无退化（尤其年份/关键词碎词/模式选择）。**有退化就回退该条删除**。
-6. 记 token 削减量（改前/改后 desc+fields char 数）作为 headline win。
+### 未来（⛔ blocked，等依赖到位再回来重启）
+- **合法弱模型地板** = 本 plan 的核心阻塞依赖。以下两件都卡在「当前时点、能在**当前 harness** 上跑起来的合法弱模型」缺失上：
+  1. **模型矩阵验收**：`{弱, gemini} × {before, after}`，门收在弱模型侧——验「保留防呆」是否真在保护弱模型（gemini-only 观测不到的那半）。
+  2. **Tier-2 任务完成测**：判别力在弱模型侧，同上。bespoke 定制题（钉死 S2→openalex / S2→jina 路径）的坑已想清：真值漂移（S2 会回填摘要 → 刻舟求剑一层下）、钉路径违背 Tier-2「达成而非路径」判据、建题自身烧 token；届时优先**小批 diverse 真检索题 + 多跑比分布**，别钉单条脆路径。
+- **触发条件**：找到这样的弱模型（渠道满血、能吐合法 `tool_calls`、任务上不空答）→ 回到本节重启矩阵 + Tier-2。在此之前，gemini-only 结论一律标 provisional。
 
 ## 明确不做
 
 - **不动代码逻辑 / 返回结构 / 降级实现**——纯文本。
-- **不搞「运行时按需注入 schema」**：A4 核实结论是本项目 `bind_tools` 一次性全量暴露（graph.py:374），**无 skill 运行时**，「延迟注入」需改 agent 装配，超出轻量范围。本 PR 只做**静态瘦身**（删重复），分层披露的动态版留作后续独立立项。
+- **不搞「运行时按需注入 schema」**：本项目 `bind_tools` 一次性全量暴露（graph.py:374），无 skill 运行时，「延迟注入」需改 agent 装配，超轻量范围。本线只做**静态瘦身**（删重复），动态分层披露留作后续独立立项。
 - **不动 rag_tool / lookup_local_paper_id**：已很克制（附录 A1 核实），非目标。
 
 ## 关联
 
 - 上游：[harness-ablation-plan.md](./harness-ablation-plan.md) 附录 A1/A4。
-- 量具：[harness-behavior-runner-plan.md](./harness-behavior-runner-plan.md)（步骤 2/5 的 probe + tool_log）。
-- 邻接决策：[profile-selection-decision.md](./profile-selection-decision.md)（同为 harness 线收尾后的产品级续作；content eval 有意未建，正是本计划验证盲区的根源）。
+- 量具：[harness-behavior-runner-plan.md](./harness-behavior-runner-plan.md)（probe + tool_log）。
+- 邻接决策：[profile-selection-decision.md](./profile-selection-decision.md)（content eval 有意未建，正是本计划验证盲区的根源）。
