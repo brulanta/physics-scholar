@@ -240,16 +240,13 @@ def arxiv_tool(
     full_abstract: bool = False,
 ) -> str:
     """
-    在 arXiv 上检索学术论文。
+    在 arXiv 上检索学术论文。只负责检索、不读全文；
+    返回论文列表（标题、摘要、作者、分类、arXiv ID、pdf_url 等）。
 
-    ## 两种查询模式
-
-    ### 模式一：关键词检索（广撒网）
-    填写 keywords，可选填 author、category、recent_days。
-    返回论文列表，含标题、截断摘要、作者、分类标签、arXiv ID 和 PDF 链接。
-
-    ### 模式二：ID 精确查询
-    填写 arxiv_ids，可配合 full_abstract=True 获取完整摘要。
+    ## 两种查询模式（按所填字段自动切换）
+    - keywords：关键词检索，可附 author/category/recent_days 过滤。
+    - arxiv_ids：ID 精确查询，配合 full_abstract=True 取完整摘要。
+    （何时用本工具、与其他工具的编排与降级链，见 system prompt 的 Tool Usage。）
 
     ## 返回格式
 
@@ -284,14 +281,6 @@ def arxiv_tool(
         "agent_hint": 情况详释与处理建议,
         "papers": []
     }
-
-    ## 下游工具
-    若需深入阅读论文全文，将 pdf_url 传给 jina_tool。
-    本工具不处理全文内容。
-
-    ## 注意
-    - 批量检索时保持 full_abstract=False，避免 token 超限
-    - 相同 query 失败后 120 秒内不会重复请求
     """
     # 谬误拦截：防止 Agent 传入全空参数导致 API 报错 400 Bad Request
     if not keywords and not arxiv_ids and not author and not category:

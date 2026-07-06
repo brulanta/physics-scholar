@@ -351,10 +351,6 @@ class JinaRequest(BaseModel):
         description=(
             "目标网页或 PDF 的完整 URL（必填）：\n"
             "- 支持任意公开可访问的网页或 PDF 链接\n"
-            "- 典型来源：\n"
-            "    s2_search_tool 或 openalex_tool 返回的 open_access_pdf 字段\n"
-            "    arxiv_tool 返回的 pdf_url 字段\n"
-            "    用户直接提供的链接\n"
             "- 不支持需要登录才能访问的页面"
         )
     )
@@ -362,10 +358,8 @@ class JinaRequest(BaseModel):
         default="",
         description=(
             "语义检索问题（可选）：\n"
-            "- 填写后：对全文分片，逐片用副 LLM 打分，返回最相关的片段\n"
-            "- 留空时：返回全文开头截断内容，不消耗副 LLM\n"
-            "- 建议用英文描述用户真正关心的研究问题，如实验细节、方法原理等\n"
-            "- 仅在摘要无法满足用户追问时才填写此参数"
+            "- 填写后：对全文分片打分，返回最相关片段；留空：返回全文开头截断，不消耗副 LLM\n"
+            "- 建议用英文描述用户真正关心的研究问题（实验细节、方法原理等）"
         ),
     )
     top_n: int = Field(
@@ -431,16 +425,10 @@ def jina_tool(
     """
     读取指定 URL 的网页或 PDF 内容，支持基于副 LLM 的语义片段召回。
 
-    ## 两种模式
-
-    ### 无 query：全文截断模式
-    返回全文开头 no_query_max_tokens 估算 token 的内容。
-    不消耗副 LLM，适合快速了解文章结构。
-
-    ### 有 query：分片打分模式
-    对全文完整分片，逐片调副 LLM 打分（1-10），
-    按分数从高到低累积返回，直到达到 max_return_tokens 预算或 top_n 上限。
-    返回原始片段文本，附带各片分数。
+    ## 两种模式（按 query 有无自动切换）
+    - 无 query：返回全文开头 no_query_max_tokens 估算 token 的截断内容，不消耗副 LLM。
+    - 有 query：对全文分片，逐片调副 LLM 打分（1-10），按分数累积返回至 max_return_tokens/top_n 上限，附各片分数。
+    （何时用哪种模式、与检索工具的编排，见 system prompt 的 Tool Usage。）
 
     ## 返回格式
 
@@ -491,13 +479,8 @@ def jina_tool(
     }
 
     ## 注意
-    - 无法访问需要登录的页面（付费期刊正文等）
-    - open_access_pdf 链接有时指向出版商页面而非 PDF 本体，可能因访问限制导致内容极短或无效；返回结果中若含 content_warning 字段，说明内容可疑，应告知用户并放弃继续读取
-    - 有 query 时副 LLM 调用次数 = 切片数，长文档会消耗较多资源
-    - 有 query 时若 returned_chunks 为 0，参考 agent_hint 字段的说明判断原因，不要直接重复调用
-    - 副 LLM 未配置时，有 query 的请求直接返回错误
-    - 相同 URL 失败后 120 秒内不会重复请求
-    - 不要对同一 URL 反复调用；如需多次讨论同一篇文章，建议用户将其下载入库
+    - 返回结果若含 content_warning 字段，说明页面内容可疑（出版商跳转/访问受限/极短），应告知用户并放弃继续读取。
+    - 有 query 时副 LLM 调用次数 = 切片数，长文档会消耗较多资源。
     """
     # ── 基础校验 ──
     url = url.strip()
