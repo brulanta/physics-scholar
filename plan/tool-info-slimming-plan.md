@@ -36,6 +36,8 @@
 - **判据**：给一个**唯一可辨识、训练库答不出**的目标，强制真检索；指标为**是否达成 + rounds-to-goal**（客观代理，绕开内容打分主观 + 未建的盲区）。
 - **为何挂起**：n=1 是噪声（④教训），须每侧多跑比分布——贵。更根本地，其**判别力全在弱模型侧**（强模型不看防呆也填对，gemini-only 下 Tier-2 信息增量 ≈ Tier-1，为它显不出的信号付贵测量费）。故与「弱模型地板」一并挂起。
 
+> user本人注： 弱模型与防呆的关系 —— 弱模型大概率依赖防呆才能表现出正常行为，所以删改前后、想要探测是否误删防呆内容，最好用弱模型做before/after探测；如果想删去所有防呆，也需要弱模型做下限测试，即弱模型可以不读（也能正常工作）的防呆、强模型天然也可以略去。
+
 ## 当前决策：gemini-only 单模型基线（2026-07-06）
 
 三选一（① gemini-only / ② 先修 flash 乱码 / ③ 搁置）**选 ①**。定案理由——不止「省事」，而是**当前没有合法地板**：
@@ -44,8 +46,8 @@
   - **SiliconFlow v4-flash**：Q03 ok，但 Q18 三连空答（0 工具调用 / 505s / `error=None`，flash 在部分工具题上本就边缘）。
   - **DS 官方 v4-flash**（harness 原始调校渠道）：Q03 直接空答——根因是 flash 把 `tool_call` 序列化成乱码标签（`</思维DSMLparameter>` 等）吐进 content，**未产出合法 `tool_calls` 结构**（C1 协议输出层失败），与工具文本冗余无关。裸调用取证确认 harness 的 `DEEPSEEK_EXTRA_BODY` 禁思维字段在该渠道有效（非接线问题），是模型侧 `bind_tools` 兼容退化。
   - ∴ 两渠道都混入「pre-existing flash×harness 不兼容」噪声，**不存在合法地板** → gemini-only 不是妥协、是此刻唯一诚实选项。
-- **代价（诚实记下）**：A1/A4 无开关，一份文本发所有模型；弃 flash = 只在「强模型不看防呆也填对」的样本上验证，**承重防呆句的真实价值观测不到**。
-- **缓解 = 用「不删防呆」替代「flash 门」**：风险压在删除策略上——只砍编排/模式重复，返回 schema + 防呆句全留（第一刀），规避「删过头伤弱模型」靠根本不删，而非靠地板抓。
+- **代价（诚实记下）**：A1/A4 无开关，一份文本发所有模型；弃 flash = 丢了上文「活 A 哨兵」，删过头无自动传感器；「活 B 防呆估值」本就不在保守范围（不 care）。
+- **缓解 = 用「不删防呆」替代「flash 门」**：哨兵（活 A）没了，安全就从「地板抓」搬到「删除策略」——只砍编排/模式重复，返回 schema + 防呆句全留，规避「删过头伤弱模型」**靠根本不删，而非靠地板抓**。这是弱模型缺席下的等价替代，不是退让。
 - **找补**：今天的弱模型会被淘汰，未来模型平均水位大概率高过现在预设下限，"失去弱覆盖" 的代价随时间自我衰减。
 
 ### 元决策立足点（矫正层 vs 契约层，adopted 2026-07-06）
@@ -70,6 +72,7 @@ gemini 自己也可能被供应商悄悄量化（正是本轮 DS v4 系列「降
 Tier-1 门（gemini Q03/Q11/Q18，FLASH，before 11:08 / after 11:26 交错紧跑）：`errR` 0→0、`empty` 0→0、`marker/guard/noThk` 全 1.0/0/0 逐格无回归、`budget_hit` 0→0。after 侧 request 桶空（Q11 仅 1 条 `recent_failed_query`=transient 旁观）。
 - **诚实标注**：`avg_tool_rounds` 3.33→2.0 **是噪声不是信号**（before-Q03 5 轮含 transient 触发的重试，n=1）。真信号只有「门绿」。
 - **门的边界**：gemini-only 下 `errR` 本就恒 0，故本门证的是「**没删过头**」，**非**「防呆无用」——防呆真值在弱模型侧，本轮观测不到（gemini-only 固有代价）。存档 `behavior_gemBASE_{before,after}_20260706_*.json`。
+> user本人注： 本门证的是 —— 没有删得太过头、删到强模型都无法正常工作。但无法证明 —— 没有误删防呆、防呆无用。
 
 ### 第二刀已落地（2026-07-06，gemini-only，Tier-1 门通过）
 
@@ -85,18 +88,32 @@ Tier-1 门（gemini Q03/Q11/Q18，FLASH，before 11:08 / after 11:26 交错紧�
 Tier-1 门（gem2_before 12:27 / gem2_after 12:33 交错紧跑）：`errR` 0→0、`empty` 0→0、`marker/guard/noThk` 全 1.0/0/0 逐格无回归、`budget_hit` 0→0。`errT` 3→2（全 transient 旁观桶，不进门）。
 - **诚实标注**：`avg_tool_rounds` 4.33→3.0 **是噪声**（transient 触发的工具重试波动，n=1）。真信号只有「门绿」。
 - 第二刀只削 docstring 的**输出面**，arg-fill 的**输入面**（Field/防呆）一格未动 → `errR` 恒 0 符合预期；门证「没删过头」比第一刀更强（连可能扰动 arg-fill 的模式选择段都没碰）。存档 `behavior_gem2_{before,after}_20260706_*.json`。
+- ⚠️ **errR 门对第二刀近乎「结构性空转」，别把绿当强证据**：既然输入面一格没动，`errR≡0` 是**必然**、不是测出来的好消息（换任何模型都 0）。第二刀真正该看的是**输出面 gloss 砍掉后 agent 有没有误读返回结构** → 靠**已落地的 transcript spot-check**（见下「spot-check」段），不是靠 errR。errR 门在这里只排除了「手滑连带删了输入面」这一种事故。
+
+### spot-check 已落地（2026-07-06，gemini-only，定性通过）
+
+待办 #1 的前提「现有 after 存档已在手」**不成立**——`harness_probe.py` 原本只落指标计数、不落 transcript（4 份 gemini 存档里没有可翻的 transcript）。故先给 runner 加 `--dump-transcript` 开关（把每题 `result["messages"]` 序列化到 `results/behavior/transcripts/{label}_{stamp}/{id}.json`，缺省关闭、不污染指标存档），再重跑 gem2 after 三题落 transcript。存档 `behavior_gem2_after_spotcheck_20260706_164730.json` + `transcripts/gem2_after_spotcheck_20260706_163233/`。
+
+人眼翻 Q03/Q11/Q18 transcript，核验三大关切（plan 量具卫生：仅 after 一侧、紧贴第二刀文本）：
+- **① 选工具/降级链**：Q18 撞 S2 429 → 正确降级 openalex→arxiv→openalex（换词）→arxiv，每步 Q3 附「与上轮差异」理由；budget 剩 1 果断 `[TOOL_LOOP: DONE]`。Q03/Q11 用 s2+openalex 即满足即收手。**无退化**。
+- **② 读返回字段**（第二刀核心关切）：agent 在 thinking 里精确引用返回内容——"前4篇是关于6G/遥感/太赫兹综述，只有第5篇 Shilong Pan & Yamei Zhang 的 Microwave Photonic Radars (2020)"、"返回论文集中在生命体征监测/高分辨率成像"、"北大王兴军团队2022 Fully on-chip microwave photonics system (arXiv:2202.11495)"。这些 title/authors/year/arxiv_id 均从工具返回 `papers[]` 读出 → **gloss 砍后 agent 仍正确读出 abstract/title/venue/authors/open_access_pdf 等字段并据内容决策，无误读返回结构**。还观察到正向元认知：[10] 诊断 openalex 长短语检索「被拆词匹配到高引用无关论文」→ 主动改拆分关键词重搜。
+- **③ arg-fill**：所有 tool_calls args 合法、防呆生效（s2 年份走 `year_range` 不混入 query、`publication_types` 列表、`sort` 合法；openalex `full_abstract/keywords/year_range` 全对）。`errR=0` 与行为一致，**无 arg-fill 退化**。
+
+- ⚠️ **覆盖盲区（诚实标注，不阻塞收口）**：本次 after 三题**一次都没调 jina_tool**（Q03/Q11 用 s2+openalex 即足，Q18 走 s2→openalex→arxiv 链）。故第二刀砍掉的 `open_access_pdf`「可传给 jina_tool」编排泄漏，其下游「agent 是否仍知道把 `open_access_pdf` 传给 jina」**未在本次观测到**。已确认 openalex 返回里 `open_access_pdf` 字段实存可读，只是 jina 传递链没被触发——属「gemini-only 固有盲区」同类（没测到 ≠ 退化），留待弱模型矩阵 / 触发 jina 的题出现时补。
 
 ## 待办
 
-### 即将（gemini-only 可独立推进）
-1. **翻 transcript 定性 spot-check**（免费）：现有 after 存档已在手，人眼看 gemini 砍编排/gloss 后是否仍选对工具/模式、arg 无退化。拿到 bespoke 想要的定性判断、零新开销。
-2. **（可选）第三刀 / 收口**：docstring 已 −29%，大头（防呆 fld + 定位/模式段）有意保留；若无更多低风险可削处，即记为 A1/A4 里程碑收口。
+### ✅ 已完成（gemini-only 可独立推进部分）
+1. **transcript 定性 spot-check**：runner 加 `--dump-transcript` 开关 + 重跑 gem2 after 落盘 + 人眼核验，结论「无退化」（见上「spot-check 已落地」段）。
+2. **第三刀 / 收口**：spot-check 无退化 + docstring 已 −29%、剩余可削面只剩承重防呆（红线全留）与定位一行（低收益）→ **无更多低风险可削处，A1/A4 静态瘦身里程碑收口**。`--dump-transcript` 开关随收口留存（未来弱模型矩阵/Tier-2 复用）。
 
 ### 未来（⛔ blocked，等依赖到位再回来重启）
 - **合法弱模型地板** = 本 plan 的核心阻塞依赖。以下两件都卡在「当前时点、能在**当前 harness** 上跑起来的合法弱模型」缺失上：
   1. **模型矩阵验收**：`{弱, gemini} × {before, after}`，门收在弱模型侧——验「保留防呆」是否真在保护弱模型（gemini-only 观测不到的那半）。
+   > user本人注： 验是否误删防呆内容
   2. **Tier-2 任务完成测**：判别力在弱模型侧，同上。bespoke 定制题（钉死 S2→openalex / S2→jina 路径）的坑已想清：真值漂移（S2 会回填摘要 → 刻舟求剑一层下）、钉路径违背 Tier-2「达成而非路径」判据、建题自身烧 token；届时优先**小批 diverse 真检索题 + 多跑比分布**，别钉单条脆路径。
 - **触发条件**：找到这样的弱模型（渠道满血、能吐合法 `tool_calls`、任务上不空答）→ 回到本节重启矩阵 + Tier-2。在此之前，gemini-only 结论一律标 provisional。
+> user本人注： 本质是找到一个在当前时间下、当前harness的版本能兼容运行的本体性能最弱的模型，其表现天然具有探针价值（是否是良性的删除 可以与 agent前后表现对比 直接挂钩，观测后者自然得出前者结果），因此目前 tier 1-2 的结果都只具备较弱的参考意义（但随着时间流逝价值会上升 —— 时间够久，最终市面上模型的性能都会高于harness的兼容最底线）
 
 ## 明确不做
 

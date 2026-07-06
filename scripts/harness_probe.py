@@ -35,6 +35,8 @@
     python scripts/harness_probe.py                      # 全部 20 题
     python scripts/harness_probe.py --only Q01 Q05       # 指定题
     python scripts/harness_probe.py --label STRONG --mode discuss
+    python scripts/harness_probe.py --only Q03 Q11 Q18 --label gem2_after_spotcheck \
+        --dump-transcript                                # A1/A4 验收：落 transcript 供人眼 spot-check
 """
 
 from __future__ import annotations
@@ -69,6 +71,69 @@ from src.core.trim_thinking import process_llm_output  # noqa: E402
 
 TEST_CASES = REPO_ROOT / "eval_framework" / "test_cases.json"
 OUT_DIR = REPO_ROOT / "eval_framework" / "results" / "behavior"
+
+
+def _content_to_jsonable(content) -> object:
+    """把 message.content 规整成 json 可序列化。str 原样；list/dict 尝试 json 往返，
+    失败（含非可序列化对象）退化为 repr——transcript 仅供人眼 spot-check，保真即可。"""
+    if isinstance(content, str):
+        return content
+    try:
+        json.dumps(content)
+        return content
+    except (TypeError, ValueError):
+        return repr(content)
+
+
+def serialize_message(m) -> dict:
+    """把一条 langchain message 序列化成人眼可读的 dict（供 transcript 落盘 spot-check）。
+
+    保留 spot-check 关心的全部信号：type / content / tool_calls（选了哪个工具+填了什么参）
+    / tool_call_id / status（工具执行框架层成败）/ additional_kwargs。gloss 砍后 agent 是否
+    仍认得返回字段、arg 有无退化，全靠这里落下来的真实交互可读。
+    """
+    entry: dict = {
+        "type": m.type,
+        "content": _content_to_jsonable(m.content),
+    }
+    name = getattr(m, "name", None)
+    if name:
+        entry["name"] = name
+    if isinstance(m, AIMessage):
+        tc = getattr(m, "tool_calls", None)
+        if tc:
+            entry["tool_calls"] = [
+                {"name": t.get("name"), "args": t.get("args"), "id": t.get("id")}
+                for t in tc
+            ]
+        itc = getattr(m, "invalid_tool_calls", None)
+        if itc:
+            entry["invalid_tool_calls"] = itc
+    if isinstance(m, ToolMessage):
+        entry["tool_call_id"] = getattr(m, "tool_call_id", None)
+        entry["status"] = getattr(m, "status", None)
+    akwargs = getattr(m, "additional_kwargs", None)
+    if akwargs:
+        try:
+            json.dumps(akwargs)
+            entry["additional_kwargs"] = akwargs
+        except (TypeError, ValueError):
+            entry["additional_kwargs"] = repr(akwargs)
+    return entry
+
+
+def dump_transcript(dump_dir: Path, item: dict, row: dict, messages: list) -> Path:
+    """把单题 transcript 落盘：question + 行为指标 row + 逐条序列化消息。返回写入路径。"""
+    payload = {
+        "id": item["id"],
+        "question": item["question"],
+        "run": row,
+        "messages": [serialize_message(m) for m in messages],
+    }
+    out = dump_dir / f"{item['id']}.json"
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    return out
 
 # thinking_guard 注入的「工具调用已被取消」假 ToolMessage 的稳定子串（graph.py:184）
 GUARD_SENTINEL = "未检测到必要的 <thinking>"
@@ -249,8 +314,9 @@ async def run_one(
     profile,
     timeout: float,
     retries: int,
-) -> dict:
-    """跑单题，返回 {id, metrics..., latency, error, attempts}。
+    keep_transcript: bool = False,
+) -> tuple[dict, list]:
+    """跑单题，返回 ({id, metrics..., latency, error, attempts}, transcript_messages)。
 
     针对 gemini-3.1-pro（RPM=5 + Google GLI 上游抖动）的兜底：
     - **硬超时**：`ainvoke` 无 request_timeout，上游挂起会无限 stall。用 asyncio.wait_for
@@ -258,9 +324,13 @@ async def run_one(
     - **题级重试**：对「超时 / 抛异常 / 空答」重试 `retries` 次。空答在强模型的工具题上
       多半是上游 200-空 body 的哑火，值得重试；attempts 如实记录，最后一次仍空则 empty_answer=True。
     每次重试重建 agent+state，避免脏状态复用。
+
+    keep_transcript=True 时把**最后一次 ainvoke 的完整 messages** 带回（供 --dump-transcript
+    落盘 spot-check）；失败/空答/重试链上只保留最后那条结果的 transcript（重试本身不记历史）。
     """
     error = None
     metrics: dict = {}
+    transcript: list = []
     t0 = time.perf_counter()
     attempts = 0
     for attempt in range(retries + 1):
@@ -271,12 +341,16 @@ async def run_one(
             result = await asyncio.wait_for(agent.ainvoke(state), timeout=timeout)
             metrics = collect_metrics(result)
             error = None
+            if keep_transcript:
+                transcript = list(result.get("messages", []))
         except asyncio.TimeoutError:
             metrics = {}
             error = f"TimeoutError: 超过 {timeout}s 无响应"
+            transcript = []
         except Exception as e:  # 网络/模型异常
             metrics = {}
             error = f"{type(e).__name__}: {e}"
+            transcript = []
 
         # 干净非空结果 → 收工；否则（异常 / 超时 / 空答）还有配额就重试
         if error is None and not metrics.get("empty_answer", True):
@@ -290,7 +364,7 @@ async def run_one(
             await asyncio.sleep(RETRY_BACKOFF_S)
 
     latency = round(time.perf_counter() - t0, 2)
-    return {"id": item["id"], "latency_s": latency, "error": error, "attempts": attempts, **metrics}
+    return {"id": item["id"], "latency_s": latency, "error": error, "attempts": attempts, **metrics}, transcript
 
 
 COLUMNS = [
@@ -374,13 +448,26 @@ async def main_async(args) -> None:
         f"  {profile}\n"
     )
 
+    # --dump-transcript：把每题完整 transcript 落到子目录，供人眼 spot-check 选工具/读字段/arg。
+    # 缺省关闭——只落行为指标计数，行为不变。落盘目录随本轮 timestamp 绑定 label，避免覆盖。
+    dump_dir: Path | None = None
+    if args.dump_transcript:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dump_dir = OUT_DIR / "transcripts" / f"{label}_{stamp}"
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  → transcript 落盘到：{dump_dir}\n")
+
     rows: list[dict] = []
     for i, item in enumerate(items, 1):
         print(f"[{i}/{len(items)}] {item['id']} 跑中…", file=sys.stderr)
-        row = await run_one(
-            item, args.user_id, args.mode, profile, args.timeout, args.retries
+        row, transcript = await run_one(
+            item, args.user_id, args.mode, profile, args.timeout, args.retries,
+            keep_transcript=args.dump_transcript,
         )
         rows.append(row)
+        if dump_dir is not None and transcript:
+            p = dump_transcript(dump_dir, item, row, transcript)
+            print(f"    ↳ transcript → {p}", file=sys.stderr)
         # RPM=5：题间静置，避免下一题开头就撞限流
         if i < len(items) and args.pace > 0:
             await asyncio.sleep(args.pace)
@@ -437,6 +524,11 @@ def main() -> None:
     p.add_argument(
         "--pace", type=float, default=5.0,
         help="题间静置秒数，缓解 RPM=5 限流。默认 5",
+    )
+    p.add_argument(
+        "--dump-transcript", action="store_true",
+        help="把每题完整 transcript 落到 results/behavior/transcripts/{label}_{stamp}/，"
+             "供人眼 spot-check 选工具/读字段/arg 有无退化（A1/A4 验收用）。缺省只落指标计数",
     )
     args = p.parse_args()
     asyncio.run(main_async(args))
