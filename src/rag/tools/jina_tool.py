@@ -431,52 +431,13 @@ def jina_tool(
     （何时用哪种模式、与检索工具的编排，见 system prompt 的 Tool Usage。）
 
     ## 返回格式
-
-    ### 无 query 成功时
-    {
-        "success": true,
-        "url": 请求的 URL,
-        "mode": "full_text_truncated",
-        "has_jina_key": 是否使用了 Jina API Key,
-        "content": 截断后的全文文本,
-        "estimated_tokens": 估算 token 数,
-        "agent_hint": 情况详释
-    }
-
-    ### 有 query 成功时
-    {
-        "success": true,
-        "url": 请求的 URL,
-        "mode": "scored_chunks",
-        "has_jina_key": 是否使用了 Jina API Key,
-        "query": 传入的 query,
-        "total_chunks": 全文切片总数,
-        "returned_chunks": 实际返回片段数,
-        "estimated_tokens": 返回内容的估算 token 总数,
-        "chunks": [
-            {
-                "index": 片段在全文中的原始顺序（0起），
-                "score": 副 LLM 打分（1-10），
-                "estimated_tokens": 该片段估算 token 数,
-                "text": 原始片段文本
-            },
-            ...
-        ],
-        "agent_hint": 情况详释
-    }
-
-    ### 失败时
-    {
-        "success": false,
-        "url": 请求的 URL,
-        "error_type": "rate_limited" | "timeout" | "request_failed"
-                      | "auth_error" | "recent_failed" | "no_url" | "slice_no_config",
-        "error": 错误详情,
-        "retryable": true | false,
-        "agent_hint": 情况详释与处理建议,
-        "mode": null,
-        "content": null
-    }
+    无 query 成功：{success, url, mode:"full_text_truncated", has_jina_key,
+      content（截断全文）, estimated_tokens, agent_hint, content_warning}。
+    有 query 成功：{success, url, mode:"scored_chunks", has_jina_key, query,
+      total_chunks, returned_chunks, estimated_tokens, agent_hint, content_warning,
+      chunks:[{index（全文中原始顺序）, score（副 LLM 1-10 打分）, estimated_tokens, text}]}。
+    失败：{success:false, url, error_type, error, retryable, agent_hint, mode:null, content:null}；
+      error_type ∈ rate_limited|timeout|request_failed|auth_error|recent_failed|no_url|slice_no_config。
 
     ## 注意
     - 返回结果若含 content_warning 字段，说明页面内容可疑（出版商跳转/访问受限/极短），应告知用户并放弃继续读取。

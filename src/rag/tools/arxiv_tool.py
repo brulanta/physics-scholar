@@ -249,38 +249,12 @@ def arxiv_tool(
     （何时用本工具、与其他工具的编排与降级链，见 system prompt 的 Tool Usage。）
 
     ## 返回格式
-
-    ### 成功时
-    {
-        "success": true,
-        "count": 实际返回论文数量,
-        "papers": [
-            {
-                "title": 论文标题,
-                "summary": 摘要（full_abstract=False 时截断至300字符）,
-                "authors": 作者列表,
-                "published": 发布时间（ISO 8601）,
-                "updated": 更新时间（ISO 8601）,
-                "arxiv_id": arXiv ID,
-                "pdf_url": PDF 直接下载链接,
-                "link": arXiv 页面链接,
-                "categories": 所属分类列表,
-                "primary_category": 主分类
-            },
-            ...
-        ],
-        "agent_hint": 情况详释,
-    }
-
-    ### 失败时
-    {
-        "success": false,
-        "error_type": "rate_limited" | "timeout" | "request_failed" | "recent_failed_query",
-        "error": 错误详情,
-        "retryable": true | false,
-        "agent_hint": 情况详释与处理建议,
-        "papers": []
-    }
+    成功：{success, count, agent_hint, papers:[…]}。每篇 paper 字段：
+    title、summary（full_abstract=False 时截断 300 字）、authors、
+    published、updated（均 ISO 8601）、arxiv_id、pdf_url、link、
+    categories、primary_category。
+    失败：{success:false, error_type, error, retryable, agent_hint, papers:[]}；
+      error_type ∈ rate_limited|timeout|request_failed|recent_failed_query。
     """
     # 谬误拦截：防止 Agent 传入全空参数导致 API 报错 400 Bad Request
     if not keywords and not arxiv_ids and not author and not category:

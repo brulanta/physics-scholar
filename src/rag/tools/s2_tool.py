@@ -445,50 +445,17 @@ def s2_search_tool(
     （何时选哪种模式、与其他工具的编排与降级链，见 system prompt 的 Tool Usage。）
 
     ## 返回格式
-
-    ### 成功时
-    {
-        "success": true,
-        "count": 实际返回论文数量,
-        "has_s2_key": 是否使用了 API Key（影响速率上限）,
-        "agent_hint": 情况详释,
-        "papers": [
-            {
-                "title": 论文标题,
-                "abstract": 摘要（full_abstract=False 时截断至300字符）,
-                "has_abstract": 是否存在摘要,
-                "tldr": S2 AI 一句话总结（精确查询时有，批量检索时为空）,
-                "authors": 作者列表,
-                "year": 发表年份,
-                "publication_date": 精确发表日期（部分论文有）,
-                "venue": 发表期刊/会议（预印本通常为空）,
-                "publication_types": 论文类型列表,
-                "fields_of_study": 研究领域,
-                "citation_count": 引用数,
-                "influential_citation_count": 高影响力引用数,
-                "s2_paper_id": S2 Paper ID,
-                "arxiv_id": arXiv ID（若有）,
-                "doi": DOI（若有）,
-                "open_access_pdf": 开放获取 PDF URL（若有，可传给 jina_tool）,
-                "s2_url": S2 论文页面链接
-            },
-            ...
-        ]
-    }
-
-    ### 失败时
-    {
-        "success": false,
-        "error_type": "rate_limited" | "timeout" | "request_failed"
-                      | "recent_failed_query" | "invalid_params",
-        "error": 错误详情,
-        "retryable": true | false,
-        "agent_hint": 情况详释与处理建议
-        "papers": []
-    }
+    成功：{success, count, has_s2_key, agent_hint, papers:[…]}。每篇 paper 字段：
+    title、abstract（full_abstract=False 时截断 300 字）、has_abstract、
+    tldr（AI 一句话总结，仅精确 ID 查询有值、批量检索为空）、authors、year、
+    publication_date、venue（预印本通常为空）、publication_types、fields_of_study、
+    citation_count、influential_citation_count、s2_paper_id、arxiv_id、doi、
+    open_access_pdf（开放获取 PDF URL）、s2_url。
+    失败：{success:false, error_type, error, retryable, agent_hint, papers:[]}；
+      error_type ∈ rate_limited|timeout|request_failed|recent_failed_query|invalid_params。
 
     ## 注意
-    - abstract 为空是 S2 的正常现象；精确 ID 查询不会补全原本缺失的摘要，勿为取摘要反复重查同一 ID。
+    - abstract 为空是 S2 常态；精确 ID 查询不补全缺失摘要，勿为取摘要反复重查同一 ID。
     """
     # ── 模式二 & 三：精确 ID 查询 ──
     if s2_paper_ids or arxiv_ids:
