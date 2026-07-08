@@ -308,8 +308,7 @@ class S2SearchRequest(BaseModel):
         description=(
             "arXiv ID 列表（可选）：\n"
             "- S2 支持以 arXiv ID 直接查询，格式如 '2301.07041'\n"
-            "- 填写后将忽略 keywords、author、year_range、fields_of_study\n"
-            "- 适用于已从 arxiv_tool 获得 arxiv_id、想在 S2 补充引用数等字段的场景"
+            "- 填写后将忽略 keywords、author、year_range、fields_of_study"
         ),
     )
     author: str = Field(
@@ -436,77 +435,27 @@ def s2_search_tool(
     publication_types: list[str] = [],
 ) -> str:
     """
-    在 Semantic Scholar (S2) 上检索学术论文。
+    在 Semantic Scholar (S2) 上检索学术论文。只负责检索、不读全文；
+    返回论文列表（标题、摘要、作者、年份、引用数、venue、s2_paper_id、open_access_pdf 等）。
 
-    ## 三种查询模式
-
-    ### 模式一：关键词检索（广撒网）
-    填写 keywords，可选填 author、year_range、publication_date_range、fields_of_study、
-    publication_types、min_citation_count、open_access_only。
-    返回论文列表，包含标题、截断摘要、引用数、s2_paper_id、open_access_pdf 等。
-    建议根据标题和引用数筛选目标论文，记录 s2_paper_id 供后续精确查询。
-    默认按相关性排序；填写 sort 字段可改为按引用数或发表日期排序（自动切换至 bulk 端点）。
-
-    ### 模式二：S2 Paper ID 精确查询
-    填写 s2_paper_ids，配合 full_abstract=True 获取完整摘要。
-    返回额外包含 tldr（S2 AI 生成的一句话总结）。
-    对话历史中已出现的 s2_paper_id 视为可信，直接使用。
-
-    ### 模式三：arXiv ID 精确查询
-    填写 arxiv_ids，通过 S2 获取该论文的完整元数据（引用数、venue 等）。
-    适合在 arxiv_tool 检索后，用 S2 补充元数据的场景。
+    ## 三种查询模式（按所填字段自动切换）
+    - keywords：关键词检索，返回候选列表（摘要按 full_abstract 截断）。
+    - s2_paper_ids：S2 Paper ID 精确查询，返回完整元数据，额外含 tldr（AI 一句话总结）。
+    - arxiv_ids：arXiv ID 精确查询，返回该论文的 S2 元数据。
+    （何时选哪种模式、与其他工具的编排与降级链，见 system prompt 的 Tool Usage。）
 
     ## 返回格式
-
-    ### 成功时
-    {
-        "success": true,
-        "count": 实际返回论文数量,
-        "has_s2_key": 是否使用了 API Key（影响速率上限）,
-        "agent_hint": 情况详释,
-        "papers": [
-            {
-                "title": 论文标题,
-                "abstract": 摘要（full_abstract=False 时截断至300字符）,
-                "has_abstract": 是否存在摘要,
-                "tldr": S2 AI 一句话总结（精确查询时有，批量检索时为空）,
-                "authors": 作者列表,
-                "year": 发表年份,
-                "publication_date": 精确发表日期（部分论文有）,
-                "venue": 发表期刊/会议（预印本通常为空）,
-                "publication_types": 论文类型列表,
-                "fields_of_study": 研究领域,
-                "citation_count": 引用数,
-                "influential_citation_count": 高影响力引用数,
-                "s2_paper_id": S2 Paper ID,
-                "arxiv_id": arXiv ID（若有）,
-                "doi": DOI（若有）,
-                "open_access_pdf": 开放获取 PDF URL（若有，可传给 jina_tool）,
-                "s2_url": S2 论文页面链接
-            },
-            ...
-        ]
-    }
-
-    ### 失败时
-    {
-        "success": false,
-        "error_type": "rate_limited" | "timeout" | "request_failed"
-                      | "recent_failed_query" | "invalid_params",
-        "error": 错误详情,
-        "retryable": true | false,
-        "agent_hint": 情况详释与处理建议
-        "papers": []
-    }
-
-    ## 下游工具
-    若需深入阅读论文全文，将 open_access_pdf 字段的值传给 jina_tool。
-    本工具不处理全文内容。
+    成功：{success, count, has_s2_key, agent_hint, papers:[…]}。每篇 paper 字段：
+    title、abstract（full_abstract=False 时截断 300 字）、has_abstract、
+    tldr（AI 一句话总结，仅精确 ID 查询有值、批量检索为空）、authors、year、
+    publication_date、venue（预印本通常为空）、publication_types、fields_of_study、
+    citation_count、influential_citation_count、s2_paper_id、arxiv_id、doi、
+    open_access_pdf（开放获取 PDF URL）、s2_url。
+    失败：{success:false, error_type, error, retryable, agent_hint, papers:[]}；
+      error_type ∈ rate_limited|timeout|request_failed|recent_failed_query|invalid_params。
 
     ## 注意
-    - 批量检索时保持 full_abstract=False，避免 token 超限
-    - 相同 query 失败后 120 秒内不会重复请求
-    - abstract 为空是 S2 的正常现象，出现频率较高。S2 的精确 ID 查询功能不会补全原本就没有的摘要
+    - abstract 为空是 S2 常态；精确 ID 查询不补全缺失摘要，勿为取摘要反复重查同一 ID。
     """
     # ── 模式二 & 三：精确 ID 查询 ──
     if s2_paper_ids or arxiv_ids:

@@ -240,58 +240,21 @@ def arxiv_tool(
     full_abstract: bool = False,
 ) -> str:
     """
-    在 arXiv 上检索学术论文。
+    在 arXiv 上检索学术论文。只负责检索、不读全文；
+    返回论文列表（标题、摘要、作者、分类、arXiv ID、pdf_url 等）。
 
-    ## 两种查询模式
-
-    ### 模式一：关键词检索（广撒网）
-    填写 keywords，可选填 author、category、recent_days。
-    返回论文列表，含标题、截断摘要、作者、分类标签、arXiv ID 和 PDF 链接。
-
-    ### 模式二：ID 精确查询
-    填写 arxiv_ids，可配合 full_abstract=True 获取完整摘要。
+    ## 两种查询模式（按所填字段自动切换）
+    - keywords：关键词检索，可附 author/category/recent_days 过滤。
+    - arxiv_ids：ID 精确查询，配合 full_abstract=True 取完整摘要。
+    （何时用本工具、与其他工具的编排与降级链，见 system prompt 的 Tool Usage。）
 
     ## 返回格式
-
-    ### 成功时
-    {
-        "success": true,
-        "count": 实际返回论文数量,
-        "papers": [
-            {
-                "title": 论文标题,
-                "summary": 摘要（full_abstract=False 时截断至300字符）,
-                "authors": 作者列表,
-                "published": 发布时间（ISO 8601）,
-                "updated": 更新时间（ISO 8601）,
-                "arxiv_id": arXiv ID,
-                "pdf_url": PDF 直接下载链接,
-                "link": arXiv 页面链接,
-                "categories": 所属分类列表,
-                "primary_category": 主分类
-            },
-            ...
-        ],
-        "agent_hint": 情况详释,
-    }
-
-    ### 失败时
-    {
-        "success": false,
-        "error_type": "rate_limited" | "timeout" | "request_failed" | "recent_failed_query",
-        "error": 错误详情,
-        "retryable": true | false,
-        "agent_hint": 情况详释与处理建议,
-        "papers": []
-    }
-
-    ## 下游工具
-    若需深入阅读论文全文，将 pdf_url 传给 jina_tool。
-    本工具不处理全文内容。
-
-    ## 注意
-    - 批量检索时保持 full_abstract=False，避免 token 超限
-    - 相同 query 失败后 120 秒内不会重复请求
+    成功：{success, count, agent_hint, papers:[…]}。每篇 paper 字段：
+    title、summary（full_abstract=False 时截断 300 字）、authors、
+    published、updated（均 ISO 8601）、arxiv_id、pdf_url、link、
+    categories、primary_category。
+    失败：{success:false, error_type, error, retryable, agent_hint, papers:[]}；
+      error_type ∈ rate_limited|timeout|request_failed|recent_failed_query。
     """
     # 谬误拦截：防止 Agent 传入全空参数导致 API 报错 400 Bad Request
     if not keywords and not arxiv_ids and not author and not category:

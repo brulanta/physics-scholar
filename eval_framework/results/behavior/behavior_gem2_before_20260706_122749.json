@@ -1,0 +1,108 @@
+{
+  "label": "gem2_before",
+  "profile": "FLASH",
+  "profile_fields": {
+    "guard_mode": "strict",
+    "prefill_level": "full",
+    "final_prefill": "full",
+    "budget_n": 6
+  },
+  "mode": "normal",
+  "user_id": "default",
+  "timestamp": "20260706_122749",
+  "summary": {
+    "n_ok": 3,
+    "n_error": 0,
+    "guard_hits_total": 0,
+    "missing_thinking_total": 0,
+    "tool_turns_total": 13,
+    "tool_err_request_total": 0,
+    "tool_err_transient_total": 3,
+    "avg_thinking_compliance_rate": 1.0,
+    "empty_answer_rate": 0.0,
+    "budget_hit_rate": 0.0,
+    "avg_tool_rounds": 4.333,
+    "avg_marker_emit_rate": 1.0,
+    "avg_latency_s": 150.007
+  },
+  "rows": [
+    {
+      "id": "Q03",
+      "latency_s": 124.38,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "missing_thinking_calls": 0,
+      "thinking_compliance_rate": 1.0,
+      "tool_rounds": 5,
+      "tool_err_request": 0,
+      "tool_err_transient": 1,
+      "tool_err_other": 0,
+      "tool_errors": [
+        [
+          "err_transient",
+          "rate_limited"
+        ]
+      ],
+      "tool_turns": 5,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 1,
+      "empty_answer": false,
+      "answer_chars": 2175
+    },
+    {
+      "id": "Q11",
+      "latency_s": 48.21,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "missing_thinking_calls": 0,
+      "thinking_compliance_rate": 1.0,
+      "tool_rounds": 3,
+      "tool_err_request": 0,
+      "tool_err_transient": 1,
+      "tool_err_other": 0,
+      "tool_errors": [
+        [
+          "err_transient",
+          "recent_failed_query"
+        ]
+      ],
+      "tool_turns": 3,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 3,
+      "empty_answer": false,
+      "answer_chars": 2510
+    },
+    {
+      "id": "Q18",
+      "latency_s": 277.43,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "missing_thinking_calls": 0,
+      "thinking_compliance_rate": 1.0,
+      "tool_rounds": 5,
+      "tool_err_request": 0,
+      "tool_err_transient": 1,
+      "tool_err_other": 0,
+      "tool_errors": [
+        [
+          "err_transient",
+          "rate_limited"
+        ]
+      ],
+      "tool_turns": 5,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 1,
+      "empty_answer": false,
+      "answer_chars": 2503
+    }
+  ]
+}

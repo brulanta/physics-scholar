@@ -1,0 +1,41 @@
+{
+  "label": "FLASH",
+  "profile": "FLASH",
+  "profile_fields": {
+    "guard_mode": "strict",
+    "prefill_level": "full",
+    "final_prefill": "full",
+    "budget_n": 6
+  },
+  "mode": "normal",
+  "user_id": "default",
+  "timestamp": "20260704_100646",
+  "summary": {
+    "n_ok": 1,
+    "n_error": 0,
+    "guard_hits_total": 0,
+    "correction_loops_total": 0,
+    "empty_answer_rate": 0.0,
+    "budget_hit_rate": 0.0,
+    "avg_tool_rounds": 0.0,
+    "avg_marker_emit_rate": null,
+    "avg_latency_s": 25.54
+  },
+  "rows": [
+    {
+      "id": "Q01",
+      "latency_s": 25.54,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "tool_rounds": 0,
+      "tool_turns": 0,
+      "marker_emit_rate": null,
+      "budget_hit": false,
+      "remaining_calls": 6,
+      "empty_answer": false,
+      "answer_chars": 1901
+    }
+  ]
+}

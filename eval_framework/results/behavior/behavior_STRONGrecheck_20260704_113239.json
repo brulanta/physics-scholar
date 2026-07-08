@@ -1,0 +1,41 @@
+{
+  "label": "STRONGrecheck",
+  "profile": "STRONG",
+  "profile_fields": {
+    "guard_mode": "soft",
+    "prefill_level": "light",
+    "final_prefill": "light",
+    "budget_n": 6
+  },
+  "mode": "normal",
+  "user_id": "default",
+  "timestamp": "20260704_113239",
+  "summary": {
+    "n_ok": 1,
+    "n_error": 0,
+    "guard_hits_total": 0,
+    "correction_loops_total": 0,
+    "empty_answer_rate": 0.0,
+    "budget_hit_rate": 0.0,
+    "avg_tool_rounds": 1.0,
+    "avg_marker_emit_rate": 1.0,
+    "avg_latency_s": 39.73
+  },
+  "rows": [
+    {
+      "id": "Q18",
+      "latency_s": 39.73,
+      "error": null,
+      "attempts": 1,
+      "guard_hits": 0,
+      "correction_loops": 0,
+      "tool_rounds": 1,
+      "tool_turns": 1,
+      "marker_emit_rate": 1.0,
+      "budget_hit": false,
+      "remaining_calls": 5,
+      "empty_answer": false,
+      "answer_chars": 2538
+    }
+  ]
+}
