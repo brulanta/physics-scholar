@@ -246,7 +246,7 @@
 
 | 序  | 项                                            | 来源         | 依赖                         | 开工指引                                                                                                                                                                     |
 | --- | --------------------------------------------- | ------------ | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 3   | 想法 2 的 (b) bind-by-id + enrichment sidecar | 【五】想法 2 | 无（可与 #4 合并，也可先做） | 工具层补 source_id（RAG `format_context` 加 doc_id）+ enrichment sidecar 表 + 展示期 merge + prompt 改 lean ref 格式。反幻觉护城河强化，独立于想法 3（耦合点已消解挂桥接层） |
+| 3 ✅ | 想法 2 的 (b) bind-by-id + enrichment sidecar | 【五】想法 2 | 无（可与 #4 合并，也可先做） | 代码+47 单测全绿（`commit 492b417`，2026-07-13）；端到端（dev server 真实 LLM）+ frozen 端到端（`build_release.py`）待跑。详见 `plan/citation-bind-by-id-plan.md`。工具层补 source_id（RAG `format_context` 加 doc_id）+ enrichment sidecar 表 + 展示期 merge + prompt 改 lean ref 格式。反幻觉护城河强化，独立于想法 3（耦合点已消解挂桥接层） |
 
 ### T2 — 枢纽，大改动
 
