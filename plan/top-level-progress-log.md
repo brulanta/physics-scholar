@@ -5,7 +5,7 @@
 > 不是季度总结、不是 plans 压缩版——是 base 项目总体的决策落实处，随 session 持续演进。
 >
 > 「近期波及」列的字母 = 工作线编号，见末尾[子计划索引](#子计划索引)的映射。
-> 最后更新 2026-07-10。
+> 最后更新 2026-07-13。
 
 ---
 
@@ -66,23 +66,25 @@
 9. **打包走 `build_release.py`**：别直接 `pyinstaller physics_scholar.spec`（会 ship 旧前端 + 递归旧 bundle）。
 10. **原生思维链保持禁用**（控温决策），作实验外层变量记录，不进 profile 结构。
 11. **MCP plan 封存**：闭环迁移记录，不再往里堆新工作；启动/重启相关去 `startup-restart-refactor-plan.md`。
+12. **想法 3 开工时机 = 按【五】序排第三**（2026-07-13 定）：B/F 接线与 Profile 产品化推迟到想法 3 后。理由：想法 3 把主 agent 检索循环挪子 agent，循环消失 → B/F 接线对象变（先接=返工）；STRONG(light) 档变历史 → 现在固化进 UI 是给用户承诺即将名不副实的"高性能档"。合 memory `harness-vs-llm-change-stance`——校准点会过时别急着固化，重测回路（`harness_probe`）在想法 3 后存活且搬家更值钱才是资产。→ 执行序见【六】。
+13. **chain.py 保留作非流式兜底**（2026-07-13 定）：仅清 `retriever.py`/`prompt.py`（实测全仓零 import 真死代码）；`chain.py` 生产路径已不走、仅信任边界外漂移测试脚本 import，删它要动那些脚本收益低。消解了本 log §一 与 `real-streaming-sse.md:86` 的表述冲突。
 
 ---
 
 ## 四、待办
 
 ### ⛔ blocked（等依赖到位）
-- **合法弱模型地板**（核心阻塞依赖）：解锁 A1/A4 模型矩阵验收 `{弱,gemini}×{before,after}`（验是否误删防呆）+ Tier-2 任务完成测（达成+rounds-to-goal）。触发条件=找到渠道满血、能吐合法 `tool_calls`、任务上不空答的弱模型。在那之前 gemini-only 结论一律标 provisional。
-- **Harness B（correction_tone）/ F（serial_tools）接线**：黄区，改动扩散出 graph.py，各自单独小 PR。非阻塞。
+- **合法弱模型地板**（核心阻塞依赖）— 来源 [harness-ablation-plan.md](./harness-ablation-plan.md)（附录 A1/A4 + 矩阵框架）/ [tool-info-slimming-plan.md](./tool-info-slimming-plan.md)（§合法弱模型地板，定性+矩阵+Tier-2+触发条件全在此）/ [harness-behavior-runner-plan.md](./harness-behavior-runner-plan.md)（harness_probe 仪器）：解锁 A1/A4 模型矩阵验收 `{弱,gemini}×{before,after}`（验是否误删防呆）+ Tier-2 任务完成测（达成+rounds-to-goal）。触发条件=找到渠道满血、能吐合法 `tool_calls`、任务上不空答的弱模型。在那之前 gemini-only 结论一律标 provisional。
+- **Harness B（correction_tone）/ F（serial_tools）接线** — 来源 [harness-ablation-plan.md](./harness-ablation-plan.md)（§接线风险分级 line 79-80/101，B/F 列黄区）：改动扩散出 graph.py，各自单独小 PR。非阻塞。**⚠ 冲撞【五】想法 3**：想法 3 把检索循环挪子 agent 后，B/F 的接线对象（主 agent 检索循环）消失，先接=可能白做。
 
 ### ⏸ 不急 / 决策已定未编码
-- **Profile 产品化**：Settings 2 档开关 + `_prepare`/`build_agent` 读配置映射 FLASH/STRONG + 帮助文案（只承诺快/省）。3 步小改动，无 deadline。
-- **cross-model probe**：加 `--model` env override，把 gemini 专用探针升成任意模型探针。
-- **chunk-size 扫描**（256/200）：当前证据支持取消、保留重启口；真实用户反馈纯语义检索有术语不匹配短板再议。
-- **`answer_reset` 流式硬化**：DONE 后惯性早闭标签致瞬时闪烁（done 覆盖保正确性，不写错库）；投入产出比低。
+- **Profile 产品化** — 来源 [profile-selection-decision.md](./profile-selection-decision.md)（整篇即此决策）：Settings 2 档开关 + `_prepare`/`build_agent` 读配置映射 FLASH/STRONG + 帮助文案（只承诺快/省）。3 步小改动，无 deadline。**⚠ 冲撞【五】想法 3**：想法 3 让 STRONG(light) 检索循环配置变历史、子 agent 开新配置空间，产品化前需先 settle 档位。
+- **cross-model probe** — 来源 [harness-behavior-runner-plan.md](./harness-behavior-runner-plan.md) / [profile-selection-decision.md](./profile-selection-decision.md)（§量具 line 66）：加 `--model` env override，把 gemini 专用探针升成任意模型探针。**⊕ 协同【五】想法 3**：子 agent 需新 probe 轮测时顺带加 `--model`，一次到位。
+- **chunk-size 扫描**（256/200）— 来源 [rag-fix-upgrade-plan.md](./rag-fix-upgrade-plan.md)（§chunk-size 扫描降级 line 363-365）：当前证据支持取消、保留重启口；真实用户反馈纯语义检索有术语不匹配短板再议。
+- **`answer_reset` 流式硬化** — 来源 [real-streaming-sse.md](./real-streaming-sse.md)（§风险与边界 line 110-113）：DONE 后惯性早闭标签致瞬时闪烁（done 覆盖保正确性，不写错库）；投入产出比低。
 
 ### 🧹 收尾杂项
-- 死代码 `retriever.py`/`chain.py`/`prompt.py`：择机清理。
+- 死代码 `retriever.py`/`chain.py`/`prompt.py` — 来源：跨计划技术债（本 log §一 首记，无单一子计划）。**⚠ `chain.py` 表述冲突**：本 log §一称"全仓无 import 待清理"，[real-streaming-sse.md](./real-streaming-sse.md)（line 86）称"`chain.py` 的 `ask()` 保留为非流式兜底"；实测 `chain.py` 仅被 `tests/test_rag_chain.py`+`scripts/verify_rag_chain.py`（CLAUDE.md 信任边界外漂移脚本）import，生产路径（routes.py:368 仅注释）已不走它。删不删待决策（见正文）。`retriever.py`/`prompt.py` 实测全仓零 import（仅 spec 打包列表），确为真死代码。
 
 ---
 
@@ -201,7 +203,48 @@
 
 ---
 
-## 六、跨机交接提醒（gitignored `data/` 相关）
+## 六、全局执行排序（决策已定，逐个开工照此走）
+
+> 2026-07-13 决策落地。整合【四】待办 + 【五】想法成统一开工单。每项开工时从【四】/【五】提炼成独立 plan 文件再动手（见 CLAUDE.md「Plans live in the repo」）。
+> 依赖列：硬阻塞标 `blockedBy #N`；软依赖标 `先 #N 更顺`。
+
+### T0 — 纯收益低风险，想法 3 地基
+
+| 序 | 项 | 来源 | 依赖 | 开工指引 |
+|---|---|---|---|---|
+| 1 | 想法 1 的 A 半：修 4 硬边界 + 漂移 bug | 【五】想法 1 | 无 | 模块发现改目录扫描、mode 从枚举改数据、统一占位符协议、`TOOL_DECISION_PLUGIN` 下沉成可注入变量；修 `debug.yaml:25` 引用已删 `CITATION_PLUGIN_SLOT` 的漂移 bug。纯收益零行为变化，是想法 3 重写主 agent prompt 的地基 |
+| 2 | 死代码清理 `retriever.py` / `prompt.py` | 【四】收尾 | 无 | 实测全仓零 import（仅 `physics_scholar.spec` 打包列表残留，一并删）；`chain.py` 保留不动（决策 §三.13） |
+
+### T1 — 独立不挡路，中等收益
+
+| 序 | 项 | 来源 | 依赖 | 开工指引 |
+|---|---|---|---|---|
+| 3 | 想法 2 的 (b) bind-by-id + enrichment sidecar | 【五】想法 2 | 无（可与 #4 合并，也可先做） | 工具层补 source_id（RAG `format_context` 加 doc_id）+ enrichment sidecar 表 + 展示期 merge + prompt 改 lean ref 格式。反幻觉护城河强化，独立于想法 3（耦合点已消解挂桥接层） |
+
+### T2 — 枢纽，大改动
+
+| 序 | 项 | 来源 | 依赖 | 开工指引 |
+|---|---|---|---|---|
+| 4 | 想法 3：解耦 CoT，子 agent 专注检索 | 【五】想法 3 | 先 #1 更顺 | 主 graph 零改动、子 agent 包成工具；子 agent guard off + prefill minimal（非流式新配置空间）+ 独立预算；`return_findings` 工具终止；流式走 `adispatch_custom_event` 阶段边界 dispatch + 前端嵌套分组渲染；删主 agent prompt 工具编排细节，`[TOOL_LOOP]` 改名 `TOOL_PENDING`/`RETRIEVAL_PENDING`。**cross-model probe 的 `--model` 加法并入本项新 probe 轮**（正协同一次到位） |
+
+### T3 — 随想法 3 定（决策 §三.12 落地）
+
+| 序 | 项 | 来源 | 依赖 | 开工指引 |
+|---|---|---|---|---|
+| 5 | Harness B（correction_tone）/ F（serial_tools）接线 | 【四】blocked | `blockedBy #4` | 想法 3 后检索循环挪子 agent，B/F 接线对象变子 agent，先接=返工。B 须同步替换 prompt 层 `output_format.py:4-10`+`plugins.py:19`；F 须重构 `llm.py` 为工厂函数或 `build_agent` 里 `llm.bind(extra_body=...)` 覆盖 |
+| 6 | Profile 产品化 | 【四】不急 | `blockedBy #4` | 想法 3 后 STRONG(light) 检索循环配置变历史，需在新配置空间重新 settle 档位再搬前端。Settings 2 档开关（兼容/高性能）+ `_prepare`/`build_agent` 读配置映射 + 帮助文案只承诺快/省；不做模型检测/运行时自动升档 |
+
+### 不排期 / 外部触发
+
+| 项 | 来源 | 状态 | 备注 |
+|---|---|---|---|
+| chunk-size 扫描（256/200） | 【四】不急 | 保留重启口 | 等真实用户反馈纯语义检索术语不匹配短板再议；与想法 3 正交（子 agent 用同款检索工具） |
+| `answer_reset` 流式硬化 | 【四】不急 | 最低优先 | 投入产出比低；想法 3 主 agent answer 流式不动故不受影响 |
+| 合法弱模型地板 | 【四】blocked | 外部触发 | 等弱模型渠道；与想法 3 无关（子 agent probe 在 gemini-only 下一样 provisional） |
+
+---
+
+## 七、跨机交接提醒（gitignored `data/` 相关）
 
 - RAG 评测依赖 `data/chroma_db/` 的 `eval_baseline`/`eval_fixed` 1024 维 collection（换机不存在 → 首跑重入库**消耗嵌入额度**）。
 - 生产 chroma 库需 bge-m3/1024 维（曾遇 384 维历史废库报维度错）。
