@@ -7,3 +7,7 @@ CONSTRAINTS_NORMAL = """
 - 如果本地RAG检索结果与用户问题相关性低，如实告知，不强行引用
 - 双语引用（如启用翻译插件）：翻译仅针对标题和摘要关键部分，不翻译作者名和期刊名
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="CONSTRAINTS_NORMAL", content=CONSTRAINTS_NORMAL, order=65)

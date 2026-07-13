@@ -10,3 +10,7 @@ BOUNDARY_RULES = """
 
 可根据具体情境略作调整，但保持简洁，不展开。
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="BOUNDARY_RULES", content=BOUNDARY_RULES, order=70)

@@ -31,6 +31,7 @@ from src.rag.prompts import (
     CITATION_DEFAULT,
     CITATION_TRANSLATION,
 )
+from src.rag.prompts.plugins import TOOL_DECISION_PLUGIN
 from src.core.trim_thinking import process_llm_output, THINK_TAG_PATTERN
 from src.rag.harness_profile import HarnessProfile, FLASH
 from src.utils.logger import get_logger
@@ -553,6 +554,7 @@ def _prepare(
         mode="normal" if mode == "normal" else "discuss",
         history=history,
         citation_plugin=CITATION_TRANSLATION if translation else CITATION_DEFAULT,
+        tool_decision_plugin=TOOL_DECISION_PLUGIN,
         debug=False,
     )
     agent = build_agent(user_id, profile)

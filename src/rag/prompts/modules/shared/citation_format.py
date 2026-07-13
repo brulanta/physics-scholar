@@ -44,3 +44,7 @@ Ma et al. "Deep Photonic Reservoir Computer Meets UAV Control" arXiv:2604.10262 
 <zh>深度光子储存计算机与无人机控制 | 摘要片段：“将训练时间从数小时减少到毫秒，并将推理延迟降低到纳秒……提供的残差力预测精度可与或超过 TCN/MLP 基准”</zh>
 </ref>
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="CITATION_FORMAT", content=CITATION_FORMAT, order=40)

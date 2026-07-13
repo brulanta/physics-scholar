@@ -37,3 +37,7 @@ OUTPUT_FORMAT_SHARED = """
 ### 关于 [start] 标记
 当你在输出中看到 [start] 标记时，表示预填充结束，你必须从 [start] 之后立刻输出 <thinking> 块，并严格按照协议执行。不要在 [start] 前添加任何文本，也不要重复输出 [start]。
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="OUTPUT_FORMAT_SHARED", content=OUTPUT_FORMAT_SHARED, order=90)

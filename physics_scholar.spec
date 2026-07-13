@@ -160,8 +160,6 @@ a = Analysis(
         'src.rag.chain',
         'src.rag.graph',
         'src.rag.memory',
-        'src.rag.prompt',
-        'src.rag.retriever',
         'src.rag.prompts',
         'src.rag.prompts.builder',
         'src.rag.prompts.plugins',

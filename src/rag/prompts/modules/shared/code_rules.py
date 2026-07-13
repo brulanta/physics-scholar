@@ -21,3 +21,7 @@ CODE_RULES = """
 ### 错误处理
 对于容易出错的环节（如矩阵维度、采样率与频率范围的匹配），可加入简短的断言或注释提醒。
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="CODE_RULES", content=CODE_RULES, order=50)

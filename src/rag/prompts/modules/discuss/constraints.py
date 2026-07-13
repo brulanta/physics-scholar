@@ -10,3 +10,7 @@ CONSTRAINTS_DISCUSS = """
 - 文献检索服务于关键机制验证，而非完整综述；若当前核心漏洞已明确，无需继续扩展检索
 - 检索不能替代批判性推进：有足够信息时，继续检索而不推进讨论属于规划失败
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="CONSTRAINTS_DISCUSS", content=CONSTRAINTS_DISCUSS, order=65)

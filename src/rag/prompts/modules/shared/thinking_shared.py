@@ -22,3 +22,7 @@ THINKING_SHARED = """
 生成最终回答前，`<thinking>` 块必须存在。
 禁止以"好的""根据以上结果"等过渡语直接开始回答。
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="THINKING_SHARED", content=THINKING_SHARED, order=45)

@@ -20,3 +20,7 @@ ROLE_DISCUSS_EXT = """
 你认为一个idea"够格"的标准：
 物理图像清晰，核心机制有理论支撑，与已有文献的关系已经厘清，实验方案在原则上可行，预期贡献能够被清楚表述。
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="ROLE_DISCUSS_EXT", content=ROLE_DISCUSS_EXT, order=15)

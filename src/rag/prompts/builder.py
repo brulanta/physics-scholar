@@ -13,9 +13,11 @@ PromptBuilder — 模块化prompt拼装引擎
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Literal
+from string import Formatter
 import yaml
 import os
+
+from .plugins import TOOL_DECISION_PLUGIN
 
 # --------------------------------------------------------------------------- #
 # 数据结构
@@ -30,6 +32,19 @@ class PromptModule:
     order: int = 0
 
 
+def _extract_placeholders(content: str) -> set[str]:
+    """提取字符串里所有合法的 {占位符} 字段名。
+
+    用 string.Formatter.parse 扫描。对含字面 { 但非合法占位符的文本，
+    parse 会抛 ValueError —— 此时降级为空集（当作无占位符，保留原样），
+    避免未来有人在模块里写字面 { 时炸 build。
+    """
+    try:
+        return {fname for _, fname, _, _ in Formatter().parse(content) if fname}
+    except ValueError:
+        return set()
+
+
 # --------------------------------------------------------------------------- #
 # Builder
 # --------------------------------------------------------------------------- #
@@ -38,7 +53,7 @@ class PromptModule:
 class PromptBuilder:
     def __init__(self):
         self._modules: dict[str, PromptModule] = {}
-        self._injections: dict[str, dict] = {}  # 新增
+        self._vars: dict[str, str] = {}  # 统一变量池，build 时按各模块 content 的占位符自动取用
 
     # ── 注册 ──────────────────────────────────────────────────────────────── #
 
@@ -75,11 +90,10 @@ class PromptBuilder:
 
     # ── 变量注入 ──────────────────────────────────────────────────────────── #
 
-    def inject(self, name: str, **kwargs) -> "PromptBuilder":
-        """对指定模块做变量替换，例如注入 {history}"""
-        module = self._get(name)
-        # 不改原对象，存到一个临时的替换表里
-        self._injections[name] = kwargs
+    def set_vars(self, **kwargs) -> "PromptBuilder":
+        """设置全局变量池。build 时按各模块 content 里出现的 {占位符} 自动取用，
+        只替换该模块实际含有的占位符。新增动态变量只需在这里传入即可，无需按模块名逐个 inject。"""
+        self._vars.update(kwargs)
         return self
 
     # ── 从yaml配置批量应用 ────────────────────────────────────────────────── #
@@ -116,8 +130,13 @@ class PromptBuilder:
         parts = []
         for m in active:
             content = m.content
-            if m.name in self._injections:
-                content = content.format(**self._injections[m.name])
+            if self._vars:
+                # 自动探测该模块 content 里的 {占位符}，只传它实际需要的变量
+                needed = _extract_placeholders(content)
+                if needed:
+                    subset = {k: self._vars[k] for k in needed if k in self._vars}
+                    if subset:
+                        content = content.format(**subset)
             parts.append(content)
         return separator.join(parts)
 
@@ -146,19 +165,23 @@ class PromptBuilder:
 
 
 def build_prompt(
-    mode: Literal["normal", "discuss"],
+    mode: str,
     history: str = "",
     citation_plugin: str = "",
+    tool_decision_plugin: str = TOOL_DECISION_PLUGIN,
     debug: bool = False,
 ) -> str:
     """
     构建完整的system prompt。
 
     Args:
-        mode:           "normal" 或 "discuss"
-        history:        对话历史字符串，注入到 CONTEXT_BLOCK
-        citation_plugin: 引用插件文本，注入到 CITATION_PLUGIN_SLOT
+        mode:           mode 名，须在 modules 的 _MODE_MODULES 中注册（"normal"/"discuss"）
+        history:        对话历史字符串，注入到含 {history} 占位符的模块（CONTEXT_BLOCK）
+        citation_plugin: 引用插件文本，注入到含 {citation_plugin} 占位符的模块（CITATION_FORMAT）
                          传入 CITATION_DEFAULT 或 CITATION_TRANSLATION
+        tool_decision_plugin: 工具调用申请书骨架，注入到含 {tool_decision_plugin} 占位符的
+                         模块（THINKING_NORMAL/THINKING_DISCUSS）。默认值=TOOL_DECISION_PLUGIN 常量，
+                         保证不传时（如兼容层无参调用）行为与改造前 f-string 内嵌一致。
         debug:          True时打印模块状态
 
     Returns:
@@ -185,9 +208,12 @@ def build_prompt(
     if os.path.exists(profile_path):
         builder.apply_config(profile_path)
 
-    # 注入动态内容
-    builder.inject("CONTEXT_BLOCK", history=history)
-    builder.inject("CITATION_FORMAT", citation_plugin=citation_plugin)
+    # 注入动态内容：统一变量池，build 时按各模块占位符自动取用
+    builder.set_vars(
+        history=history,
+        citation_plugin=citation_plugin,
+        tool_decision_plugin=tool_decision_plugin,
+    )
 
     if debug:
         print(builder.status())

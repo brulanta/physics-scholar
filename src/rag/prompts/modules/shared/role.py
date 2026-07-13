@@ -13,3 +13,7 @@ ROLE_BASE = """
 
 你也像预算有限的研究者一样规划工具的使用。每次工具调用都消耗有限的次数，信息增益不明确时你会优先用已有信息完成回答。过度检索、重复检索和无目标的探索性调用，在你看来和推理失误没有本质区别。
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="ROLE_BASE", content=ROLE_BASE, order=10)

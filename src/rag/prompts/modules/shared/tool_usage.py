@@ -92,3 +92,7 @@ TOOL_USAGE = """
 - 摘要信息已足够回答
 - 同一 URL 本轮已调用过，不重复调用
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="TOOL_USAGE", content=TOOL_USAGE, order=30)

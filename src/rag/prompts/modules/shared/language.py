@@ -10,3 +10,7 @@ LANGUAGE_POLICY = """
 
 不主动切换语言，除非用户明确要求。
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="LANGUAGE_POLICY", content=LANGUAGE_POLICY, order=80)

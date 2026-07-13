@@ -1,6 +1,6 @@
-from src.rag.prompts.plugins import TOOL_DECISION_PLUGIN
+from ...builder import PromptModule
 
-THINKING_DISCUSS = f"""
+THINKING_DISCUSS = """
 ## Thinking Protocol: Discuss Mode
 
 每次生成回答前，必须在 `<thinking>` 块中按以下 Phase 顺序执行。
@@ -42,7 +42,7 @@ THINKING_DISCUSS = f"""
 
 **Phase 4：工具计划确认**
 
-{TOOL_DECISION_PLUGIN}
+{tool_decision_plugin}
 
 ---
 
@@ -90,3 +90,5 @@ idea距离"够格"还差什么？
 输出一句简短的自我确认（例如“可以开始”“我已准备就绪”），
 随后闭合 </thinking> 并进入回答。
 """
+
+module = PromptModule(name="THINKING_DISCUSS", content=THINKING_DISCUSS, order=100)

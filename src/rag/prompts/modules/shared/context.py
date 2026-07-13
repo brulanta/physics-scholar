@@ -3,3 +3,7 @@ CONTEXT_BLOCK = """
 
 {history}
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="CONTEXT_BLOCK", content=CONTEXT_BLOCK, order=20)

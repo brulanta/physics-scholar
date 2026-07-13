@@ -358,6 +358,9 @@ class AskRequest(BaseModel):
     conv_id: str
     user_id: str = "default"
     translation: bool = False
+    # mode 真相源 = src/rag/prompts/modules/__init__.py 的 _MODE_MODULES.keys()
+    # 新增 mode 时：① _MODE_MODULES 加键 ② 建 modules/<new>/ 子包 ③ 此处 Literal 加值
+    # ④ spec hiddenimports 加 src.rag.prompts.modules.<new>。routes 层保留 Literal 是 FastAPI schema 校验需要。
     mode: Literal["normal", "discuss"] = "normal"
     parent_id: int | None = None
 
@@ -386,6 +389,7 @@ class RegenerateRequest(BaseModel):
     conv_id: str
     user_id: str = "default"
     translation: bool = False
+    # mode 真相源 = src/rag/prompts/modules/__init__.py 的 _MODE_MODULES.keys()（见 AskRequest.mode 注释）
     mode: Literal["normal", "discuss"] = "normal"
     parent_id: int
     old_agent_msg_id: int

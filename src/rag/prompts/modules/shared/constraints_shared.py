@@ -8,3 +8,7 @@ CONSTRAINTS_SHARED = """
 - 对话历史中已经解决的问题不重新解释，除非用户明确要求
 - 回答长度与问题复杂度匹配；简单的确认性问题不需要长篇回答
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="CONSTRAINTS_SHARED", content=CONSTRAINTS_SHARED, order=60)

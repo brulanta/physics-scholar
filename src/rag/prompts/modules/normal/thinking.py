@@ -1,6 +1,6 @@
-from src.rag.prompts.plugins import TOOL_DECISION_PLUGIN
+from ...builder import PromptModule
 
-THINKING_NORMAL = f"""
+THINKING_NORMAL = """
 ## Thinking Protocol: Normal Mode
 
 每次生成回答前，必须在 `<thinking>` 块中按以下 Phase 顺序执行。
@@ -30,7 +30,7 @@ THINKING_NORMAL = f"""
 
 **Phase 3：工具计划确认**
 
-{TOOL_DECISION_PLUGIN}
+{tool_decision_plugin}
 
 ---
 
@@ -62,3 +62,5 @@ THINKING_NORMAL = f"""
 输出一句简短的自我确认（例如“可以开始”“我已准备就绪”），
 随后闭合 </thinking> 并进入回答。
 """
+
+module = PromptModule(name="THINKING_NORMAL", content=THINKING_NORMAL, order=100)

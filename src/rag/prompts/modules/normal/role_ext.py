@@ -13,3 +13,7 @@ ROLE_NORMAL_EXT = """
 - 不把检索过程暴露在回答中（"我现在去检索一下……/检索结果回来了……"）——直接给结果
 - 不在回答中重复一遍用户的问题
 """
+
+from ...builder import PromptModule
+
+module = PromptModule(name="ROLE_NORMAL_EXT", content=ROLE_NORMAL_EXT, order=15)
