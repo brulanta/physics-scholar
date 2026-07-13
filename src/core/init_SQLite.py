@@ -72,5 +72,38 @@ def init_db():
     CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id)
     """)
 
+    # ref_enrichment：引用元信息 sidecar（想法 2(b) bind-by-id）。
+    # lean ref（messages.content 存 model 原文 [source_id | 摘抄]）+ enrichment（本表，harness 填的
+    # 结构化元信息 ground truth）。展示期后端 merge 出 rich 给前端，不入库 messages。
+    # 候选集语义：工具返回的所有可引用项都落这里（is_cited=0）；model 实际引用的 Step 2 标 1。
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS ref_enrichment (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message_id INTEGER NOT NULL,
+        conversation_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        ref_type TEXT,
+        title TEXT,
+        authors TEXT,
+        venue TEXT,
+        year TEXT,
+        doi TEXT,
+        url TEXT,
+        doc_id TEXT,
+        page TEXT,
+        raw_meta TEXT,
+        is_cited INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+
+    cur.execute(
+        """CREATE INDEX IF NOT EXISTS idx_enrich_msg ON ref_enrichment(message_id)"""
+    )
+
+    cur.execute(
+        """CREATE INDEX IF NOT EXISTS idx_enrich_source ON ref_enrichment(conversation_id, source_id)"""
+    )
+
     conn.commit()
     conn.close()

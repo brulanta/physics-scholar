@@ -34,6 +34,17 @@ from src.rag.prompts import (
 from src.rag.prompts.plugins import TOOL_DECISION_PLUGIN
 from src.core.trim_thinking import process_llm_output, THINK_TAG_PATTERN
 from src.rag.harness_profile import HarnessProfile, FLASH
+from src.rag.citation import (
+    collect_from_tool_results,
+    detect_hallucination,
+    enrich_refs,
+    parse_refs,
+)
+from src.core.citation_store import (
+    load_enrichment_for_message,
+    mark_cited,
+    save_candidates,
+)
 from src.utils.logger import get_logger
 import asyncio
 import contextlib
@@ -592,6 +603,9 @@ def chat(
         # 节点已异步化（call_llm/final_answer 为 async），同步 invoke 不再可用；
         # 这是非流式兜底/测试路径，用 asyncio.run 包一层 ainvoke 保持同步签名（过渡态）。
         result = asyncio.run(agent.ainvoke(initial_state))
+        # 非流式路径从完整 state messages 抽 ToolMessage 收集成 tool_results，
+        # 供 _persist_and_enrich 候选收集（与流式 on_tool_end 累积同构）。
+        result["tool_results"] = _tool_results_from_messages(result.get("messages", []))
 
         # 3. 处理result，写入memory
         agent_msg_pure = process_llm_output(
@@ -614,6 +628,12 @@ def chat(
         user_res = memory.add(HumanMessage(content=user_message), parent_id=parent_id)
         agent_res = memory.add(
             AIMessage(content=agent_msg_pure), parent_id=user_res["message_id"]
+        )
+
+        # 候选 enrichment 落 sidecar（非流式测试兜底路径，只存不 enrich——见 plan 边界）
+        _persist_and_enrich(
+            conversation_id, agent_res["message_id"], agent_msg_pure, result,
+            enrich=False,
         )
 
         # 4. 构造返回
@@ -665,6 +685,7 @@ def regenerate(
 
         # 同 chat()：异步节点下用 asyncio.run 包 ainvoke 保持同步兜底签名（过渡态）。
         result = asyncio.run(agent.ainvoke(initial_state))
+        result["tool_results"] = _tool_results_from_messages(result.get("messages", []))
 
         # 3
         agent_msg_pure = process_llm_output(
@@ -679,6 +700,12 @@ def regenerate(
 
         agent_res = memory.add(
             AIMessage(content=agent_msg_pure), parent_id=parent_id, version=version
+        )
+
+        # 候选 enrichment 落 sidecar（非流式测试兜底路径，只存不 enrich——见 plan 边界）
+        _persist_and_enrich(
+            conversation_id, agent_res["message_id"], agent_msg_pure, result,
+            enrich=False,
         )
 
         # 4
@@ -818,6 +845,15 @@ async def _consume_events(agent, initial_state, request, result: dict):
                 is_thinking = (
                     False  # 工具打断后重置，下一轮 call_llm 会重发 thinking_start
                 )
+                # 累积真实工具结果供落库后候选收集（想法 2(b) bind-by-id）。
+                # guard 伪造的 ToolMessage 不经工具节点、不触发 on_tool_end，不会被收集。
+                tool_name = ev.get("name", "")
+                tool_output = ev["data"].get("output")
+                tool_content = getattr(tool_output, "content", "") or ""
+                if tool_name and tool_content and isinstance(result, dict):
+                    result.setdefault("tool_results", []).append(
+                        (tool_name, tool_content)
+                    )
                 yield _format_sse(
                     "tool_end",
                     name=ev.get("name", ""),
@@ -844,6 +880,115 @@ async def _consume_events(agent, initial_state, request, result: dict):
             await aiter.aclose()
 
 
+def _tool_results_from_messages(messages: Sequence[BaseMessage]) -> list[tuple[str, str]]:
+    """从非流式 ainvoke 的完整 state messages 抽 (tool_name, content) 列表，
+    供 _persist_and_enrich 候选收集（与流式 on_tool_end 累积同构）。
+
+    只取真实工具的 ToolMessage（带 name + 非空 content）。guard 伪造的 ToolMessage
+    name 为空、content 是驳回语，会被过滤（即便漏过，extract_candidates 也会因
+    tool_name 空/解析失败跳过）。
+    """
+    out = []
+    for m in messages:
+        if not isinstance(m, ToolMessage):
+            continue
+        name = (getattr(m, "name", "") or "").strip()
+        content = (m.content or "").strip() if isinstance(m.content, str) else ""
+        if name and content:
+            out.append((name, content))
+    return out
+
+
+def _detect_and_mark_hallucination(
+    conversation_id: str,
+    agent_msg_id: int,
+    lean_answer: str,
+    candidates: list,
+) -> None:
+    """Step 2 幻觉检测：model 引用了候选集没有的 source_id = binding 幻觉信号。
+    命中记 warning 日志（不阻断回答，soft-violation 口径，与 harness_probe 一致）；
+    同时把候选集里被实际引用的行标 is_cited=1（候选未引用的留 0，区分候选/被引用）。
+    全程 try 包裹——检测失败绝不影响回答落库/展示。
+    """
+    try:
+        refs = parse_refs(lean_answer)
+        if not refs:
+            return
+        cited_ids = [r.source_id for r in refs]
+        # 标记候选集里被引用的行
+        try:
+            mark_cited(agent_msg_id, conversation_id, cited_ids)
+        except Exception as e:
+            logger.warning("[%s] mark_cited 失败: %s", conversation_id, e)
+        # 幻觉检测：被引用集 - 候选集
+        hallucinated = detect_hallucination(refs, candidates)
+        if hallucinated:
+            logger.warning(
+                "[%s] 引用幻觉检测：model 引用了候选集没有的 source_id %s "
+                "（可能是编造 id 或候选收集漏抓）",
+                conversation_id, hallucinated,
+            )
+    except Exception as e:
+        logger.warning("[%s] 幻觉检测异常（不影响回答）: %s", conversation_id, e)
+
+
+def _persist_and_enrich(
+    conversation_id: str,
+    agent_msg_id: int,
+    lean_answer: str,
+    result: dict,
+    enrich: bool = True,
+) -> str:
+    """落库后处理（想法 2(b) bind-by-id）：收集候选 enrichment 存 sidecar，
+    再把 lean answer enrich 成 rich 返回给前端展示。
+
+    lean_answer 已是 process_llm_output 后的纯净 answer（messages.content 落的就是 lean）。
+    sidecar 关联 agent_msg_id（落库时才有，故候选收集推迟到此刻——语义等价于回路即时收集，
+    见 plan「候选收集层语义」）。无工具结果/无 ref 时 no-op，返回原 lean。
+
+    流式路径用 result['tool_results']（_consume_events 在 on_tool_end 累积）；
+    非流式路径由调用方先把 ToolMessage 收集成同结构列表塞进 result['tool_results']。
+    enrich=False 时只存 sidecar 不做展示 merge（非流式 chat/regenerate 是测试兜底路径，
+    返回 lean，测试不关心 rich——见 plan 边界）。
+    """
+    tool_results = result.get("tool_results") or []
+    candidates = collect_from_tool_results(tool_results)
+    if candidates:
+        try:
+            save_candidates(
+                agent_msg_id, conversation_id,
+                [c.to_row(agent_msg_id, conversation_id) for c in candidates],
+            )
+        except Exception as e:
+            # sidecar 写失败不阻断回答——展示降级为 lean（裸 source_id），回答正文不受影响
+            logger.warning("[%s] 候选 enrichment 落 sidecar 失败: %s", conversation_id, e)
+
+    if not enrich:
+        # 非流式测试兜底路径仍做幻觉检测 + is_cited 标记（不 enrich 展示，但信号要记）
+        _detect_and_mark_hallucination(
+            conversation_id, agent_msg_id, lean_answer, candidates
+        )
+        return lean_answer
+    refs = parse_refs(lean_answer)
+    if not refs:
+        return lean_answer  # 无引用，no-op
+    _detect_and_mark_hallucination(
+        conversation_id, agent_msg_id, lean_answer, candidates
+    )
+    # 优先用本消息 sidecar；本消息缺的候选再跨消息补（同会话多次检索同一篇）
+    enrich_map = load_enrichment_for_message(agent_msg_id)
+    cited_ids = {r.source_id for r in refs}
+    missing = cited_ids - enrich_map.keys()
+    if missing:
+        try:
+            from src.core.citation_store import load_enrichment_map
+            extra = load_enrichment_map(conversation_id, missing)
+            enrich_map.update(extra)
+        except Exception as e:
+            logger.warning("[%s] 跨消息 enrichment 补全失败: %s", conversation_id, e)
+    return enrich_refs(lean_answer, enrich_map)
+
+
 async def chat_stream(
     user_message: str,
     conv_id: str,
@@ -856,7 +1001,7 @@ async def chat_stream(
     """流式问答生成器：边推理边推 SSE，跑完后落库并发 done。"""
     conversation_id = f"{user_id}_{conv_id}"
     memory = ConversationMemory(conversation_id)
-    result: dict = {}
+    result: dict = {"tool_results": []}  # _consume_events 在 on_tool_end 累积
     try:
         agent, initial_state = _prepare(
             memory, user_message, conv_id, user_id, translation, mode, parent_id
@@ -896,7 +1041,9 @@ async def chat_stream(
             user_msg_id=user_res["message_id"],
             agent_msg_id=agent_res["message_id"],
             warning=warning,
-            answer=agent_msg_pure,  # 权威文本，前端覆盖累计的流式文本
+            answer=_persist_and_enrich(
+                conversation_id, agent_res["message_id"], agent_msg_pure, result
+            ),  # 权威文本：落 lean 入库 + enrich 出 rich 给前端覆盖
         )
     except asyncio.CancelledError:
         # 客户端断连引发的取消：直接抛出，不落库
@@ -922,7 +1069,7 @@ async def regenerate_stream(
     断连不留悬挂。done.user_msg_id 固定为 parent_id。"""
     conversation_id = f"{user_id}_{conv_id}"
     memory = ConversationMemory(conversation_id)
-    result: dict = {}
+    result: dict = {"tool_results": []}  # _consume_events 在 on_tool_end 累积
     try:
         agent, initial_state = _prepare(
             memory, user_message, conv_id, user_id, translation, mode, parent_id
@@ -959,7 +1106,9 @@ async def regenerate_stream(
             user_msg_id=parent_id,
             agent_msg_id=agent_res["message_id"],
             warning=warning,
-            answer=agent_msg_pure,
+            answer=_persist_and_enrich(
+                conversation_id, agent_res["message_id"], agent_msg_pure, result
+            ),  # 权威文本：落 lean 入库 + enrich 出 rich 给前端覆盖
         )
     except asyncio.CancelledError:
         raise

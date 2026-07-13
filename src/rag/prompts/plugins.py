@@ -1,18 +1,21 @@
 CITATION_DEFAULT = """
 引用信息使用英文原文呈现，不附加翻译。
+来源元信息（作者/标题/venue/年份/链接）由系统按 source_id 自动填充，你只写 [source_id] | 支撑片段。
 """
+
 CITATION_TRANSLATION = """
 启用中文翻译模式。对于每条引用，格式如下：
 
 <ref id="N">
-来源信息 | 支撑片段
+[source_id] | 支撑片段
 <zh>标题译文。支撑片段译文（如有）。</zh>
 </ref>
 
 翻译规则：
-- <zh>标签必须存在，紧跟在来源信息行之后
+- <zh>标签必须存在，紧跟在支撑片段行之后
 - 翻译论文标题和支撑片段
-- 不翻译作者姓名、期刊名、会议名、论文 ID（arXiv ID、DOI 等）
+- 不翻译作者姓名、期刊名、会议名、论文 ID（source_id、arXiv ID、DOI 等）
+- 来源元信息（作者/标题/venue/年份/链接）由系统按 source_id 自动填充，你只写 [source_id] | 支撑片段 + <zh>译文，不要自己写元信息
 """
 
 TOOL_DECISION_PLUGIN = """

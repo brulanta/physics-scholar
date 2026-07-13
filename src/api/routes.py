@@ -12,6 +12,8 @@ from src.rag.graph import chat_stream, regenerate_stream
 import requests
 from typing import Literal
 from src.rag.memory import ConversationMemory, MessageRepo, ConversationRepo
+from src.rag.citation import enrich_refs, parse_refs
+from src.core.citation_store import load_enrichment_for_message
 from src.utils.logger import get_logger
 import httpx
 import sys, os, subprocess, asyncio
@@ -163,7 +165,23 @@ def new_conversation():
 def get_conversation(conversation_id: str):
     memory = ConversationMemory(conversation_id)
     try:
-        return {"messages": memory.get_tree()}
+        messages = memory.get_tree()
+        # 展示期 merge（想法 2(b) bind-by-id）：对 assistant 消息，按 message_id 查
+        # sidecar enrichment，把 lean ref（[source_id] | 摘抄）merge 成 rich（完整引用
+        # + 可点 url）。user 消息不动；历史消息无 sidecar 时 parse_refs 返回空、no-op。
+        for msg in messages:
+            if msg.get("role") != "assistant":
+                continue
+            content = msg.get("content") or ""
+            if not parse_refs(content):
+                continue  # 无 lean ref，跳过（省一次 sidecar 查询）
+            try:
+                enrich_map = load_enrichment_for_message(msg["id"])
+                if enrich_map:
+                    msg["content"] = enrich_refs(content, enrich_map)
+            except Exception as e:
+                logger.warning("[tree] msg %s enrich 失败，返回 lean: %s", msg.get("id"), e)
+        return {"messages": messages}
     except Exception as e:
         return {"success": False, "detail": str(e)}
     finally:

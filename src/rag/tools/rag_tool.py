@@ -128,12 +128,20 @@ class RagToolRequest(BaseModel):
 
 
 def format_context(docs) -> str:
+    """格式化检索文段串。串头带 `rag:<doc_id>` source_id——model 引用时只抄这个 id
+    （bind-by-id），harness 据 id 查工具结果填完整元信息（enrichment）。
+    doc_id 在 doc.metadata 里本就有，写进串是 enabling edit（见 citation plan）。
+    """
     chunks = []
     for doc in docs:
+        doc_id = doc.metadata.get("doc_id", "")
         title = doc.metadata.get("title", "未知")
         page = doc.metadata.get("page_number", "")
+        # 串头 source_id 段：rag:<doc_id>；其后 title + page 供人/模型阅读，不参与绑定
+        sid = f"rag:{doc_id}" if doc_id else ""
+        sid_str = f"[{sid} | " if sid else "["
         page_str = f", Page {page}" if page else ""
-        chunks.append(f"[{title}{page_str}]\n{doc.page_content}")
+        chunks.append(f"{sid_str}{title}{page_str}]\n{doc.page_content}")
     return "\n\n---\n\n".join(chunks)
 
 
