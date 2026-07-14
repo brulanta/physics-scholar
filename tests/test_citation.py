@@ -293,8 +293,45 @@ def test_enrich_refs_s2_full():
     assert "Zhang, Ma" in rich
     assert "Nature" in rich
     assert "10.1/xx" in rich
+    # doi 必须规范化成合法 URL（https://doi.org/ 前缀），否则前端 markdown 渲成纯文本点不动
+    assert "https://doi.org/10.1/xx" in rich
+    assert "](" in rich and "https://doi.org/10.1/xx)" in rich  # markdown 链接语法 [..](..)
     # 摘抄保留
     assert '摘要片段' in rich
+
+
+def test_enrich_refs_doi_canonicalized_to_url():
+    """doi 优先做链接，但必须规范化成 https://doi.org/<doi> 才是合法 URL。
+
+    frozen 实跑暴露的 bug：旧实现 `link = doi or url` 直接拿裸 doi
+    `10.1364/ol.500356` 当链接，前端 markdown 渲成纯文本点不动。
+    """
+    lean = '<ref id="1">\n[s2:abc] | x\n</ref>'
+    enrich_map = {
+        "s2:abc": {
+            "ref_type": "s2", "title": "T", "authors": ["A"],
+            "venue": "V", "year": "2024", "doi": "10.1364/ol.500356", "url": "",
+        }
+    }
+    rich = enrich_refs(lean, enrich_map)
+    assert "https://doi.org/10.1364/ol.500356" in rich
+    # 不该出现裸 doi 当链接（[..](10.1364/ol.50036) 这种点不动的）
+    assert "](10.1364" not in rich
+
+
+def test_enrich_refs_url_only_no_doi_prefix():
+    """doi 缺失时用 url，url 本身已合法不再加 doi.org 前缀。"""
+    lean = '<ref id="1">\n[s2:abc] | x\n</ref>'
+    enrich_map = {
+        "s2:abc": {
+            "ref_type": "s2", "title": "T", "authors": ["A"],
+            "venue": "", "year": "", "doi": "",
+            "url": "https://www.semanticscholar.org/paper/abc",
+        }
+    }
+    rich = enrich_refs(lean, enrich_map)
+    assert "https://www.semanticscholar.org/paper/abc" in rich
+    assert "doi.org" not in rich  # url 不被误加 doi 前缀
 
 
 def test_enrich_refs_rag_type_aware():

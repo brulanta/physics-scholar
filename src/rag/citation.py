@@ -335,8 +335,13 @@ def _enrich_one(ref: ParsedRef, enrich: dict | None) -> str:
             return f"[{sid}]"
         return ", ".join(rag_parts)
 
-    # 论文类（s2/arxiv/openalex）：可点链接优先 doi，其次 url
-    link = doi or url
+    # 论文类（s2/arxiv/openalex）：可点链接。doi 需加 https://doi.org/ 前缀才是合法 URL，
+    # 否则前端 markdown 把裸 "10.1364/ol.500356" 渲成纯文本点不动（sidecar 存的是裸 doi）。
+    link = ""
+    if doi:
+        link = f"https://doi.org/{doi}"
+    elif url:
+        link = url
     if body and link:
         return f"{body}. [{link}]({link})"
     if body:
