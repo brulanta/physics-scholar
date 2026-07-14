@@ -1,16 +1,31 @@
 # 引用 bind-by-id + enrichment sidecar（想法 2(b) / T1 #3）
 
 > 顶层设计出处：`plan/top-level-progress-log.md` 【五】想法 2 的 (b)（line 155-167）+ 【六】T1 #3（line 247-249）。
-> 状态：**代码 + 单测完成（2026-07-13）**，端到端 + frozen 验证待跑。
+> 状态：**端到端 + frozen 验证完成（2026-07-14）**，发现并修复 2 个展示层链接 bug。
 
 ## 实现进度
 
-- ✅ Step 1 + Step 2 全部代码落地，34 个单测 + 7 个 prompt 语义回归全绿。
+- ✅ Step 1 + Step 2 全部代码落地，36 个单测 + 7 个 prompt 语义回归全绿。
 - ✅ `test_prompt_byte_equivalence.py` 字节等价用例退役（T1 改 prompt 内容，字节不变成反指标），
   换成 lean ref 语义回归（`test_prompt_has_lean_ref_format` / `test_prompt_translation_keeps_zh`）；
   T0 框架回归 3 测试保留。配套删 2 个过时 fixture（`dump_prompt_baseline.py` 留作调试工具）。
-- ⏳ 端到端验证（dev server 真实 LLM 跑 RAG+s2 问答，查 sidecar + 看 rich 引用）待跑。
-- ⏳ frozen 端到端（`build_release.py` 后确认 spec hiddenimport 生效）待跑。
+- ✅ frozen 端到端验证完成（2026-07-14，`build_release.py` 无报错，exe 启动正常）：
+  sidecar `ref_enrichment` 表落库正确（20 候选行，source_id 带前缀、doi/url/元信息齐全），
+  `is_cited` 标记正确（仅被引用的标 1），幻觉检测触发，spec hiddenimport 生效无 ModuleNotFoundError。
+- ✅ dev 端到端验证完成（2026-07-14）：rich reference 显示完整（作者/标题/venue/year/摘抄），
+  切换 session 回来仍 rich（tree 接口 merge 链路通），后台能看到 agent 输出原文是 id+摘要（lean）。
+- ✅ 修复验证中发现的 2 个展示层链接 bug：
+  1. **doi 未规范化成 URL**（`commit db25767`）：`_enrich_one` 旧实现 `link = doi or url`
+     直接拿裸 doi `10.1364/ol.500356` 当 markdown 链接，前端点不动。改为 doi 加 `https://doi.org/`
+     前缀。加 2 条回归测试。
+  2. **reference 区 url 不可点击**（`commit 1751e3e`）：前端 `buildRefBlockHtml` 把 rich source
+     （含 markdown 链接语法）当纯文本塞 `<span>`，绕过 `md.render`。改为 source 段过
+     `md.renderInline`，excerpt/zh 加 `escapeHtml`。
+- ⚠️ **更正设计前提**：原计划「前端 markdown.js 零改」假设 source 是 lean `[s2:xxx]` 还是
+  rich 完整引用都照 render——**对 rich 段不成立**：rich source 含 markdown 链接语法时必须过渲染，
+  否则显示成字面 `[url](url)` 点不动。前端改了 1 处（`buildRefBlockHtml` source 段 renderInline）。
+- ✅ 右键气泡对 reference 区 doi.org 不识别——by-design（`extractLinks` 只认 PDF 链接做下载/入库
+  动作，doi.org 是出版商落地页非 PDF 直链）。气泡区域覆盖 ref 区（挂在 `.bubble` 上），非区域问题。
 - 已知不归本计划修：`test_s2_tool` 的 `test_author_only`/`test_keywords_and_author`（既有漂移，代码 2026-05-26 去了 author: 前缀、测试断言旧格式）；`test_rag_chain.py`（import 已删的 `get_or_create_session`，既有漂移）。
 
 ## Context（为什么做这个）
