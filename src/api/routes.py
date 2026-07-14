@@ -49,7 +49,8 @@ class ToolsConfig(BaseModel):
     jina_api_key: str = ""
     s2_api_key: str = ""
     openalex_email: str = ""
-    openalex_key: str = ""
+    openalex_api_key: str = ""  # 须与 config.py(yaml tools.openalex_api_key) + 前端对齐；
+    # 旧名 openalex_key 会让 Pydantic 静默丢弃前端发的 openalex_api_key → 存不进 yaml → 重启栏空
 
 
 class EmbeddingConfig(BaseModel):
