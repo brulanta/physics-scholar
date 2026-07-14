@@ -1,7 +1,7 @@
 # 引用 bind-by-id + enrichment sidecar（想法 2(b) / T1 #3）
 
 > 顶层设计出处：`plan/top-level-progress-log.md` 【五】想法 2 的 (b)（line 155-167）+ 【六】T1 #3（line 247-249）。
-> 状态：**端到端 + frozen 验证完成（2026-07-14）**，发现并修复 2 个展示层链接 bug。
+> 状态：**端到端 + frozen 验证完成（2026-07-14）**，发现并修复 2 个展示层链接 bug；随后做 1 次 url 语义专责化（候选层 url 只存真 PDF 直链 + 展示层双链接 `[DOI]·[PDF]`，dev+frozen 实测可 commit）。
 
 ## 实现进度
 
@@ -26,6 +26,10 @@
   否则显示成字面 `[url](url)` 点不动。前端改了 1 处（`buildRefBlockHtml` source 段 renderInline）。
 - ✅ 右键气泡对 reference 区 doi.org 不识别——by-design（`extractLinks` 只认 PDF 链接做下载/入库
   动作，doi.org 是出版商落地页非 PDF 直链）。气泡区域覆盖 ref 区（挂在 `.bubble` 上），非区域问题。
+- ✅ **url 语义专责化 + 展示层双链接**（2026-07-14，dev + frozen exe 实测通过）：
+  1. **候选层 url 只存真 PDF 直链**（`citation.py` `_candidates_from_s2/arxiv/openalex`）：去掉 `s2_url`/arxiv `link`/`openalex_url` 落地页回退，`url` 只留 `open_access_pdf`（s2/openalex）/`pdf_url`（arxiv）。落地页的凭证职责交给 doi（→ doi.org），不再混进 url。
+  2. **展示层双链接**（`_enrich_one`）：OA 论文（doi + open_access_pdf 都有）→ `[DOI](https://doi.org/...) · [PDF](pdf直链)`；非 OA（有 doi 无 PDF）→ 只显 `[DOI]`；arxiv（无 doi 有 pdf_url）→ 只显 `[PDF]`。语义诚实——右键气泡只对有真 PDF 的出现，而非用 doi.org 落地页冒充 PDF affordance（旧 `link=doi or url` 的虚假 affordance）。
+  3. **双链接分隔符用 ` · `（中点）而非 ` | `**：前端 `buildRefBlockHtml`（markdown.js）用 ` | ` 切 source/excerpt 段，若用 ` | ` 会让 PDF 链接被切进 excerpt 段。用 ` · ` 规避。配套加 3 条回归测试（`test_enrich_refs_dual_links` / `test_enrich_refs_doi_only_no_pdf` / `test_enrich_refs_pdf_only_arxiv`），并改 3 条旧测试断言适配 url 专责化（`test_extract_s2_basic`/`test_extract_openalex`/`test_enrich_refs_url_only_no_doi_prefix`）。39 单测全绿。
 - 已知不归本计划修：`test_s2_tool` 的 `test_author_only`/`test_keywords_and_author`（既有漂移，代码 2026-05-26 去了 author: 前缀、测试断言旧格式）；`test_rag_chain.py`（import 已删的 `get_or_create_session`，既有漂移）。
 
 ## Context（为什么做这个）

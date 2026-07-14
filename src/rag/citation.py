@@ -90,7 +90,10 @@ def _candidates_from_s2(payload: dict) -> list[Candidate]:
             venue=p.get("venue", ""),
             year=str(p.get("year") or ""),
             doi=p.get("doi") or "",
-            url=p.get("s2_url") or p.get("open_access_pdf") or "",
+            # url 专责 PDF 下载直链（右键气泡联动入库只认 .pdf 形态）；
+            # 落地页 s2_url 的凭证职责交给 doi（→ doi.org），不在此回退。
+            # 落地页完整信息在 raw_meta 兜底。
+            url=p.get("open_access_pdf") or "",
             raw_meta=p,
         ))
     return out
@@ -111,7 +114,8 @@ def _candidates_from_arxiv(payload: dict) -> list[Candidate]:
             venue="",  # arxiv 无 venue
             year=(p.get("published", "")[:4] if p.get("published") else ""),
             doi="",
-            url=p.get("pdf_url") or p.get("link") or "",
+            # url 专责 PDF 直链（arxiv entry 几乎必有 pdf_url）；abs 页 link 不在此回退。
+            url=p.get("pdf_url") or "",
             raw_meta=p,
         ))
     return out
@@ -132,7 +136,8 @@ def _candidates_from_openalex(payload: dict) -> list[Candidate]:
             venue=p.get("venue", ""),
             year=str(p.get("year") or ""),
             doi=p.get("doi") or "",
-            url=p.get("openalex_url") or p.get("open_access_pdf") or "",
+            # url 专责 PDF 直链；落地页 openalex_url 的凭证职责交给 doi，不在此回退。
+            url=p.get("open_access_pdf") or "",
             raw_meta=p,
         ))
     return out
@@ -335,19 +340,26 @@ def _enrich_one(ref: ParsedRef, enrich: dict | None) -> str:
             return f"[{sid}]"
         return ", ".join(rag_parts)
 
-    # 论文类（s2/arxiv/openalex）：可点链接。doi 需加 https://doi.org/ 前缀才是合法 URL，
-    # 否则前端 markdown 把裸 "10.1364/ol.500356" 渲成纯文本点不动（sidecar 存的是裸 doi）。
-    link = ""
-    if doi:
-        link = f"https://doi.org/{doi}"
-    elif url:
-        link = url
-    if body and link:
-        return f"{body}. [{link}]({link})"
+    # 论文类（s2/arxiv/openalex）：双链接——DOI（凭证，去出版商落地页）+
+    # PDF（下载直链，open_access_pdf/arxiv pdf_url，右键气泡联动入库）。
+    # url 字段已专责化只存真 PDF 直链（候选层不再回退落地页）。
+    # 双链接分隔符用 ` · `（中点）而非 ` | `：前端 buildRefBlockHtml 用 ` | `
+    # 切 source/excerpt 段（markdown.js），若用 ` | ` 会把 PDF 链接切进 excerpt。
+    doi_link = f"https://doi.org/{doi}" if doi else ""
+    pdf_link = url if url else ""
+
+    links_md: list[str] = []
+    if doi_link:
+        links_md.append(f"[DOI]({doi_link})")
+    if pdf_link:
+        links_md.append(f"[PDF]({pdf_link})")
+
+    if body and links_md:
+        return f"{body}. 链接: {' · '.join(links_md)}"
     if body:
         return f"{body}."
-    if link:
-        return f"[{link}]({link})"
+    if links_md:
+        return " · ".join(links_md)
     return f"[{sid}]"
 
 

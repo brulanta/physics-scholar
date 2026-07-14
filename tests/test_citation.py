@@ -69,7 +69,8 @@ def test_extract_s2_basic():
     assert c.venue == "Nature"
     assert c.year == "2024"
     assert c.doi == "10.1/xx"
-    assert c.url == "https://www.semanticscholar.org/paper/abc123"
+    # url 专责 PDF 直链（open_access_pdf），不再回退落地页 s2_url（凭证交给 doi）
+    assert c.url == "https://x.com/a.pdf"
 
 
 def test_extract_s2_skips_missing_id():
@@ -139,7 +140,8 @@ def test_extract_openalex():
     c = cands[0]
     assert c.source_id == "openalex:W123"
     assert c.ref_type == "openalex"
-    assert c.url == "https://openalex.org/W123"
+    # url 专责 PDF 直链（open_access_pdf），不再回退落地页 openalex_url
+    assert c.url == "https://y.com/b.pdf"
 
 
 def test_extract_rag_new_format():
@@ -292,16 +294,16 @@ def test_enrich_refs_s2_full():
     assert "Photonic ADC" in rich
     assert "Zhang, Ma" in rich
     assert "Nature" in rich
-    assert "10.1/xx" in rich
-    # doi 必须规范化成合法 URL（https://doi.org/ 前缀），否则前端 markdown 渲成纯文本点不动
-    assert "https://doi.org/10.1/xx" in rich
-    assert "](" in rich and "https://doi.org/10.1/xx)" in rich  # markdown 链接语法 [..](..)
+    # 只有 doi 无 url（非 OA）→ 只显 [DOI](doi.org/...)，无 [PDF]
+    assert "[DOI](https://doi.org/10.1/xx)" in rich
+    assert "[PDF]" not in rich
+    assert "链接:" in rich
     # 摘抄保留
     assert '摘要片段' in rich
 
 
 def test_enrich_refs_doi_canonicalized_to_url():
-    """doi 优先做链接，但必须规范化成 https://doi.org/<doi> 才是合法 URL。
+    """doi 链接必须规范化成 https://doi.org/<doi> 才是合法 URL（双链接的 DOI 档）。
 
     frozen 实跑暴露的 bug：旧实现 `link = doi or url` 直接拿裸 doi
     `10.1364/ol.500356` 当链接，前端 markdown 渲成纯文本点不动。
@@ -314,24 +316,25 @@ def test_enrich_refs_doi_canonicalized_to_url():
         }
     }
     rich = enrich_refs(lean, enrich_map)
-    assert "https://doi.org/10.1364/ol.500356" in rich
-    # 不该出现裸 doi 当链接（[..](10.1364/ol.50036) 这种点不动的）
+    assert "[DOI](https://doi.org/10.1364/ol.500356)" in rich
+    # 不该出现裸 doi 当链接（](10.1364/ol.500356) 这种点不动的）
     assert "](10.1364" not in rich
 
 
 def test_enrich_refs_url_only_no_doi_prefix():
-    """doi 缺失时用 url，url 本身已合法不再加 doi.org 前缀。"""
+    """doi 缺失、url 是 PDF 直链（如 arxiv）→ 只显 [PDF](url)，无 [DOI]、无 doi.org。"""
     lean = '<ref id="1">\n[s2:abc] | x\n</ref>'
     enrich_map = {
         "s2:abc": {
             "ref_type": "s2", "title": "T", "authors": ["A"],
             "venue": "", "year": "", "doi": "",
-            "url": "https://www.semanticscholar.org/paper/abc",
+            "url": "https://arxiv.org/pdf/2305.12345",
         }
     }
     rich = enrich_refs(lean, enrich_map)
-    assert "https://www.semanticscholar.org/paper/abc" in rich
-    assert "doi.org" not in rich  # url 不被误加 doi 前缀
+    assert "[PDF](https://arxiv.org/pdf/2305.12345)" in rich
+    assert "[DOI]" not in rich
+    assert "doi.org" not in rich  # 无 doi 不该出现 doi.org
 
 
 def test_enrich_refs_rag_type_aware():
@@ -398,6 +401,64 @@ def test_enrich_refs_authors_et_al():
     }
     rich = enrich_refs(lean, enrich_map)
     assert "A et al." in rich
+
+
+def test_enrich_refs_dual_links():
+    """OA 论文（doi + open_access_pdf 都有）→ 双链接 [DOI] · [PDF]。
+
+    分隔符必须是 ` · `（中点），不能是 ` | `：前端 buildRefBlockHtml 用 ` | `
+    切 source/excerpt（markdown.js:120），用 ` | ` 会让 PDF 链接切进 excerpt 段。
+    """
+    lean = '<ref id="1">\n[s2:abc] | x\n</ref>'
+    enrich_map = {
+        "s2:abc": {
+            "ref_type": "s2", "title": "T", "authors": ["A"],
+            "venue": "V", "year": "2024",
+            "doi": "10.1/xx",
+            "url": "https://x.com/a.pdf",
+        }
+    }
+    rich = enrich_refs(lean, enrich_map)
+    assert "[DOI](https://doi.org/10.1/xx)" in rich
+    assert "[PDF](https://x.com/a.pdf)" in rich
+    # 双链接共存
+    assert "[DOI]" in rich and "[PDF]" in rich
+    # 双链接间分隔符是 ` · `（中点）：两个链接段紧邻，[DOI](...) · [PDF](...)
+    assert "[DOI](https://doi.org/10.1/xx) · [PDF](https://x.com/a.pdf)" in rich
+
+
+def test_enrich_refs_doi_only_no_pdf():
+    """非 OA 论文（有 doi 无 open_access_pdf）→ 只显 [DOI]，不显 [PDF]。
+
+    右键气泡不出现（无 .pdf 形态 URL）= 诚实表达"没现成可入库 PDF"，
+    而非用 doi.org 落地页冒充（旧逻辑的虚假 affordance）。
+    """
+    lean = '<ref id="1">\n[s2:abc] | x\n</ref>'
+    enrich_map = {
+        "s2:abc": {
+            "ref_type": "s2", "title": "T", "authors": ["A"],
+            "venue": "V", "year": "2024", "doi": "10.2/yy", "url": "",
+        }
+    }
+    rich = enrich_refs(lean, enrich_map)
+    assert "[DOI](https://doi.org/10.2/yy)" in rich
+    assert "[PDF]" not in rich
+
+
+def test_enrich_refs_pdf_only_arxiv():
+    """arxiv 论文（无 doi 有 pdf_url）→ 只显 [PDF]，不显 [DOI]、无 doi.org。"""
+    lean = '<ref id="1">\n[arxiv:2305.1] | x\n</ref>'
+    enrich_map = {
+        "arxiv:2305.1": {
+            "ref_type": "arxiv", "title": "T", "authors": ["A"],
+            "venue": "", "year": "2023", "doi": "",
+            "url": "https://arxiv.org/pdf/2305.1",
+        }
+    }
+    rich = enrich_refs(lean, enrich_map)
+    assert "[PDF](https://arxiv.org/pdf/2305.1)" in rich
+    assert "[DOI]" not in rich
+    assert "doi.org" not in rich
 
 
 # ══════════════════════════════════════════════════════════════════
