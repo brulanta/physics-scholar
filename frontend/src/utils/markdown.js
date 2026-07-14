@@ -136,11 +136,15 @@ function buildRefBlockHtml(refArea) {
 
   const itemsHtml = items
     .map(({ id, source, excerpt, zh }) => {
+      // source 段经 markdown 行内渲染——后端 enrich_refs 会把 doi 规范化成
+      // [https://doi.org/<doi>](https://doi.org/<doi>) 链接，必须过 md.renderInline
+      // 才会变可点 <a>；直接当纯文本塞 span 会显示成字面 [url](url) 点不动。
+      // renderInline 顺带把 title/authors 里的 < & 转义掉，比裸 ${source} 安全。
+      const sourceHtml = md.renderInline(source)
       const excerptHtml = excerpt
-        ? `<span class="ref-excerpt">${excerpt}</span>`
+        ? `<span class="ref-excerpt">${md.utils.escapeHtml(excerpt)}</span>`
         : "";
-
-      const zhHtml = zh ? `<span class="ref-zh">${zh}</span>` : "";
+      const zhHtml = zh ? `<span class="ref-zh">${md.utils.escapeHtml(zh)}</span>` : "";
 
       return `
 
@@ -150,7 +154,7 @@ function buildRefBlockHtml(refArea) {
 
         <span class="ref-body">
 
-          <span class="ref-source">${source}</span>
+          <span class="ref-source">${sourceHtml}</span>
 
           ${excerptHtml}
 
