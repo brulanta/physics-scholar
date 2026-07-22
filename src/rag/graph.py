@@ -239,7 +239,7 @@ def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
     }
 
 
-def after_guard(state: AgentState) -> str:
+def after_guard(state: AgentState, terminator: str | None = None) -> str:
     last_msg = state["messages"][-1]
     remaining = state.get("remaining_calls", 6)
     retry_count = state.get("thinking_retry_count", 0)
@@ -255,6 +255,13 @@ def after_guard(state: AgentState) -> str:
 
     # 正常工具调用路由
     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
+        # 子 agent 终止信号：主动调用 terminator 工具（return_findings）→ 路由 finalize，
+        # 不走 tool_node 回 call_llm（terminator 是终止意图，先于预算检查）。
+        # terminator=None（主 agent）时此分支永不命中，行为字节级不变。
+        if terminator and any(
+            tc.get("name") == terminator for tc in last_msg.tool_calls
+        ):
+            return "finalize"
         if remaining < 0:
             logger.warning("工具额度耗尽，强制进入 final_answer")
             return "final_answer"
@@ -404,36 +411,24 @@ def build_final_prefill(profile: HarnessProfile = FLASH) -> str:
     return f"{runtime_status}\n\n{lead}"
 
 
-def build_agent(user_id: str, profile: HarnessProfile = FLASH):
-    paper_id_search_tool = make_paper_id_search_tool(user_id)
-    rag_tool = make_rag_tool(user_id)
+def _build_graph(
+    llm,
+    tools,
+    profile: HarnessProfile,
+    *,
+    terminator: str | None = None,
+    finalize_fn=None,
+):
+    """共享图组装层（薄、无业务逻辑）：主 agent 与子 agent 共用同一套图骨架。
 
-    if USE_MCP:
-        # MCP 路径：从 MCP server 取的工具（阶段 0 = web：s2/arxiv/openalex）替代
-        # 对应内嵌工具；尚未迁移的工具（rag/lookup/jina）仍用内嵌实例。
-        # mcp_client.get_tools() 已在 lifespan startup 一次性加载并缓存。
-        mcp_tools = mcp_client.get_tools()
-        mcp_names = {t.name for t in mcp_tools}
-        inline_tools = [
-            rag_tool,
-            paper_id_search_tool,
-            arxiv_tool,
-            s2_search_tool,
-            openalex_tool,
-            jina_tool,
-        ]
-        # 内嵌列表里凡是已被 MCP 接管的同名工具，剔除，避免重复绑定
-        inline_tools = [t for t in inline_tools if t.name not in mcp_names]
-        tools = inline_tools + mcp_tools
-    else:
-        tools = [
-            rag_tool,
-            paper_id_search_tool,
-            arxiv_tool,
-            s2_search_tool,
-            openalex_tool,
-            jina_tool,
-        ]
+    只做 bind_tools / ToolNode / 节点+边的组装；业务逻辑（build_prefill /
+    build_final_prefill / thinking_guard / after_guard / final_answer）全在模块级
+    函数里，本函数仅调用。terminator + finalize_fn 是子 agent 专属终止机制
+    （return_findings → finalize 节点）；主 agent 不传 = 完全不感知，行为与重构前字节级一致。
+
+    解绑成本：未来主/子任一边想独立演进，fork 本函数这 ~30 行组装即可，模块级业务
+    函数全部仍可复用（沉没成本≈0）。详见 plan/subagent-retrieval-decouple-plan.md。
+    """
     llm_with_tools = llm.bind_tools(tools)
     tool_node = ToolNode(tools)
 
@@ -510,40 +505,86 @@ def build_agent(user_id: str, profile: HarnessProfile = FLASH):
         }
 
     # thinking_guard / final_answer 是模块级函数（便于单测），此处闭包注入 profile。
-    # after_guard 路由不依赖 profile（soft/off 不 set is_thinking_correction，路由不变）。
+    # after_guard 路由：soft/off 不 set is_thinking_correction，路由不变；
+    # terminator（子 agent 专属）经 _after_guard 闭包注入。
     def _guard(state):
         return thinking_guard(state, profile)
 
     async def _final(state):
         return await final_answer(state, profile)
 
+    def _after_guard(state):
+        return after_guard(state, terminator)
+
     graph = StateGraph(AgentState)
     graph.add_node("call_llm", call_llm)
     graph.add_node("thinking_guard", _guard)
     graph.add_node("tool_node", tool_node)
     graph.add_node("final_answer", _final)
+    if finalize_fn is not None:
+        graph.add_node("finalize", finalize_fn)
 
     graph.set_entry_point("call_llm")
 
     # call_llm 之后统一进 guard
     graph.add_edge("call_llm", "thinking_guard")
 
-    # guard 之后条件路由
-    graph.add_conditional_edges(
-        "thinking_guard",
-        after_guard,
-        {
-            "call_llm": "call_llm",
-            "tool_node": "tool_node",
-            "final_answer": "final_answer",
-            END: END,
-        },
-    )
+    # guard 之后条件路由（主 agent 无 finalize 映射；子 agent 有）
+    path_map = {
+        "call_llm": "call_llm",
+        "tool_node": "tool_node",
+        "final_answer": "final_answer",
+        END: END,
+    }
+    if finalize_fn is not None:
+        path_map["finalize"] = "finalize"
+    graph.add_conditional_edges("thinking_guard", _after_guard, path_map)
 
     graph.add_edge("tool_node", "call_llm")
     graph.add_edge("final_answer", END)
+    if finalize_fn is not None:
+        graph.add_edge("finalize", END)
 
     return graph.compile()
+
+
+def build_agent(user_id: str, profile: HarnessProfile = FLASH, llm=None):
+    # llm=None 走模块级 main_llm（与重构前行为一致）；
+    # cross-model probe / 子 agent 可传 override（不绑死 import 期实例，reload 友好）。
+    if llm is None:
+        from src.llm import main_llm as llm
+
+    paper_id_search_tool = make_paper_id_search_tool(user_id)
+    rag_tool = make_rag_tool(user_id)
+
+    if USE_MCP:
+        # MCP 路径：从 MCP server 取的工具（阶段 0 = web：s2/arxiv/openalex）替代
+        # 对应内嵌工具；尚未迁移的工具（rag/lookup/jina）仍用内嵌实例。
+        # mcp_client.get_tools() 已在 lifespan startup 一次性加载并缓存。
+        mcp_tools = mcp_client.get_tools()
+        mcp_names = {t.name for t in mcp_tools}
+        inline_tools = [
+            rag_tool,
+            paper_id_search_tool,
+            arxiv_tool,
+            s2_search_tool,
+            openalex_tool,
+            jina_tool,
+        ]
+        # 内嵌列表里凡是已被 MCP 接管的同名工具，剔除，避免重复绑定
+        inline_tools = [t for t in inline_tools if t.name not in mcp_names]
+        tools = inline_tools + mcp_tools
+    else:
+        tools = [
+            rag_tool,
+            paper_id_search_tool,
+            arxiv_tool,
+            s2_search_tool,
+            openalex_tool,
+            jina_tool,
+        ]
+
+    return _build_graph(llm, tools, profile)
 
 
 def _prepare(
