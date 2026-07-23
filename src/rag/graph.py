@@ -9,7 +9,9 @@ from langchain_core.messages import (
 )
 from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
+from langchain_core.tools import tool
 from typing import TypedDict, Annotated, Sequence
+from pydantic import BaseModel, Field
 import os
 from dotenv import load_dotenv
 from src.rag.tools.rag_tool import make_rag_tool
@@ -32,8 +34,9 @@ from src.rag.prompts import (
     CITATION_TRANSLATION,
 )
 from src.rag.prompts.plugins import TOOL_DECISION_PLUGIN
+from src.rag.prompts.subagent_prompt import build_subagent_prompt
 from src.core.trim_thinking import process_llm_output, THINK_TAG_PATTERN
-from src.rag.harness_profile import HarnessProfile, FLASH
+from src.rag.harness_profile import HarnessProfile, FLASH, RETRIEVER
 from src.rag.citation import (
     collect_from_tool_results,
     detect_hallucination,
@@ -119,6 +122,10 @@ _CLOSE_THINK_RE = re.compile(rf"</{THINK_TAG_PATTERN}>", re.IGNORECASE)
 # 工具循环标记：DONE=不调用工具直接进入正文；PENDING=闭合 thinking 等待工具执行
 _MARKER_RE = re.compile(r"\[TOOL_LOOP:\s*(DONE|PENDING)\]", re.IGNORECASE)
 
+# 子 agent findings（回吐给主 agent 的检索结果拼接）字符上限——防 jina 全文等长 blob
+# 撑爆主 agent context。截断兜底，主 agent 至少拿到前段。
+MAX_FINDINGS_LEN = 12000
+
 
 def _rfind_close_think(buf: str) -> int:
     """返回 buf 中最后一个 </thinking|think> 的结束下标（end），无则 -1。"""
@@ -157,7 +164,8 @@ class AgentState(TypedDict):
     remaining_calls: int
     thinking_retry_count: int
     is_thinking_correction: bool
-    pending_correction: str  # 新增
+    pending_correction: str
+    findings: str  # 子 agent 专用：finalize 写检索结果拼接，retrieve 壳取；主 agent 不用
 
 
 def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
@@ -239,7 +247,11 @@ def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
     }
 
 
-def after_guard(state: AgentState, terminator: str | None = None) -> str:
+def after_guard(
+    state: AgentState,
+    terminator: str | None = None,
+    budget_route: str = "final_answer",
+) -> str:
     last_msg = state["messages"][-1]
     remaining = state.get("remaining_calls", 6)
     retry_count = state.get("thinking_retry_count", 0)
@@ -263,8 +275,10 @@ def after_guard(state: AgentState, terminator: str | None = None) -> str:
         ):
             return "finalize"
         if remaining < 0:
-            logger.warning("工具额度耗尽，强制进入 final_answer")
-            return "final_answer"
+            # 预算耗尽：主 agent → final_answer（LLM 兜底作答）；
+            # 子 agent → finalize（拼已有工具结果作 findings，不浪费 LLM 调用）。
+            logger.warning("工具额度耗尽，路由 %s", budget_route)
+            return budget_route
         return "tool_node"
 
     # 无工具调用且非纠正状态，结束
@@ -514,7 +528,10 @@ def _build_graph(
         return await final_answer(state, profile)
 
     def _after_guard(state):
-        return after_guard(state, terminator)
+        # 子 agent（有 finalize_fn）预算耗尽走 finalize 拼工具结果；
+        # 主 agent 走 final_answer（LLM 兜底作答）。
+        budget_route = "finalize" if finalize_fn is not None else "final_answer"
+        return after_guard(state, terminator, budget_route)
 
     graph = StateGraph(AgentState)
     graph.add_node("call_llm", call_llm)
@@ -548,9 +565,138 @@ def _build_graph(
     return graph.compile()
 
 
-def build_agent(user_id: str, profile: HarnessProfile = FLASH, llm=None):
-    # llm=None 走模块级 main_llm（与重构前行为一致）；
-    # cross-model probe / 子 agent 可传 override（不绑死 import 期实例，reload 友好）。
+# ============================================================
+# 子 agent（检索 agent）—— T2：检索循环挪进独立编译的子图，
+# 包成 retrieve 工具壳给主 agent 调用（主 graph 结构零改动）。
+# 详见 plan/subagent-retrieval-decouple-plan.md。
+# ============================================================
+
+
+class RetrievalSelection(BaseModel):
+    """return_findings 的 selection 项 schema：子 agent 点的检索结果索引 + 理由。"""
+
+    result_index: int = Field(
+        description="检索结果序号（0-based，从第一个真实工具结果起算，不数 return_findings）"
+    )
+    reason: str = Field(
+        description="一句话说明这个结果为什么有用（你的判断，不要抄工具返回内容）"
+    )
+
+
+def _make_return_findings_tool():
+    """子 agent 终止工具：声明哪些工具结果有用 → 触发 finalize 节点拼 findings。
+
+    工具本身**不执行**——after_guard 拦到 return_findings 的 tool_call 就路由 finalize，
+    不走 tool_node；这里只给 bind_tools 提供 schema + 占位实现。子 agent LLM 只需「数数」
+    填 result_index，不转写工具结果内容（摘抄归属在主 agent）。
+    """
+
+    @tool
+    def return_findings(
+        selection: list[RetrievalSelection],
+        summary: str,
+    ) -> str:
+        """检索完成、已为问题找到足够支撑时调用本工具终止检索。
+
+        - selection：你认为对回答有用的检索结果列表，每项含 result_index（检索结果序号，
+          0-based，按你看到真实结果的顺序数）+ reason（为什么有用）。
+        - summary：一句话概括检索到了什么、覆盖了哪些缺口、还缺什么。
+        """
+        return ""  # 被 finalize 拦截，不真正执行
+
+    return return_findings
+
+
+async def _subagent_finalize(state: AgentState) -> dict:
+    """子 agent 终止节点：按 return_findings 的 selection 抠选中工具结果拼成 findings。
+
+    两条路径都进这里：
+      1. 子 agent 调 return_findings（正常收敛）→ 按 selection 抠选中项拼 findings。
+      2. 预算耗尽（after_guard budget_route=finalize）→ 无 return_findings args，
+         兜底全拼已有工具结果。
+
+    子 agent 全程只点索引不转写——本节点从 state messages 的真实 ToolMessage 抠 content raw，
+    拼成 findings 写 state['findings']（不写 messages，保持消息链干净；retrieve 壧取 findings）。
+    主 agent 自己读 findings 原文摘抄进 ref（grounding 留主 agent，保反幻觉初衷）。
+    """
+    messages = list(state["messages"])
+
+    # 找 return_findings 的 args（最后一条带该 tool_call 的 AIMessage）
+    rf_args: dict | None = None
+    for m in reversed(messages):
+        if isinstance(m, AIMessage) and getattr(m, "tool_calls", None):
+            for tc in m.tool_calls:
+                if tc.get("name") == "return_findings":
+                    rf_args = tc.get("args", {}) or {}
+                    break
+            if rf_args is not None:
+                break
+
+    # 真实工具结果（按出现顺序编号）——子 agent guard off 不产伪造 ToolMessage，
+    # 故所有 ToolMessage 都是真实检索结果。
+    tool_msgs = [
+        m
+        for m in messages
+        if isinstance(m, ToolMessage) and (getattr(m, "name", "") or "")
+    ]
+
+    sections: list[str] = []
+    if rf_args is not None:
+        summary = (rf_args.get("summary") or "").strip()
+        if summary:
+            sections.append(f"## 检索摘要\n{summary}")
+        selection = rf_args.get("selection") or []
+        sel_indices = {
+            s.get("result_index")
+            for s in selection
+            if isinstance(s, dict) and isinstance(s.get("result_index"), int)
+        }
+        picked = [
+            f"### 检索结果 #{i}（{tm.name}）\n{tm.content}"
+            for i, tm in enumerate(tool_msgs)
+            if i in sel_indices
+        ]
+        if picked:
+            sections.append("## 检索结果\n\n" + "\n\n".join(picked))
+        elif tool_msgs:
+            # selection 索引全部越界——兜底全拼，不丢检索成果
+            sections.append(
+                "## 检索结果\n\n"
+                + "\n\n".join(
+                    f"### 检索结果 #{i}（{tm.name}）\n{tm.content}"
+                    for i, tm in enumerate(tool_msgs)
+                )
+            )
+    else:
+        # 预算耗尽兜底：全拼已有工具结果
+        if tool_msgs:
+            sections.append(
+                "## 检索结果（预算耗尽兜底）\n\n"
+                + "\n\n".join(
+                    f"### 检索结果 #{i}（{tm.name}）\n{tm.content}"
+                    for i, tm in enumerate(tool_msgs)
+                )
+            )
+
+    findings = "\n\n".join(sections) if sections else "(检索未返回结果)"
+    if len(findings) > MAX_FINDINGS_LEN:
+        findings = findings[:MAX_FINDINGS_LEN] + "\n\n[...检索结果过长，已截断]"
+    return {"findings": findings}
+
+
+def build_subagent(
+    user_id: str,
+    profile: HarnessProfile = RETRIEVER,
+    llm=None,
+):
+    """子 agent（检索 agent）图：照搬 build_agent 骨架（共享 _build_graph），差异走参数注入。
+
+    - profile = RETRIEVER（guard off + prefill minimal + 独立预算 8）。
+    - 工具 = 检索工具集（rag/s2/openalex/arxiv/jina/lookup）+ return_findings 终止工具。
+    - terminator=return_findings + finalize_fn → after_guard 拦 return_findings 路由 finalize，
+      预算耗尽也路由 finalize（budget_route）；子 agent 不感知主 agent 的 final_answer 兜底语义。
+    对主 agent 它是 retrieve 工具（make_retrieve_tool 包一层），对自己是图。
+    """
     if llm is None:
         from src.llm import main_llm as llm
 
@@ -558,9 +704,7 @@ def build_agent(user_id: str, profile: HarnessProfile = FLASH, llm=None):
     rag_tool = make_rag_tool(user_id)
 
     if USE_MCP:
-        # MCP 路径：从 MCP server 取的工具（阶段 0 = web：s2/arxiv/openalex）替代
-        # 对应内嵌工具；尚未迁移的工具（rag/lookup/jina）仍用内嵌实例。
-        # mcp_client.get_tools() 已在 lifespan startup 一次性加载并缓存。
+        # MCP 路径：从 MCP server 取的工具替代对应内嵌工具；未迁移的仍用内嵌实例。
         mcp_tools = mcp_client.get_tools()
         mcp_names = {t.name for t in mcp_tools}
         inline_tools = [
@@ -571,11 +715,10 @@ def build_agent(user_id: str, profile: HarnessProfile = FLASH, llm=None):
             openalex_tool,
             jina_tool,
         ]
-        # 内嵌列表里凡是已被 MCP 接管的同名工具，剔除，避免重复绑定
         inline_tools = [t for t in inline_tools if t.name not in mcp_names]
-        tools = inline_tools + mcp_tools
+        search_tools = inline_tools + mcp_tools
     else:
-        tools = [
+        search_tools = [
             rag_tool,
             paper_id_search_tool,
             arxiv_tool,
@@ -584,7 +727,92 @@ def build_agent(user_id: str, profile: HarnessProfile = FLASH, llm=None):
             jina_tool,
         ]
 
-    return _build_graph(llm, tools, profile)
+    tools = search_tools + [_make_return_findings_tool()]
+    return _build_graph(
+        llm,
+        tools,
+        profile,
+        terminator="return_findings",
+        finalize_fn=_subagent_finalize,
+    )
+
+
+def _extract_findings(result: dict) -> str:
+    """从子 agent ainvoke 结果取 findings。
+
+    优先 finalize 写的 state['findings']；finalize 未跑（罕见异常路径，如预算内
+    子 agent 直接 END）兜底拼所有工具结果。
+    """
+    if not isinstance(result, dict):
+        return "(检索未返回结果)"
+    findings = (result.get("findings") or "").strip()
+    if findings:
+        return findings
+    msgs = result.get("messages", [])
+    parts = [
+        f"### 检索结果 #{i}（{name}）\n{content}"
+        for i, (name, content) in enumerate(_tool_results_from_messages(msgs))
+    ]
+    if parts:
+        return "## 检索结果（兜底）\n\n" + "\n\n".join(parts)
+    return "(检索未返回结果)"
+
+
+def make_retrieve_tool(user_id: str):
+    """主 agent 的 retrieve 工具壳：把子 agent 图包成一个工具。
+
+    主 agent 调 retrieve(query) → 壳内 build_subagent().ainvoke（非流式同步阻塞）→
+    取 findings 作 content、子 agent 工具结果作 artifact，返回 (content, artifact)。
+    response_format='content_and_artifact' 让 BaseTool 把它包成 ToolMessage——
+    content 给主 agent LLM 读 findings，artifact 给 _consume_events 收候选源（T1 seam 兑现）。
+    Stage 1–4 不接流式 custom event：retrieve 调用期间前端只见一个工具节点转圈。
+    """
+
+    @tool(response_format="content_and_artifact")
+    async def retrieve(query: str):
+        """检索本地知识库与外部文献（Semantic Scholar / OpenAlex / arXiv / Jina 全文精读），
+        返回支撑当前问题的检索结果与可引用文献。当问题需要外部文献证据或本地论文内容时调用。
+        """
+        try:
+            subagent = build_subagent(user_id)
+            initial_state = {
+                "messages": [
+                    SystemMessage(content=build_subagent_prompt()),
+                    HumanMessage(content=query),
+                ],
+                "conv_id": "",
+                "user_id": user_id,
+                "translation": False,
+                "remaining_calls": RETRIEVER.budget_n,
+                "findings": "",
+            }
+            result = await subagent.ainvoke(initial_state)
+        except Exception as e:
+            logger.warning("[retrieve] 子 agent 检索异常，返回空 findings: %s", e)
+            return f"(检索失败：{e})", []
+        findings = _extract_findings(result)
+        # 候选源 = 子 agent 所有真实工具结果（经 artifact 冒泡给 _consume_events →
+        # result['tool_results'] → _persist_and_enrich collect）。findings 本身不进候选收集
+        # （它是拼接产物，候选层要原始工具结果做 source_id 提取）。
+        candidates = _tool_results_from_messages(result.get("messages", []))
+        return findings, candidates
+
+    return retrieve
+
+
+def build_agent(user_id: str, profile: HarnessProfile = FLASH, llm=None):
+    """主 agent 图：T2 后只绑定 retrieve 工具壳——检索循环挪进子 agent，主 agent 注意力
+    聚焦思考与输出。主 graph 结构零改动（仍是 _build_graph 组装），仅工具列表从 6 个检索
+    工具换成 1 个 retrieve 壳。
+
+    llm=None 走模块级 main_llm；cross-model probe / 子 agent 可传 override。
+    主 agent prompt 的去水（删 tool_usage / 压 Phase 3）在 Stage 2，本阶段 prompt 暂不动。
+    """
+    if llm is None:
+        from src.llm import main_llm as llm
+
+    retrieve_shell = make_retrieve_tool(user_id)
+    return _build_graph(llm, [retrieve_shell], profile)
 
 
 def _prepare(
@@ -891,10 +1119,21 @@ async def _consume_events(agent, initial_state, request, result: dict):
                 tool_name = ev.get("name", "")
                 tool_output = ev["data"].get("output")
                 tool_content = getattr(tool_output, "content", "") or ""
-                if tool_name and tool_content and isinstance(result, dict):
-                    result.setdefault("tool_results", []).append(
-                        (tool_name, tool_content)
-                    )
+                if isinstance(result, dict):
+                    # T2：retrieve 壳经 artifact 冒泡子 agent 工具结果作候选源
+                    # （retrieve 的 content=findings 不进候选收集——它是拼接产物，
+                    # 候选层要原始工具结果做 source_id 提取）。常规工具 artifact=None 走 elif。
+                    artifact = getattr(tool_output, "artifact", None)
+                    if isinstance(artifact, list):
+                        for sub_name, sub_content in artifact:
+                            if sub_name and sub_content:
+                                result.setdefault("tool_results", []).append(
+                                    (sub_name, sub_content)
+                                )
+                    elif tool_name and tool_content:
+                        result.setdefault("tool_results", []).append(
+                            (tool_name, tool_content)
+                        )
                 yield _format_sse(
                     "tool_end",
                     name=ev.get("name", ""),

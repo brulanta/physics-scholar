@@ -63,5 +63,22 @@ MINIMAL = HarnessProfile(
     budget_n=6,
 )
 
+# 子 agent（检索 agent）预置：T2 解耦后的检索循环 owner。
+# guard off（检索循环不强求 <thinking> 申请单——它不是回答者，少了主 agent 那套
+# 工具调用申请书的开销）+ prefill minimal（非流式 ainvoke，不经流式 marker 闸门，
+# 老实验里 minimal 破契约是流式空间的坑，子 agent 非流式不踩）+ final_prefill light
+# + 独立预算 8（检索比回答更费工具轮次）。详见 plan/subagent-retrieval-decouple-plan.md。
+RETRIEVER = HarnessProfile(
+    guard_mode="off",
+    prefill_level="minimal",
+    final_prefill="light",
+    budget_n=8,
+)
+
 # 名字 → 预置，供开发态脚本（如 scripts/harness_probe.py）按 --profile 选择
-PRESETS = {"FLASH": FLASH, "STRONG": STRONG, "MINIMAL": MINIMAL}
+PRESETS = {
+    "FLASH": FLASH,
+    "STRONG": STRONG,
+    "MINIMAL": MINIMAL,
+    "RETRIEVER": RETRIEVER,
+}

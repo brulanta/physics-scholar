@@ -41,20 +41,24 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 ## 子 agent 形态（核心认知，落地细节）
 
 - 子 agent = 独立编译的图（有自己的 State/预算/guard），`build_subagent` 产出；对主 agent 是 `retrieve` 工具（`bind_tools` 一项），对自己是图（有循环、guard、预算）。唯一桥是 `retrieve` 工具壳函数：主 agent 递 query → 子图 `ainvoke`（非流式、同步阻塞）→ 取 findings 回吐成主 agent 的 ToolMessage。
-- **`return_findings` 终止**：子 agent 工具，结构化参数 `selection=[{result_index, item_index, reason}], summary`。子 agent 检索够了就调它。`after_guard` 检测到该 tool_call → 路由 `finalize` 节点（不走 tool_node 回 call_llm）。
-- **`finalize` 节点**：从 state messages 找 `return_findings` args + 按顺序编号的真实 ToolMessage；**复用 `src/rag/citation.py` 的 extract 分派器**把每个工具结果解析成 items 列表，按 `result_index/item_index` 抠选中 item 的 raw；拼成 findings 写 state。子 agent 全程**只点索引不转写元信息**（解中间商抄错 + 不白花 token 原样吐）。
-- **摘抄归属留主 agent**：桥接层传给主 agent 的是被选中 item 的 content raw（限长兜底，jina 长 blob 截断），主 agent 自己读自己摘抄进 ref——grounding 留主 agent 保反幻觉初衷。
-- **配置瘦身**：`RETRIEVER = HarnessProfile(guard_mode="off", prefill_level="minimal", final_prefill="light", budget_n=8)`（独立预算，非流式 minimal 安全）。`final_answer` 子 agent**必留**（头铁不收敛的兜底，预算耗尽强制返回当前 findings）。
+- **`return_findings` 终止**：子 agent 工具，结构化参数 `selection=[{result_index, reason}], summary`。子 agent 检索够了就调它。`after_guard` 检测到该 tool_call → 路由 `finalize` 节点（不走 tool_node 回 call_llm）。
+  > **实现定稿（偏离原计划）**：去掉了原计划的 `item_index`。编号单位是 **ToolMessage / 工具调用**（「第几次工具结果有用」），不做工具结果内部的 item 级筛选——主 agent 读整条选中的工具结果原文自己摘抄。item 级筛选（省 token）作为后续优化，第一版不上。
+- **`finalize` 节点**：从 state messages 找 `return_findings` args + 按顺序编号的真实 ToolMessage；**直接用 `ToolMessage.content` raw**（不经过 `citation.py` 的 `extract_candidates`——`Candidate` 只存元信息无 content 字段，而 finalize 要的是工具结果原文给主 agent 读），按 `result_index` 抠选中工具调用的整条 content 拼成 findings 写 `state['findings']`。候选 enrichment 收集仍复用 `collect_from_tool_results`（喂 retrieve 壳冒泡的原始工具结果，零改）。子 agent 全程**只点索引不转写元信息**（解中间商抄错 + 不白花 token 原样吐）。
+- **摘抄归属留主 agent**：桥接层传给主 agent 的是被选中工具调用的 content raw（限长兜底，`MAX_FINDINGS_LEN=12000` 截断，jina 长 blob 截断），主 agent 自己读自己摘抄进 ref——grounding 留主 agent 保反幻觉初衷。
+- **配置瘦身**：`RETRIEVER = HarnessProfile(guard_mode="off", prefill_level="minimal", final_prefill="light", budget_n=8)`（独立预算，非流式 minimal 安全）。**预算耗尽走 `finalize` 兜底**（`after_guard` 的 `budget_route=finalize`，拼已有工具结果作 findings，不浪费 LLM 调用）；`final_answer` 节点因共用 `_build_graph` 仍 add（子 agent 图里是死节点，永不路由到）。
+  > 与原计划「final_answer 子 agent 必留兜底」表述出入：实际兜底由 finalize 承担（拼工具结果 = 当时的 findings），final_answer 节点保留仅为共用图结构。
 
 ## 实现阶段（每阶段独立可提交）
 
-### Stage 0 — 分支 + 抽 `_build_graph`（零行为变化地基）
+> **进展**：Stage 0 ✅（commit `0a66a15`，63 核心测试零变化）/ Stage 1 ✅（harness `RETRIEVER` 预置 + graph 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`；15 新单测 `test_subagent_finalize.py` + 63 核心回归全过）。主 agent prompt 去水（Stage 2）+ 子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。
+
+### Stage 0 ✅ — 分支 + 抽 `_build_graph`（零行为变化地基）
 - 建分支 `t2-subagent-retrieval`。
 - 从 `build_agent` 抽出 `_build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)`；`build_agent` 改调它（主 agent 路径 terminator=None，行为字节级不变）。
 - `build_agent` 加可选 `llm=None`（默认走模块级 `llm`，cross-model probe 与子 agent 共用）。
 - 验证：现有 `test_consume_events`/`test_citation`/主 agent 端到端零变化。
 
-### Stage 1 — 子 agent 图 + 桥接（后端核心，ainvoke 阻塞）
+### Stage 1 ✅ — 子 agent 图 + 桥接（后端核心，ainvoke 阻塞）
 - `harness_profile.py` 加 `RETRIEVER` 预置 + 进 `PRESETS`。
 - `graph.py` 加 `return_findings` 工具 + `finalize` 节点（复用 `citation.py` extract）+ `build_subagent`。
 - 加 `retrieve` 工具壳：`make_retrieve_tool(user_id)` 闭包，内部 `build_subagent().ainvoke()` 取 findings，拼成主 agent ToolMessage。
