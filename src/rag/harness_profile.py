@@ -64,15 +64,17 @@ MINIMAL = HarnessProfile(
 )
 
 # 子 agent（检索 agent）预置：T2 解耦后的检索循环 owner。
-# guard off（检索循环不强求 <thinking> 申请单——它不是回答者，少了主 agent 那套
-# 工具调用申请书的开销）+ prefill minimal（非流式 ainvoke，不经流式 marker 闸门，
-# 老实验里 minimal 破契约是流式空间的坑，子 agent 非流式不踩）+ final_prefill light
-# + 独立预算 8（检索比回答更费工具轮次）。详见 plan/subagent-retrieval-decouple-plan.md。
+# guard strict——与拆分前检索循环所在的 strict 对等（不因搬进子图就卸掉 per-call thinking
+# 监管；「优先拆、之后考虑减」，先保对等基线，probe 验证后再议是否松到 soft/off）+
+# prefill minimal（非流式 ainvoke、不经流式 marker 闸门；⑤ minimal 破契约是流式空间的坑，
+# 子 agent 非流式不踩，minimal 仅留 [RUNTIME_STATUS]+[start]）+ final_prefill light
+# + 预算 6（对齐拆分前全局检索额度；子 agent 纯检索不写答案，6 次成功检索够用，且 guard
+# 驳回重试不消耗预算）。详见 plan/subagent-retrieval-decouple-plan.md。
 RETRIEVER = HarnessProfile(
-    guard_mode="off",
+    guard_mode="strict",
     prefill_level="minimal",
     final_prefill="light",
-    budget_n=8,
+    budget_n=6,
 )
 
 # 名字 → 预置，供开发态脚本（如 scripts/harness_probe.py）按 --profile 选择

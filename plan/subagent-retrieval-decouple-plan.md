@@ -45,12 +45,12 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
   > **实现定稿（偏离原计划）**：去掉了原计划的 `item_index`。编号单位是 **ToolMessage / 工具调用**（「第几次工具结果有用」），不做工具结果内部的 item 级筛选——主 agent 读整条选中的工具结果原文自己摘抄。item 级筛选（省 token）作为后续优化，第一版不上。
 - **`finalize` 节点**：从 state messages 找 `return_findings` args + 按顺序编号的真实 ToolMessage；**直接用 `ToolMessage.content` raw**（不经过 `citation.py` 的 `extract_candidates`——`Candidate` 只存元信息无 content 字段，而 finalize 要的是工具结果原文给主 agent 读），按 `result_index` 抠选中工具调用的整条 content 拼成 findings 写 `state['findings']`。候选 enrichment 收集仍复用 `collect_from_tool_results`（喂 retrieve 壳冒泡的原始工具结果，零改）。子 agent 全程**只点索引不转写元信息**（解中间商抄错 + 不白花 token 原样吐）。
 - **摘抄归属留主 agent**：桥接层传给主 agent 的是被选中工具调用的 content raw（限长兜底，`MAX_FINDINGS_LEN=12000` 截断，jina 长 blob 截断），主 agent 自己读自己摘抄进 ref——grounding 留主 agent 保反幻觉初衷。
-- **配置瘦身**：`RETRIEVER = HarnessProfile(guard_mode="off", prefill_level="minimal", final_prefill="light", budget_n=8)`（独立预算，非流式 minimal 安全）。**预算耗尽走 `finalize` 兜底**（`after_guard` 的 `budget_route=finalize`，拼已有工具结果作 findings，不浪费 LLM 调用）；`final_answer` 节点因共用 `_build_graph` 仍 add（子 agent 图里是死节点，永不路由到）。
+- **配置（修订后）**：`RETRIEVER = HarnessProfile(guard_mode="strict", prefill_level="minimal", final_prefill="light", budget_n=6)`。guard **strict**（与拆分前检索循环所在的 strict 对等——不因搬进子图就卸掉 per-call thinking 监管；「优先拆、之后考虑减」，先保对等基线，probe 验证后再议松到 soft/off）+ prefill **minimal**（非流式 ainvoke、不经流式 marker 闸门；⑤ minimal 破契约是流式空间的坑，子 agent 非流式不踩）+ budget **6**（对齐拆分前全局检索额度；子 agent 纯检索不写答案，6 次成功检索够用，且 guard 驳回重试不消耗预算——`call_llm` 扣、`thinking_guard` 驳回时 `+1` 还回）。**预算耗尽走 `finalize` 兜底**（`after_guard` 的 `budget_route=finalize`，拼已有工具结果作 findings）；`final_answer` 节点因共用 `_build_graph` 仍 add（子 agent 图里是死节点，永不路由到）。
   > 与原计划「final_answer 子 agent 必留兜底」表述出入：实际兜底由 finalize 承担（拼工具结果 = 当时的 findings），final_answer 节点保留仅为共用图结构。
 
 ## 实现阶段（每阶段独立可提交）
 
-> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅（删 `tool_usage` + 压 Phase 3 为**单次 retrieve 契约** + `build_prefill` 清 Q1/Q2/Q3 话术 + 主 agent `budget_n=1` **硬保证**；78 核心测试全过）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。
+> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅ + **修订**（见下「Stage 2」：TOOL_DECISION_PLUGIN/output_format/协议 B 回滚原版保 CoT phase 链 + retrieve docstring 承单次寿命契约 + 状态信封 5 分类 + RETRIEVER strict/budget6 + 子 agent thinking 收紧；核心测试全过）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。
 
 ### Stage 0 ✅ — 分支 + 抽 `_build_graph`（零行为变化地基）
 - 建分支 `t2-subagent-retrieval`。
@@ -69,20 +69,28 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - 主 agent prompt **暂不动**（Stage 2 才去水），先验证子 agent 检索循环 + 回吐正确。
 - **不接流式 custom event**（Stage 5），主 agent `_consume_events` 零改；`retrieve` 调用期间前端只见一个工具节点转圈。
 
-### Stage 2 ✅ — 主 agent prompt 去水 + 单次 retrieve 硬保证
-- 删主 agent `tool_usage.py`（降级链编排挪子 agent prompt；3 个 yaml 同步清 `TOOL_USAGE`）；Phase 3 的 `TOOL_DECISION_PLUGIN`（Q1/Q2/Q3 多轮决策）压成**单次 retrieve 契约**（保留 `[TOOL_LOOP: PENDING/DONE]` 单次 marker，删多轮骨架，明确「一次机会 + 接受结果不重调」）；`build_prefill` full 模式 3 个 lead 清 Q1/Q2/Q3 话术；`output_format`/`citation_format` 的工具迭代/工具名表述同步改单次。
-- **主 agent 单次 retrieve 硬保证**：`build_agent` 强制 `budget_n=1`（调第二次 retrieve 被 `after_guard` 兜底 `remaining<0 → final_answer` 拦下）；`build_prefill` 的 `remaining==1` warning 加 `budget_n>1` 条件（budget=1 首轮满额不误报「最后机会」）。
-- `_persist_and_enrich` **不动**（Stage 1 已让候选源经 artifact 冒泡到 `result["tool_results"]`）。
-- 「降到 light」（prefill_level full→light）推 T3 Profile 产品化，不在 Stage 2 改 profile 级别。
-- ⚠️ Stage 2 主 agent prompt 行为（单次 retrieve 契约 + budget=1 是否让主 agent 稳定调一次）待 Stage 4 probe 真跑 LLM 验证；自动化测试只覆盖框架 + 语义关键字。
+### Stage 2 ✅（+ 修订）— 主 agent prompt 去水 → 修订：单次 retrieve 契约重构
+
+**初版（commit `e907b4f`）**：删 `tool_usage.py`（降级链挪子 agent prompt；3 yaml 清 `TOOL_USAGE`）+ 主 agent `budget_n=1` 硬保证。但初版把 `TOOL_DECISION_PLUGIN` 压成「单次 retrieve 契约」、`output_format`/协议 B 改「DONE→进入正文」——**破坏了 CoT phase 链**（Phase 3 是中间 phase，DONE 后要走完 Phase 4-7 再闭合 thinking 进正文，不是直跳正文），且把通用循环逻辑特化成了单工具硬编码。
+
+**修订（本批）**：
+- **回滚 phase 链**：`TOOL_DECISION_PLUGIN`（Phase 3 = `{tool_decision_plugin}`）回滚原版 Q1/Q2/Q3「工具调用申请书」通用循环（DONE→Next Phase、PENDING→闭合等工具）；`output_format` + `build_prefill` 协议 B 同步回滚原版。理由：主 agent 仍是「调工具的循环」，budget=1 + 单工具只是当下配置；保留通用循环对未来扩展工具必要（即便当下杀鸡用牛刀）。检索编排脑（降级链）仍留子 agent。
+- **单次寿命契约挪 docstring**：「retrieve 一次寿命、高度置信、拿到就答、不二次调用」是**工具契约**（与全局 budget 两根独立轴），写进 `retrieve` docstring（随 bind_tools、per-tool 可扩展），不进通用循环 PLUGIN。今天 budget=1 已机器兜底（`after_guard` remaining<0→final_answer 拦第 2 次 retrieve）；**budget>1 时的预算无关兜底（`after_guard` 数 retrieve 调用次数→final_answer）记为后续 safeguard，等加第二个工具时再上**。
+- **retrieve 状态信封**：返回 `[检索状态: ...]` + `agent_hint` + findings，5 分类（SUCCESS/NO_MATCH/INFRA_FAIL/INCOMPLETE/HARD_FAIL，`_classify_retrieve_outcome`）——对齐 s2 等工具的 agent_hint 约定，让主 agent 区分「无符合材料」(NO_MATCH) 与「上游硬伤」(INFRA/HARD)。`test_retrieve_classify.py` 9 例覆盖。
+- **RETRIEVER 配置**：guard off→**strict**（拆分前对等）、budget 8→**6**（对齐拆分前全局）；prefill minimal 保留（非流式无关项）。
+- **子 agent thinking 收紧**：`subagent_prompt` 删「thinking 可省略」（与 strict guard 矛盾），改要求每轮 thinking 写缺口/动作/判停。**当前子 agent prompt 刻意轻量**——是否加料留待 Stage 4 probe 看 guard 拦截/契约遵守效果再定。
+- **guard 纠错话术通用化**：删 Q1/Q2/Q3 硬编码引用（主/子 agent 通用，按各自 system prompt 结构）。
+- **citation（Point 2）**：不向 LLM 注入「系统按 source_id 自动填元信息」这类隐藏机制描述（撤回「加回 source_id 指令」）；lean ref 格式（source_id 前缀）保留。agent 是否自发写元信息 + `enrich_refs` 是否 robust 留 probe 验，必要时加 **harness 层 strip**（渲染时只留 source_id+snippet）而非 prompt 指令。
+- `_persist_and_enrich` 不动；`test_prompt_byte_equivalence` 删 3 条 stale 断言（bind-by-id/系统自动填/不翻译，编码旧「告知机械化」立场，被 Point 2 反转），保留 lean 格式断言。
+- ⚠️ 主 agent 单次 retrieve 行为 + 子 agent strict/minimal 安全性待 Stage 4 probe 真跑验证。
 
 ### Stage 3 — harness_probe 搬家 + cross-model `--model`
-- `scripts/harness_probe.py` 适配子 agent：接 `build_subagent` + `RETRIEVER`；砍 `guard_hits`/`budget_hit` 哨兵分支（子 agent guard off + return_findings 不产 `GUARD_SENTINEL`/`BUDGET_SENTINEL`，恒 0/False 噪音）；`collect_metrics` 输入契约不变（`{messages, remaining_calls}`）。
+- `scripts/harness_probe.py` 适配子 agent：接 `build_subagent` + `RETRIEVER`。**guard_hits 不再是噪音**（修订后 RETRIEVER guard strict，子 agent 违规会产 `GUARD_SENTINEL`——是真实 thinking 合规信号，保留）；budget_hit 哨兵分支仍可砍（子 agent 预算耗尽走 finalize、不产 `BUDGET_SENTINEL`）。`collect_metrics` 输入契约不变（`{messages, remaining_calls}`）。
 - 加 `--model` argparse：`ChatOpenAI(model=args.model, ...)` 传给 `build_agent`/`build_subagent` 的 `llm` 参数（方案 1，与子 agent 绑 llm 同构）。
 - 子 agent probe 单测复刻 `test_harness_probe_metrics.py` 的 `importlib.util` 文件加载模式。
 
 ### Stage 4 — probe 轮测验收（T2 验收门）
-- gemini 下验证 `RETRIEVER`（guard off + prefill minimal 非流式）安全：`missing_thinking_calls` 合规、`tool_rounds` 合理、Tier-1 门 `tool_err_request` 不退化。
+- gemini 下验证 `RETRIEVER`（guard strict + prefill minimal 非流式）安全：`missing_thinking_calls`/`guard_hits` 合规、`tool_rounds` 合理、Tier-1 门 `tool_err_request` 不退化；子 agent prompt 轻量是否够（看 guard 拦截率/契约遵守）决定是否加料。
 - 验证主 agent 行为不退化：删 prompt 编排后主 agent 稳定「只调 1 次 retrieve」、marker 闸门流式正确。
 - 印证 memory `harness-vs-llm-change-stance`：probe 是回路（存活且搬子 agent 更值钱），校准点是 `RETRIEVER` 配置。
 

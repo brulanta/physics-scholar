@@ -227,14 +227,14 @@ def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
         remaining_chances = MAX_THINKING_RETRIES - current_violation
         correction_text = (
             f"⚠️ 工具调用申请被驳回（剩余纠正机会：{remaining_chances} 次）：\n"
-            f"原因：未附 thinking 报告。请理解——thinking 是工具调用的申请单，不提交申请单的调用请求一律不受理。\n"
-            f"请在下一轮严格按 [TOOL_LOOP: BEGIN] 完成 Q1→Q2→Q3，提交完整申请后重新调用。"
+            f"原因：未附 thinking 报告。thinking 是工具调用的申请单——不提交申请单的调用请求一律不受理。\n"
+            f"请在下一轮先输出完整的 `<thinking>` 块（按 system prompt 指定的结构），再重新调用工具。"
         )
     else:
         correction_text = (
             "⚠️ 工具调用申请最终驳回（最后一次纠正机会）：\n"
             "前几次调用均因未附 thinking 被拒绝。系统要求很明确：先写申请（thinking），再执行调用。\n"
-            "这是最后一次机会：下一轮必须先完成 [TOOL_LOOP: BEGIN] 的 Q1-Q3，否则工具调用权限将永久关闭。"
+            "这是最后一次机会：下一轮必须先输出 `<thinking>` 块，否则工具调用权限将永久关闭。"
         )
 
     return {
@@ -375,10 +375,10 @@ def build_prefill(
                 "[start]"
             )
     elif is_after_tool:
-        # 协议 B：retrieve 返回后——基于检索结果回答，不再调第二次 retrieve
+        # 协议 B 正常情况
         lead = (
             f"<think>\n"
-            f"retrieve 已返回检索结果（本轮唯一一次检索的最终结果）。我必须在 [start] 后立刻输出 <thinking>，基于检索结果组织回答，输出 [TOOL_LOOP: DONE] 进入正文。不再发起第二次 retrieve。现在输出 [start]。\n"
+            f"我已经拿到这一轮工具返回的反馈。系统显示剩余调用次数为 {remaining}，我必须基于这个真实数字推理。我需要在 [start] 后立刻输出 <thinking>，并从 [TOOL_LOOP: BEGIN] 进入，用工具返回的真实内容完成 Q1→Q2→Q3 评估，不得照搬历史。现在输出 [start]。\n"
             "</think>\n"
             "[start]"
         )
@@ -693,7 +693,7 @@ def build_subagent(
 ):
     """子 agent（检索 agent）图：照搬 build_agent 骨架（共享 _build_graph），差异走参数注入。
 
-    - profile = RETRIEVER（guard off + prefill minimal + 独立预算 8）。
+    - profile = RETRIEVER（guard strict + prefill minimal + 预算 6）。
     - 工具 = 检索工具集（rag/s2/openalex/arxiv/jina/lookup）+ return_findings 终止工具。
     - terminator=return_findings + finalize_fn → after_guard 拦 return_findings 路由 finalize，
       预算耗尽也路由 finalize（budget_route）；子 agent 不感知主 agent 的 final_answer 兜底语义。
@@ -760,6 +760,91 @@ def _extract_findings(result: dict) -> str:
     return "(检索未返回结果)"
 
 
+# ── retrieve 出口状态分类（文本信封第一行 + agent_hint）──────────────────────────
+# 对齐 s2/openalex/arxiv/jina 的 agent_hint 约定：让主 agent 区分「无符合材料」与
+# 「上游硬伤」，两者作答措辞不同。分类信号全在子 agent state/messages（详见 plan）。
+_RETRIEVE_OK = "SUCCESS"            # 有甄选材料（ok>0 且收敛）
+_RETRIEVE_NO_MATCH = "NO_MATCH"     # 无任何成功工具结果、子 agent 收敛 → 语义空
+_RETRIEVE_INFRA = "INFRA_FAIL"      # 工具全部报错 → 管道断了、非「无文献」
+_RETRIEVE_INCOMPLETE = "INCOMPLETE" # 预算耗尽兜底、未经甄选
+_RETRIEVE_HARD = "HARD_FAIL"        # ainvoke 抛异常 → 图级硬伤
+
+
+def _return_findings_called(messages) -> bool:
+    """子 agent 是否调过 return_findings（正常收敛）vs 预算耗尽兜底（无 return_findings）。"""
+    for m in reversed(messages):
+        if isinstance(m, AIMessage) and getattr(m, "tool_calls", None):
+            for tc in m.tool_calls:
+                if tc.get("name") == "return_findings":
+                    return True
+    return False
+
+
+def _count_tool_ok_err(messages) -> tuple[int, int]:
+    """数子 agent 真实工具结果的 (成功数, 失败数)，判空回是语义空还是上游硬伤。
+
+    成功 = 框架层 status!='error' 且工具自报非 success:false（rag_tool 纯文本无 success 字段
+    视为成功）；失败 = status=='error' 或 success:false。guard 伪造的 ToolMessage 无 name、
+    被 name 过滤排除（与 _tool_results_from_messages 同构）。
+    """
+    ok = err = 0
+    for m in messages:
+        if not isinstance(m, ToolMessage):
+            continue
+        if not (getattr(m, "name", "") or ""):
+            continue
+        if getattr(m, "status", None) == "error":
+            err += 1
+            continue
+        try:
+            data = json.loads(m.content or "")
+        except (ValueError, TypeError):
+            data = None
+        if isinstance(data, dict) and data.get("success") is False:
+            err += 1
+        else:
+            ok += 1
+    return ok, err
+
+
+def _classify_retrieve_outcome(result, exception) -> tuple[str, str]:
+    """把 retrieve 出口分成 5 类，返回 (status, agent_hint)。主 agent 据此调整作答措辞。
+
+    判据（可靠信号优先）：异常 → HARD_FAIL；工具全部报错(ok==0,err>0) → INFRA_FAIL；
+    有成功工具结果(ok>0) → 收敛 SUCCESS / 预算耗尽 INCOMPLETE；无任何工具活动(ok==0,err==0)
+    → 收敛 NO_MATCH / 预算耗尽 INCOMPLETE。
+    """
+    if exception is not None:
+        return _RETRIEVE_HARD, (
+            "检索因硬性故障未取得结果（子图异常/网络彻底不可达），非「无文献」。"
+            "retrieve 仅一次寿命、无法重试；请基于背景知识作答，并说明检索受阻。"
+        )
+    messages = result.get("messages", []) if isinstance(result, dict) else []
+    ok, err = _count_tool_ok_err(messages)
+    rf_called = _return_findings_called(messages)
+    if ok == 0 and err > 0:
+        return _RETRIEVE_INFRA, (
+            "检索工具全部报错（限流/网络/上游故障），未取得任何有效结果，非「无符合材料」。"
+            "retrieve 仅一次寿命、无法重试；请基于背景知识作答，并说明检索受阻。"
+        )
+    if ok > 0:
+        if rf_called:
+            return _RETRIEVE_OK, "检索成功，已返回子 agent 甄选的相关结果。"
+        return _RETRIEVE_INCOMPLETE, (
+            "子 agent 未在检索预算内收敛，结果为预算耗尽兜底（未经甄选），可能偏全。"
+            "请基于已有结果作答，措辞留余地。"
+        )
+    # ok==0 and err==0：无任何工具成功结果
+    if rf_called:
+        return _RETRIEVE_NO_MATCH, (
+            "子 agent 完成检索但未取得任何成功结果（语义空，非故障）。"
+            "可基于背景知识作答，或说明该方向暂无可用文献。"
+        )
+    return _RETRIEVE_INCOMPLETE, (
+        "子 agent 未在检索预算内取得任何结果。请基于背景知识作答，措辞留余地。"
+    )
+
+
 def make_retrieve_tool(user_id: str):
     """主 agent 的 retrieve 工具壳：把子 agent 图包成一个工具。
 
@@ -773,8 +858,22 @@ def make_retrieve_tool(user_id: str):
     @tool(response_format="content_and_artifact")
     async def retrieve(query: str):
         """检索本地知识库与外部文献（Semantic Scholar / OpenAlex / arXiv / Jina 全文精读），
-        返回支撑当前问题的检索结果与可引用文献。当问题需要外部文献证据或本地论文内容时调用。
+        返回支撑当前问题的检索结果与可引用文献。问题需要外部文献证据或本地论文内容时调用。
+
+        **一次寿命**：你一回合只能调用 retrieve 一次——它内部已跑完整检索循环（多轮检索 +
+        降级链 s2→openalex→arxiv→jina + 本地 RAG），返回的即本轮最终结果。检索不够理想是
+        retrieve 内部子 agent 的事，**不要第二次调用、不要怀疑结果**：这次调用就代表你「已尝试
+        获取信息填补缺口」这个动作，结果高度置信，拿到就基于它作答。
+
+        返回是文本信封，第一行 `[检索状态: ...]` 说明结果性质，据此调整作答措辞：
+        - SUCCESS：正常拿到材料。
+        - NO_MATCH：检索完成但无符合材料（语义空，非故障）——可基于背景知识作答或说明该方向暂无文献。
+        - INFRA_FAIL / HARD_FAIL：检索因网络/上游故障未取得结果（非「无文献」）——基于背景知识作答并说明检索受阻。
+        - INCOMPLETE：预算耗尽兜底、结果未经甄选——基于已有结果作答、措辞留余地。
+        无论哪种状态，retrieve 寿命已用完，不再重调。
         """
+        exception = None
+        result = None
         try:
             subagent = build_subagent(user_id)
             initial_state = {
@@ -790,14 +889,17 @@ def make_retrieve_tool(user_id: str):
             }
             result = await subagent.ainvoke(initial_state)
         except Exception as e:
-            logger.warning("[retrieve] 子 agent 检索异常，返回空 findings: %s", e)
-            return f"(检索失败：{e})", []
-        findings = _extract_findings(result)
+            exception = e
+            logger.warning("[retrieve] 子 agent 检索异常: %s", e)
+
+        status, hint = _classify_retrieve_outcome(result, exception)
+        findings = _extract_findings(result) if result is not None else "(检索未返回结果)"
         # 候选源 = 子 agent 所有真实工具结果（经 artifact 冒泡给 _consume_events →
         # result['tool_results'] → _persist_and_enrich collect）。findings 本身不进候选收集
-        # （它是拼接产物，候选层要原始工具结果做 source_id 提取）。
-        candidates = _tool_results_from_messages(result.get("messages", []))
-        return findings, candidates
+        # （它是拼接产物，候选层要原始工具结果做 source_id 提取）。状态信封不影响 artifact。
+        candidates = _tool_results_from_messages(result.get("messages", [])) if result else []
+        envelope = f"[检索状态: {status}]\n[agent_hint: {hint}]\n\n[检索结果]\n{findings}"
+        return envelope, candidates
 
     return retrieve
 

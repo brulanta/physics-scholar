@@ -12,9 +12,11 @@ test_prompt_byte_equivalence.py — prompt 模块化框架回归 + 引用格式�
 - mode 从 _MODE_MODULES 数据驱动（MODES 与之一致）
 - 三个模块子包 pkgutil 扫描成功（frozen 兼容烟雾）
 
-新增的语义断言（T1 资产）：
-- build_prompt 输出含 lean ref 关键字（[source_id] / rag:<doc_id> / bind-by-id 规则）
-- translation 模式 <zh> 保留、source_id 不翻译口径在
+新增的语义断言（T1 资产，Point 2 后收紧）：
+- build_prompt 输出含 lean ref「格式」关键字（[source_id] / rag:<doc_id> / s2: 前缀规则）。
+  不再断言「告知 LLM 机械化」的指令文本（bind-by-id 说明 / 系统按 source_id 自动填元信息）——
+  Point 2 起不向 LLM 注入隐藏机制描述，改由 probe 验行为。
+- translation 模式 <zh> 保留、翻译规则（仅翻译支撑片段）在。
 """
 from __future__ import annotations
 
@@ -74,10 +76,11 @@ _HISTORY = "测试历史：用户问过微波光子学的基础问题。"
 
 @pytest.mark.parametrize("mode", ["normal", "discuss"])
 def test_prompt_has_lean_ref_format(mode: str) -> None:
-    """build_prompt 输出含 lean ref 关键字——保护 T1 的 bind-by-id 引用格式确实落在 prompt 里。
+    """build_prompt 输出含 lean ref 格式关键字——保护 bind-by-id 的 lean ref 形态确实落在 prompt 里。
 
-    这是语义断言不是字节断言：未来想法 3 再改 prompt 时，若这些关键字消失会红 = 真信号
-    （你确实改了 ref 格式相关，去确认是不是想要的）；关键字还在则说明 ref 格式未受波及。
+    语义断言：只守 lean ref 的「格式」（source_id 前缀规则 + [source_id] 标记），不守
+    「告知 LLM 机械化」的指令文本（Point 2：不再注入「系统按 source_id 自动填元信息」这类
+    隐藏机制描述，改 probe 验行为）。未来想法 3 再改 prompt 时，若格式关键字消失会红 = 真信号。
     """
     from src.rag.prompts import CITATION_DEFAULT, build_prompt
     from src.rag.prompts.plugins import TOOL_DECISION_PLUGIN
@@ -88,15 +91,10 @@ def test_prompt_has_lean_ref_format(mode: str) -> None:
         citation_plugin=CITATION_DEFAULT,
         tool_decision_plugin=TOOL_DECISION_PLUGIN,
     )
-    # lean ref 核心关键字（任一缺失 = bind-by-id 格式被破坏）
+    # lean ref 格式关键字（source_id 前缀规则 + 标记）——格式未变，仍须在
     assert "[source_id]" in prompt, f"{mode} prompt 缺 lean ref [source_id] 标记"
-    assert "bind-by-id" in prompt, f"{mode} prompt 缺 bind-by-id 说明"
     assert "rag:<doc_id>" in prompt, f"{mode} prompt 缺 rag: source_id 前缀规则"
     assert "s2:<s2_paper_id>" in prompt, f"{mode} prompt 缺 s2: source_id 前缀规则"
-    # 教 model 不自己写元信息（bind-by-id 核心约束）
-    assert "系统按 source_id 自动" in prompt or "由系统按 source_id 自动填充" in prompt, (
-        f"{mode} prompt 缺「元信息由系统填」约束"
-    )
 
 
 @pytest.mark.parametrize("mode", ["normal", "discuss"])
@@ -112,6 +110,8 @@ def test_prompt_translation_keeps_zh(mode: str) -> None:
         tool_decision_plugin=TOOL_DECISION_PLUGIN,
     )
     assert "<zh>" in prompt, f"{mode} translation prompt 缺 <zh> 标签规则"
-    # source_id 不翻译口径在（translation 规则里）
-    assert "不翻译" in prompt, f"{mode} translation prompt 缺「不翻译 id」口径"
+    # translation 规则在 prompt 里（Point 2 后口径从「不翻译 X/Y/Z」精简为「仅翻译支撑片段」）
+    assert "仅翻译支撑片段" in prompt or "支撑片段译文" in prompt, (
+        f"{mode} translation prompt 缺翻译规则"
+    )
 
