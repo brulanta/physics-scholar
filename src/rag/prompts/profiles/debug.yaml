@@ -10,10 +10,6 @@ modules:
     enabled: true
     order: 20
 
-  - name: TOOL_USAGE
-    enabled: true
-    order: 30
-
   - name: THINKING_SHARED
     enabled: false
     order: 45

@@ -16,20 +16,20 @@ N为引用序号，从1开始，按在正文中首次出现的顺序编号。
 
 **你只写 `[source_id]` 和 `支持片段` 两部分，绝不自己写作者、标题、venue、年份、链接等来源元信息**——系统会按 source_id 自动查工具结果填充完整引用。你手写元信息反而会抄错（漏作者、拼错、编 venue），所以只抄短而稳的 id。
 
-### source_id 拼写规则（带类型前缀，逐字符照抄工具返回）
+### source_id 拼写规则（带类型前缀，逐字符照抄检索结果）
 
-工具返回里已带可直接抄的 id 字段，照抄 + 加前缀：
+retrieve 返回的检索结果里已带可直接抄的 id 字段，照抄 + 加前缀：
 
-| 来源 | source_id 格式 | id 字段出处 |
+| 来源 | source_id 格式 | id 字段出处（检索结果里） |
 |---|---|---|
-| 本地 RAG 检索 | `rag:<doc_id>` | rag_tool 返回串每段开头的 `[rag:xxx | ...]` 里的 doc_id |
-| Semantic Scholar | `s2:<s2_paper_id>` | s2_search_tool 返回 papers[].s2_paper_id |
-| arXiv | `arxiv:<arxiv_id>` | arxiv_tool 返回 papers[].arxiv_id |
-| OpenAlex | `openalex:<openalex_id>` | openalex_tool 返回 papers[].openalex_id |
+| 本地 RAG 检索 | `rag:<doc_id>` | 每段开头 `[rag:xxx | ...]` 里的 doc_id |
+| Semantic Scholar | `s2:<s2_paper_id>` | papers[].s2_paper_id |
+| arXiv | `arxiv:<arxiv_id>` | papers[].arxiv_id |
+| OpenAlex | `openalex:<openalex_id>` | papers[].openalex_id |
 
 - id 短且可逐字符抄，转写低错；前缀固定，不要自创。
-- **严禁编造 id**：只抄工具本轮真实返回的 id。编造的 id 系统查无匹配，会留下幻觉信号。
-- 本地文档若无 doc_id（rag_tool 返回串头无 `rag:` 前缀），该来源不参与 bind-by-id，按下方“无 source_id 时的退路”处理。
+- **严禁编造 id**：只抄本轮检索结果真实返回的 id。编造的 id 系统查无匹配，会留下幻觉信号。
+- 本地文档若无 doc_id（检索结果段头无 `rag:` 前缀），该来源不参与 bind-by-id，按下方“无 source_id 时的退路”处理。
 
 ### 支撑片段
 引用该来源时所依据的具体内容，直接截取原文，不改写，不概括。
@@ -38,7 +38,7 @@ N为引用序号，从1开始，按在正文中首次出现的顺序编号。
 - 无可靠原文时：省略支撑片段，格式退化为 `<ref id="N">[source_id]</ref>`（只有 id，无 `| 摘抄`）
 
 ### 无 source_id 时的退路
-仅当来源确实没有稳定 id（如 jina_tool 读的网页、用户口述的来源）时，才允许在 `[source_id]` 位置直接写来源描述（标题/域名等）。这是例外不是常规，优先用工具返回的结构化 id。
+仅当来源确实没有稳定 id（如检索结果里的网页全文、用户口述的来源）时，才允许在 `[source_id]` 位置直接写来源描述（标题/域名等）。这是例外不是常规，优先用检索结果里的结构化 id。
 
 {citation_plugin}
 

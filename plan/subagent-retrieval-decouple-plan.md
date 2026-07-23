@@ -50,7 +50,7 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 
 ## 实现阶段（每阶段独立可提交）
 
-> **进展**：Stage 0 ✅（commit `0a66a15`，63 核心测试零变化）/ Stage 1 ✅（harness `RETRIEVER` 预置 + graph 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`；15 新单测 `test_subagent_finalize.py` + 63 核心回归全过）。主 agent prompt 去水（Stage 2）+ 子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。
+> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅（删 `tool_usage` + 压 Phase 3 为**单次 retrieve 契约** + `build_prefill` 清 Q1/Q2/Q3 话术 + 主 agent `budget_n=1` **硬保证**；78 核心测试全过）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。
 
 ### Stage 0 ✅ — 分支 + 抽 `_build_graph`（零行为变化地基）
 - 建分支 `t2-subagent-retrieval`。
@@ -69,10 +69,12 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - 主 agent prompt **暂不动**（Stage 2 才去水），先验证子 agent 检索循环 + 回吐正确。
 - **不接流式 custom event**（Stage 5），主 agent `_consume_events` 零改；`retrieve` 调用期间前端只见一个工具节点转圈。
 
-### Stage 2 — 主 agent prompt 去水
-- 删主 agent `tool_usage.py`（降级链编排挪子 agent prompt）；Phase 3 的 `TOOL_DECISION_PLUGIN`（Q1/Q2/Q3）压成极简 marker 闸门教学（保留 `[TOOL_LOOP: PENDING/DONE]` 信号，删多轮决策骨架）；`build_prefill` 清死分支降到 light。
-- `_persist_and_enrich` **不动**（Stage 1 已让候选源经 artifact 冒泡到 `result["tool_results"]`，落库照常 collect + save_candidates + enrich + 幻觉检测）。Stage 2 纯 prompt/prefill 去水。
-- 端到端验证：引用收集 / 幻觉检测 / is_cited 标记在子 agent 路径下正确（T1 seam 兑现）。
+### Stage 2 ✅ — 主 agent prompt 去水 + 单次 retrieve 硬保证
+- 删主 agent `tool_usage.py`（降级链编排挪子 agent prompt；3 个 yaml 同步清 `TOOL_USAGE`）；Phase 3 的 `TOOL_DECISION_PLUGIN`（Q1/Q2/Q3 多轮决策）压成**单次 retrieve 契约**（保留 `[TOOL_LOOP: PENDING/DONE]` 单次 marker，删多轮骨架，明确「一次机会 + 接受结果不重调」）；`build_prefill` full 模式 3 个 lead 清 Q1/Q2/Q3 话术；`output_format`/`citation_format` 的工具迭代/工具名表述同步改单次。
+- **主 agent 单次 retrieve 硬保证**：`build_agent` 强制 `budget_n=1`（调第二次 retrieve 被 `after_guard` 兜底 `remaining<0 → final_answer` 拦下）；`build_prefill` 的 `remaining==1` warning 加 `budget_n>1` 条件（budget=1 首轮满额不误报「最后机会」）。
+- `_persist_and_enrich` **不动**（Stage 1 已让候选源经 artifact 冒泡到 `result["tool_results"]`）。
+- 「降到 light」（prefill_level full→light）推 T3 Profile 产品化，不在 Stage 2 改 profile 级别。
+- ⚠️ Stage 2 主 agent prompt 行为（单次 retrieve 契约 + budget=1 是否让主 agent 稳定调一次）待 Stage 4 probe 真跑 LLM 验证；自动化测试只覆盖框架 + 语义关键字。
 
 ### Stage 3 — harness_probe 搬家 + cross-model `--model`
 - `scripts/harness_probe.py` 适配子 agent：接 `build_subagent` + `RETRIEVER`；砍 `guard_hits`/`budget_hit` 哨兵分支（子 agent guard off + return_findings 不产 `GUARD_SENTINEL`/`BUDGET_SENTINEL`，恒 0/False 噪音）；`collect_metrics` 输入契约不变（`{messages, remaining_calls}`）。

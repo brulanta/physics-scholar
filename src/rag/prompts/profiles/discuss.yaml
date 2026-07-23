@@ -13,10 +13,6 @@ modules:
     enabled: true
     order: 20
 
-  - name: TOOL_USAGE
-    enabled: true
-    order: 30
-
   - name: CITATION_FORMAT
     enabled: true
     order: 40

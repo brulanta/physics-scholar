@@ -311,7 +311,9 @@ def build_prefill(
     profile: HarnessProfile = FLASH,
 ) -> str:
     budget_n = profile.budget_n
-    if remaining == 1:
+    # budget_n=1（主 agent 单次 retrieve）时 remaining==1 是初始满额，不是「快耗尽」，
+    # 不警告；仅多预算档（budget_n>1）在 remaining==1 时提醒「最后机会」。
+    if remaining == 1 and budget_n > 1:
         warning = (
             "⚠️ CRITICAL: FINAL_OPPORTUNITY. "
             "仅存最后一次工具调用机会。"
@@ -360,23 +362,23 @@ def build_prefill(
             # 情况：工具返回后违规被打回
             lead = (
                 "<think>\n"
-                "系统驳回了上一次工具调用，因为没有附带 <thinking> 申请单。我已经拿到了真实工具返回内容，不能浪费这些信息。我必须在 [start] 后立刻输出 <thinking>，并从 [TOOL_LOOP: BEGIN] 进入，基于真实返回内容完成 Q1→Q2→Q3，写完整申请后重新调用工具。现在输出 [start]。\n"
-                "<think>\n"
+                "系统驳回了上一次工具调用，因为没有附带 <thinking> 申请单。我已经拿到了真实工具返回内容，不能浪费这些信息。我必须在 [start] 后立刻输出 <thinking>，并从 [TOOL_LOOP: BEGIN] 进入，基于真实返回内容重新评估是否还需调用工具，写完整申请后重新调用。现在输出 [start]。\n"
+                "</think>\n"
                 "[start]"
             )
         else:
             # 情况：首轮违规被打回（没有工具返回，也没有禁止 Phase 0 的必要）
             lead = (
                 "<think>\n"
-                "系统提醒我，上一轮尝试的工具调用因为缺少 <thinking> 申请单而被驳回。现在我需要严格按照规则来：在 [start] 后立刻输出 <thinking>，然后从 Phase 0 状态同频开始，完整执行所有 Phase，在 [TOOL_LOOP] 正式提交工具调用申请。现在输出 [start]。\n"
+                "系统提醒我，上一轮尝试的工具调用因为缺少 <thinking> 申请单而被驳回。现在我需要严格按照规则来：在 [start] 后立刻输出 <thinking>，然后从 Phase 0 状态同频开始，完整执行所有 Phase，在 Phase 3 完成检索决策。现在输出 [start]。\n"
                 "</think>\n"
                 "[start]"
             )
     elif is_after_tool:
-        # 协议 B 正常情况
+        # 协议 B：retrieve 返回后——基于检索结果回答，不再调第二次 retrieve
         lead = (
             f"<think>\n"
-            f"我已经拿到这一轮工具返回的反馈。系统显示剩余调用次数为 {remaining}，我必须基于这个真实数字推理。我需要在 [start] 后立刻输出 <thinking>，并从 [TOOL_LOOP: BEGIN] 进入，用工具返回的真实内容完成 Q1→Q2→Q3 评估，不得照搬历史。现在输出 [start]。\n"
+            f"retrieve 已返回检索结果（本轮唯一一次检索的最终结果）。我必须在 [start] 后立刻输出 <thinking>，基于检索结果组织回答，输出 [TOOL_LOOP: DONE] 进入正文。不再发起第二次 retrieve。现在输出 [start]。\n"
             "</think>\n"
             "[start]"
         )
@@ -805,12 +807,22 @@ def build_agent(user_id: str, profile: HarnessProfile = FLASH, llm=None):
     聚焦思考与输出。主 graph 结构零改动（仍是 _build_graph 组装），仅工具列表从 6 个检索
     工具换成 1 个 retrieve 壳。
 
-    llm=None 走模块级 main_llm；cross-model probe / 子 agent 可传 override。
-    主 agent prompt 的去水（删 tool_usage / 压 Phase 3）在 Stage 2，本阶段 prompt 暂不动。
+    主 agent 单次 retrieve 契约：检索循环已在子 agent，主 agent 只调一次 retrieve 拿最终
+    结果（即使不理想也接受，不重调）。budget_n=1 硬保证——调第二次 retrieve 会被 after_guard
+    兜底（remaining<0 → final_answer）拦下。profile 其他轴（guard/prefill）仍可调，唯 budget 强制 1。
+
+    llm=None 走模块级 main_llm；cross-model probe 可传 override。
     """
     if llm is None:
         from src.llm import main_llm as llm
 
+    if profile.budget_n != 1:
+        profile = HarnessProfile(
+            guard_mode=profile.guard_mode,
+            prefill_level=profile.prefill_level,
+            final_prefill=profile.final_prefill,
+            budget_n=1,
+        )
     retrieve_shell = make_retrieve_tool(user_id)
     return _build_graph(llm, [retrieve_shell], profile)
 

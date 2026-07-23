@@ -59,7 +59,7 @@ def test_module_subpackages_scanned() -> None:
     """三个模块子包 pkgutil 扫描成功（frozen 兼容烟雾：扫空即落盘异常）。"""
     from src.rag.prompts.modules import SHARED_MODULES, _MODE_MODULES
 
-    assert len(SHARED_MODULES) >= 10, f"shared 扫到 {len(SHARED_MODULES)} 个，疑似 pkgutil 扫描异常"
+    assert len(SHARED_MODULES) >= 9, f"shared 扫到 {len(SHARED_MODULES)} 个，疑似 pkgutil 扫描异常"
     assert len(_MODE_MODULES["normal"]) >= 3, "normal 扫描异常"
     assert len(_MODE_MODULES["discuss"]) >= 3, "discuss 扫描异常"
 
