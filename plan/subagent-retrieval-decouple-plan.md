@@ -50,7 +50,7 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 
 ## 实现阶段（每阶段独立可提交）
 
-> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅ + **修订**（见下「Stage 2」：TOOL_DECISION_PLUGIN/output_format/协议 B 回滚原版保 CoT phase 链 + retrieve docstring 承单次寿命契约 + 状态信封 5 分类 + RETRIEVER strict/budget6 + 子 agent thinking 收紧；核心测试全过）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。
+> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅ + **修订**（见下「Stage 2」：TOOL_DECISION_PLUGIN/output_format/协议 B 回滚原版保 CoT phase 链 + retrieve docstring 承单次寿命契约 + 状态信封 5 分类 + RETRIEVER strict/budget6 + 子 agent thinking 收紧；核心测试全过）/ Stage 3 ✅（见下「Stage 3」：harness_probe `--target sub`/`--model` + `_prepare` 主 agent 种子 bug 修复（remaining_calls 6→1，单次 retrieve 的 budget 安全网才真正生效）+ `test_harness_probe_subagent.py`；probe 真跑留 Stage 4）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。
 
 ### Stage 0 ✅ — 分支 + 抽 `_build_graph`（零行为变化地基）
 - 建分支 `t2-subagent-retrieval`。
@@ -84,10 +84,13 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - `_persist_and_enrich` 不动；`test_prompt_byte_equivalence` 删 3 条 stale 断言（bind-by-id/系统自动填/不翻译，编码旧「告知机械化」立场，被 Point 2 反转），保留 lean 格式断言。
 - ⚠️ 主 agent 单次 retrieve 行为 + 子 agent strict/minimal 安全性待 Stage 4 probe 真跑验证。
 
-### Stage 3 — harness_probe 搬家 + cross-model `--model`
-- `scripts/harness_probe.py` 适配子 agent：接 `build_subagent` + `RETRIEVER`。**guard_hits 不再是噪音**（修订后 RETRIEVER guard strict，子 agent 违规会产 `GUARD_SENTINEL`——是真实 thinking 合规信号，保留）；budget_hit 哨兵分支仍可砍（子 agent 预算耗尽走 finalize、不产 `BUDGET_SENTINEL`）。`collect_metrics` 输入契约不变（`{messages, remaining_calls}`）。
-- 加 `--model` argparse：`ChatOpenAI(model=args.model, ...)` 传给 `build_agent`/`build_subagent` 的 `llm` 参数（方案 1，与子 agent 绑 llm 同构）。
-- 子 agent probe 单测复刻 `test_harness_probe_metrics.py` 的 `importlib.util` 文件加载模式。
+### Stage 3 ✅ — harness_probe 搬家 + cross-model `--model`（+ 主 agent 种子 bug 修复）
+- **主 agent 种子 bug（修复，折进本 stage）**：`_prepare` 原用 `profile.budget_n`(=6) 播 `remaining_calls`，但 `build_agent` 强制 `budget_n=1`——`call_llm` 从 **state** 读 remaining(=6)，致 `after_guard` 的 `remaining<0` 兜底要到第 7 次 retrieve 才触发，「单次 retrieve 契约」的 budget 安全网失效（沦为只靠 prompt 自觉），与 `build_agent` docstring「budget_n=1 硬保证」不符。修：`_prepare` 播 `remaining_calls=1`（主 agent 有效预算恒 1）；probe 主 target 同步播 1 才能当有效验收门。trace 验证：seed=1 时第 2 次 retrieve 即 remaining=-1→final_answer 拦下。
+- `scripts/harness_probe.py` 适配子 agent：加 `--target {main,sub}`——`sub` 直跑 `build_subagent`+`RETRIEVER`+子 agent prompt（把检索循环从 retrieve 壳拎出来单测，不经过主 agent）；`main` 验单次 retrieve 契约 + marker 闸门流式。`--target sub` 默认 RETRIEVER、main 默认 FLASH，显式 `--profile` 优先。
+- 加 `--model` argparse：`_build_override_llm` 用 `ChatOpenAI(model=...)` 覆盖 main_llm（其余 base_url/key/温度/重试/流式对齐），传 `build_agent`/`build_subagent` 的 `llm` 参数——cross-model 重跑比 harness 行为差异。
+- `build_initial_state` 拆 `build_main_state`(rem=1)/`build_sub_state`(rem=profile.budget_n、findings='')。**`collect_metrics` 契约不变、代码不动**——原计划「砍 budget_hit 哨兵分支」改为不动 + 注释说明（砍会 fork collect_metrics、违背「契约不变」）：修订后 RETRIEVER guard **strict**，`guard_hits` 是真信号（子 agent 违规产 `GUARD_SENTINEL`，与 `missing_thinking_calls` 交叉校验）；但预算耗尽走 finalize（非 final_answer）→ `BUDGET_SENTINEL` 永不产、`budget_forced` 恒 False（`budget_hit` 仍由 `remaining<=0` 反映）；marker 闸门主 agent 流式专属，子 agent `marker_emit_rate` 恒 0/None（真零）。
+- 子 agent probe 单测 `test_harness_probe_subagent.py`（复刻 `test_harness_probe_metrics.py` 的 `importlib.util` 文件加载）：`build_main_state` rem=1 回归门、`build_sub_state` 形状、`collect_metrics` 在子 agent 风格 transcript（return_findings 不计 tool_rounds、strict guard 哨兵真信号、预算耗尽无 BUDGET_SENTINEL）。5 例 + 既有 metrics 11 例全过；T2 核心 76 例无回归。
+- ⚠️ probe 真跑（gemini cross-model 轮测）留 Stage 4——本 stage 只交付量具 + 离线单测，未触网。
 
 ### Stage 4 — probe 轮测验收（T2 验收门）
 - gemini 下验证 `RETRIEVER`（guard strict + prefill minimal 非流式）安全：`missing_thinking_calls`/`guard_hits` 合规、`tool_rounds` 合理、Tier-1 门 `tool_err_request` 不退化；子 agent prompt 轻量是否够（看 guard 拦截率/契约遵守）决定是否加料。

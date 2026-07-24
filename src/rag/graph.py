@@ -960,7 +960,11 @@ def _prepare(
         "conv_id": conv_id,
         "user_id": user_id,
         "translation": translation,
-        "remaining_calls": profile.budget_n,
+        # 主 agent 有效预算恒为 1（build_agent 强制 budget_n=1）。种子须匹配：after_guard
+        # 的 remaining<0 兜底要在「第二次 retrieve」时触发，种子就必须是 1——这是单次
+        # retrieve 契约的 budget 安全网（不靠 prompt 自觉）。曾误用 profile.budget_n(=6)，
+        # 致安全网要到第 7 次才拦下，契约沦为只靠 prompt。
+        "remaining_calls": 1,
         "next_prefill": None,
     }
     return agent, initial_state

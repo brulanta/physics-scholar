@@ -22,8 +22,16 @@
   退化，**门信号**）/ transient（429/超时=上游噪声，旁观）/ other（auth/not_found，旁观）。
   瘦身若删掉承重的防呆字段描述 → agent 填错参 → `tool_err_request` 抬头。**429 主噪声被隔到
   transient 桶，不污染门**（④ 教训）。分类纯逻辑、离线可测（tests/test_harness_probe_metrics.py）。
-- **复用不 fork**：build_agent/build_prompt/_detect_marker/process_llm_output 全部从
-  src.rag.graph import。
+- **复用不 fork**：build_agent/build_subagent/build_prompt/build_subagent_prompt/_detect_marker/
+  process_llm_output 全部从 src.rag.* import。
+- **--target sub 直跑子 agent**（T2 Stage 3）：把检索循环从 retrieve 壳里拎出来单测——
+  build_subagent + RETRIEVER + 子 agent system prompt，ainvoke 直跑（非流式）。子 agent guard
+  **strict**（非原计划的 off——见 plan Stage 2 修订）→ guard_hits 是**真信号**（会产 GUARD_SENTINEL，
+  与 missing_thinking_calls 交叉校验）；但预算耗尽走 finalize（非 final_answer）→ BUDGET_SENTINEL
+  永不产、budget_forced 恒 False（budget_hit 仍由 remaining<=0 反映）；marker 闸门是主 agent 流式
+  专属，子 agent 不用 → marker_emit_rate 恒 0/None（真零，非噪声）。
+- **--model cross-model**：用 ChatOpenAI(model=...) 覆盖 main_llm（其余 base_url/key/温度/重试/流式
+  对齐 main_llm），传给 build_agent/build_subagent 的 llm 参数——换模型重跑即可比 harness 行为差异。
 
 风险提示：
 - **真成本**：每题 = 一次完整 agent 跑（LLM + s2/arxiv/jina 真实网络）。用 --only 限子集。
@@ -32,11 +40,13 @@
 - **MCP**：若设了 PS_USE_MCP=true，需 MCP server 在跑（否则 build_agent 取不到工具）。
 
 用法：
-    python scripts/harness_probe.py                      # 全部 20 题
+    python scripts/harness_probe.py                      # 全部 20 题（主 agent）
     python scripts/harness_probe.py --only Q01 Q05       # 指定题
     python scripts/harness_probe.py --label STRONG --mode discuss
     python scripts/harness_probe.py --only Q03 Q11 Q18 --label gem2_after_spotcheck \
         --dump-transcript                                # A1/A4 验收：落 transcript 供人眼 spot-check
+    python scripts/harness_probe.py --target sub --only Q03   # 直跑子 agent 验 RETRIEVER 安全性
+    python scripts/harness_probe.py --target sub --model gemini-2.5-flash --only Q03  # cross-model
 """
 
 from __future__ import annotations
@@ -63,9 +73,11 @@ from langchain_core.messages import (  # noqa: E402
 
 from src.rag.graph import (  # noqa: E402
     build_agent,
+    build_subagent,
     _detect_marker,
 )
 from src.rag.prompts import build_prompt, CITATION_DEFAULT  # noqa: E402
+from src.rag.prompts.subagent_prompt import build_subagent_prompt  # noqa: E402
 from src.rag.harness_profile import PRESETS  # noqa: E402
 from src.core.trim_thinking import process_llm_output  # noqa: E402
 
@@ -207,8 +219,30 @@ def load_questions(only: list[str] | None) -> list[dict]:
     return items
 
 
-def build_initial_state(question: str, user_id: str, mode: str, profile) -> dict:
-    """内联复刻 _prepare 的 initial_state（空 history）。"""
+def _build_override_llm(model: str):
+    """cross-model probe：用 --model 覆盖 main_llm 的 model，其余配置（base_url/key/温度/
+    重试/流式）对齐 main_llm——换模型重跑即可比 harness 行为差异，不引入无关变量。"""
+    from langchain_openai import ChatOpenAI
+    from src.config import MAIN_LLM_API_KEY, MAIN_LLM_BASE_URL, DEEPSEEK_EXTRA_BODY
+
+    return ChatOpenAI(
+        model=model,
+        temperature=0.15,
+        api_key=MAIN_LLM_API_KEY,
+        base_url=MAIN_LLM_BASE_URL,
+        extra_body=DEEPSEEK_EXTRA_BODY,
+        max_retries=5,
+        streaming=True,
+    )
+
+
+def build_main_state(question: str, user_id: str, mode: str, profile) -> dict:
+    """主 agent initial_state（内联复刻 _prepare，空 history）。
+
+    remaining_calls=1：主 agent 有效预算恒为 1（build_agent 强制 budget_n=1）。种子须匹配——
+    after_guard 的 remaining<0 才能在「第二次 retrieve」兜底，这是单次 retrieve 契约的 budget
+    安全网（不靠 prompt 自觉）。曾误用 profile.budget_n(=6)，致安全网到第 7 次才拦下（Stage 3 修复）。
+    """
     system_prompt = build_prompt(
         mode="normal" if mode == "normal" else "discuss",
         history="",
@@ -223,8 +257,28 @@ def build_initial_state(question: str, user_id: str, mode: str, profile) -> dict
         "conv_id": "harness_probe",
         "user_id": user_id,
         "translation": False,
-        "remaining_calls": profile.budget_n,
+        "remaining_calls": 1,
         "next_prefill": None,
+    }
+
+
+def build_sub_state(question: str, user_id: str, profile) -> dict:
+    """子 agent initial_state（内联复刻 make_retrieve_tool 的种子，直跑检索循环）。
+
+    子 agent 用 build_subagent_prompt（无 mode、无 ref 归属——归属在主 agent），remaining_calls=
+    profile.budget_n（RETRIEVER=6；build_subagent 不强制预算）。直跑子图 = 把检索循环从 retrieve 壳
+    里拎出来单测，验 RETRIEVER（guard strict + prefill minimal 非流式）安全性，不经过主 agent。
+    """
+    return {
+        "messages": [
+            SystemMessage(content=build_subagent_prompt()),
+            HumanMessage(content=question),
+        ],
+        "conv_id": "harness_probe_sub",
+        "user_id": user_id,
+        "translation": False,
+        "remaining_calls": profile.budget_n,
+        "findings": "",
     }
 
 
@@ -312,6 +366,8 @@ async def run_one(
     user_id: str,
     mode: str,
     profile,
+    target: str,
+    override_llm,
     timeout: float,
     retries: int,
     keep_transcript: bool = False,
@@ -335,8 +391,12 @@ async def run_one(
     attempts = 0
     for attempt in range(retries + 1):
         attempts = attempt + 1
-        agent = build_agent(user_id, profile)
-        state = build_initial_state(item["question"], user_id, mode, profile)
+        if target == "sub":
+            agent = build_subagent(user_id, profile, llm=override_llm)
+            state = build_sub_state(item["question"], user_id, profile)
+        else:
+            agent = build_agent(user_id, profile, llm=override_llm)
+            state = build_main_state(item["question"], user_id, mode, profile)
         try:
             result = await asyncio.wait_for(agent.ainvoke(state), timeout=timeout)
             metrics = collect_metrics(result)
@@ -439,12 +499,16 @@ async def main_async(args) -> None:
         print("没有可跑的题目。", file=sys.stderr)
         sys.exit(1)
 
-    profile = PRESETS[args.profile]
-    label = args.label or args.profile  # 未显式指定 label 时用 profile 名
+    # --target sub 默认 RETRIEVER（子 agent 预置）；--target main 默认 FLASH。显式 --profile 优先。
+    profile_name = args.profile or ("RETRIEVER" if args.target == "sub" else "FLASH")
+    profile = PRESETS[profile_name]
+    label = args.label or profile_name  # 未显式指定 label 时用 profile 名
+    override_llm = _build_override_llm(args.model) if args.model else None
 
     print(
-        f"harness_probe | profile={args.profile} | label={label} | mode={args.mode} | "
-        f"user_id={args.user_id} | {len(items)} 题\n"
+        f"harness_probe | target={args.target} | profile={profile_name} | label={label} | "
+        f"mode={args.mode} | model={args.model or '(default)'} | user_id={args.user_id} | "
+        f"{len(items)} 题\n"
         f"  {profile}\n"
     )
 
@@ -461,7 +525,8 @@ async def main_async(args) -> None:
     for i, item in enumerate(items, 1):
         print(f"[{i}/{len(items)}] {item['id']} 跑中…", file=sys.stderr)
         row, transcript = await run_one(
-            item, args.user_id, args.mode, profile, args.timeout, args.retries,
+            item, args.user_id, args.mode, profile, args.target, override_llm,
+            args.timeout, args.retries,
             keep_transcript=args.dump_transcript,
         )
         rows.append(row)
@@ -486,7 +551,9 @@ async def main_async(args) -> None:
         json.dump(
             {
                 "label": label,
-                "profile": args.profile,
+                "target": args.target,
+                "profile": profile_name,
+                "model": args.model or "(default)",
                 "profile_fields": vars(profile),
                 "mode": args.mode,
                 "user_id": args.user_id,
@@ -505,10 +572,23 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Harness 行为量具（阶段②）")
     p.add_argument("--only", nargs="*", help="只跑指定题目 id，如 Q01 Q05")
     p.add_argument(
+        "--target",
+        default="main",
+        choices=["main", "sub"],
+        help="探测对象：main（主 agent，验单次 retrieve 契约 + marker 闸门流式）| "
+             "sub（子 agent，直跑检索循环验 RETRIEVER: guard strict + prefill minimal 非流式 安全性）",
+    )
+    p.add_argument(
         "--profile",
-        default="FLASH",
+        default=None,
         choices=list(PRESETS.keys()),
-        help="HarnessProfile 预置：FLASH（现状基线）| STRONG（松绑候选）",
+        help="HarnessProfile 预置（--target sub 默认 RETRIEVER；main 默认 FLASH）；"
+             "显式指定优先。FLASH=现状基线 | STRONG=松绑候选 | MINIMAL=⑤探针 | RETRIEVER=子 agent",
+    )
+    p.add_argument(
+        "--model",
+        default=None,
+        help="cross-model 覆盖 main_llm 的 model 名（其余配置对齐 main_llm）；不传走默认 main_llm",
     )
     p.add_argument("--label", default=None, help="运行标签（入存档名）；缺省=profile 名")
     p.add_argument("--mode", default="normal", choices=["normal", "discuss"])
