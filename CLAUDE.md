@@ -74,6 +74,10 @@ Tool results are only visible within the current graph loop — they do not pers
 
 When changing CoT / tool-call behavior, the logic spans **three places**: `graph.py` (prefill + guard), the prompt modules in `src/rag/prompts/`, and `trim_thinking.py` (strips CoT from output before storage/display).
 
+### Main/sub agent isolation — no architecture metadata leakage
+
+主/子 agent 互不感知——LLM 可见文本（@tool docstring、Field.description、prompt、prefill、跨边消息）严禁出现 主/子agent/subagent/子系统/子图 等架构 metadata，只用中性表述（"检索系统""你""检索异常""信息缺口"）。暴露架构关系会让 LLM 产生错误自我定位，污染工具调用与思考。
+
 ### Agent tools (`src/rag/tools/`) — tiered, not equal
 
 Defined retrieval hierarchy (the prompt instructs the agent to follow coarse→fine, stop when sufficient):
@@ -88,6 +92,14 @@ Defined retrieval hierarchy (the prompt instructs the agent to follow coarse→f
 ### Prompt system (`src/rag/prompts/`) — modular, decoupled from tools
 
 `build_prompt(mode, history, citation_plugin, debug)` assembles the system prompt from modules via `builder.py` + `plugins.py`. Structure: `profiles/` (mode configs: normal / discuss / debug), `modules/shared/` (role, constraints, citation format), `modules/normal/`, `modules/discuss/`. **Mode switching (normal vs discuss) and bilingual-citation toggle are entirely prompt-layer** — the graph never forks for them. To adapt to a different research field, swap the domain-knowledge modules; the tool chain stays untouched.
+
+### Tool text layering — docstring / schema / prompt (who says what)
+
+Tool-facing text the LLM sees is split across three layers with a strict division of labor:
+
+- **`@tool` docstring** — **WHAT it returns** (return schema — the only place that describes the payload) + a one-line positioning. Not usage/orchestration.
+- **`Field.description` (`args_schema`)** — per-argument **format + 防呆 (foolproofing) rules**.
+- **prompt tool-introduction section** — **WHEN**: cross-tool orchestration, 降级链, which-tool-when. The single source of truth for tool-specific timing.
 
 ### Document ingestion (`src/core/`)
 

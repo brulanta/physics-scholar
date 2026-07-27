@@ -66,13 +66,18 @@ MINIMAL = HarnessProfile(
 # 子 agent（检索 agent）预置：T2 解耦后的检索循环 owner。
 # guard strict——与拆分前检索循环所在的 strict 对等（不因搬进子图就卸掉 per-call thinking
 # 监管；「优先拆、之后考虑减」，先保对等基线，probe 验证后再议是否松到 soft/off）+
-# prefill minimal（非流式 ainvoke、不经流式 marker 闸门；⑤ minimal 破契约是流式空间的坑，
-# 子 agent 非流式不踩，minimal 仅留 [RUNTIME_STATUS]+[start]）+ final_prefill light
-# + 预算 6（对齐拆分前全局检索额度；子 agent 纯检索不写答案，6 次成功检索够用，且 guard
-# 驳回重试不消耗预算）。详见 plan/subagent-retrieval-decouple-plan.md。
+# prefill **light** + final_prefill light + 预算 6（对齐拆分前全局检索额度；子 agent 纯检索
+# 不写答案，6 次成功检索够用，且 guard 驳回重试不消耗预算）。详见 plan/subagent-retrieval-decouple-plan.md。
+#
+# prefill 取 light 而非 minimal 的实证依据（Stage 4 probe，gemini-3.1-pro-preview Q03）：
+# 初版 minimal（裸 [start]、无 <think> 引子）→ 模型前三轮直接发空 content + tool_call、不包
+# <thinking> 标签 → guard 连拦 3 次（thinking_compliance 0.0）→ 第 4 轮泄气自认「调用次数 0」
+# 空收敛、一次真实检索都没跑。即「⑤ minimal 破契约仅限流式空间」的旧假设被推翻——非流式
+# 子 agent 同样踩坑；light 里「先输出 <thinking>」引子是承重的（与 MINIMAL 预置⑤结论一致：
+# minimal 破契约、light 是地板）。
 RETRIEVER = HarnessProfile(
     guard_mode="strict",
-    prefill_level="minimal",
+    prefill_level="light",
     final_prefill="light",
     budget_n=6,
 )

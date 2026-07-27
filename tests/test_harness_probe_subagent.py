@@ -90,7 +90,7 @@ def test_sub_state_uses_subagent_prompt_and_unforced_budget():
     state = build_sub_state("q", "u", profile)
     sys_content = state["messages"][0].content
     assert sys_content == build_subagent_prompt()        # 子 agent 专属 prompt
-    assert "检索子系统" in sys_content                   # 身份标识（确认非主 agent prompt）
+    assert "检索系统" in sys_content                     # 身份标识（确认非主 agent prompt）
     assert "return_findings" in sys_content              # 终止协议在场
     assert state["remaining_calls"] == profile.budget_n   # 6，未强制（与主 agent 的强制 1 对照）
     assert state["findings"] == ""

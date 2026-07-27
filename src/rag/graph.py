@@ -165,7 +165,9 @@ class AgentState(TypedDict):
     thinking_retry_count: int
     is_thinking_correction: bool
     pending_correction: str
-    findings: str  # 子 agent 专用：finalize 写检索结果拼接，retrieve 壳取；主 agent 不用
+    findings: (
+        str  # 子 agent 专用：finalize 写检索结果拼接，retrieve 壳取；主 agent 不用
+    )
 
 
 def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
@@ -196,7 +198,9 @@ def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
 
     # 轴 A（guard_mode）：soft = 缺 <thinking> 只记警告、不驳回，放行到 tool_node
     if profile.guard_mode == "soft":
-        logger.warning("[guard:soft] 工具调用缺 <thinking>，soft 模式放行（不驳回、不纠正）")
+        logger.warning(
+            "[guard:soft] 工具调用缺 <thinking>，soft 模式放行（不驳回、不纠正）"
+        )
         return {
             **state,
             "thinking_retry_count": 0,
@@ -215,7 +219,7 @@ def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
     # 违规：保留原始 AI message，为每个 tool_call 补虚假 ToolMessage
     fake_tool_messages = [
         ToolMessage(
-            content="[工具调用已被取消：未检测到必要的 <thinking> 块，请先完成 [TOOL_LOOP] 再调用工具]",
+            content="[工具调用已被取消：未检测到必要的 <thinking> 块，请先输出完整的 <thinking> 再重新调用工具]",
             tool_call_id=tc["id"],
         )
         for tc in last_msg.tool_calls
@@ -434,6 +438,7 @@ def _build_graph(
     *,
     terminator: str | None = None,
     finalize_fn=None,
+    annotate_tool_results: bool = False,
 ):
     """共享图组装层（薄、无业务逻辑）：主 agent 与子 agent 共用同一套图骨架。
 
@@ -446,7 +451,16 @@ def _build_graph(
     函数全部仍可复用（沉没成本≈0）。详见 plan/subagent-retrieval-decouple-plan.md。
     """
     llm_with_tools = llm.bind_tools(tools)
-    tool_node = ToolNode(tools)
+    if annotate_tool_results:
+        # 子 agent 专属：工具执行后给每条结果注「第 N 次」HumanMessage（_annotate_tool_results），
+        # 让子 agent 按显式 N 填 result_index（系统给指引，不靠 LLM 自觉数数）。
+        _base_tool_node = ToolNode(tools)
+
+        async def tool_node(state):
+            result = await _base_tool_node.ainvoke(state)
+            return _annotate_tool_results(state, result)
+    else:
+        tool_node = ToolNode(tools)
 
     # 把llm_with_tools和tool_node闭包进节点函数
     async def call_llm(state):
@@ -577,9 +591,7 @@ def _build_graph(
 class RetrievalSelection(BaseModel):
     """return_findings 的 selection 项 schema：子 agent 点的检索结果索引 + 理由。"""
 
-    result_index: int = Field(
-        description="检索结果序号（0-based，从第一个真实工具结果起算，不数 return_findings）"
-    )
+    result_index: int = Field(description="检索结果序号")
     reason: str = Field(
         description="一句话说明这个结果为什么有用（你的判断，不要抄工具返回内容）"
     )
@@ -598,15 +610,39 @@ def _make_return_findings_tool():
         selection: list[RetrievalSelection],
         summary: str,
     ) -> str:
-        """检索完成、已为问题找到足够支撑时调用本工具终止检索。
+        """决定收敛返回时调用本工具终止检索。
 
-        - selection：你认为对回答有用的检索结果列表，每项含 result_index（检索结果序号，
-          0-based，按你看到真实结果的顺序数）+ reason（为什么有用）。
-        - summary：一句话概括检索到了什么、覆盖了哪些缺口、还缺什么。
+        - selection：你认为对回答有用的检索结果列表，每项含 result_index + reason。
+        - summary：一句话诚实概括检索到了什么、覆盖了哪些缺口、还缺什么。
         """
         return ""  # 被 finalize 拦截，不真正执行
 
     return return_findings
+
+
+def _annotate_tool_results(state, tool_result):
+    """子 agent 专属：给本批新工具结果各注一条 HumanMessage「第 N 次工具调用结果 · 工具{name}」。
+
+    N 与 _subagent_finalize 编号同口径——带 name 的 ToolMessage 出现顺序、**1-based**、含失败
+    结果（429/500 也是一次调用，子 agent 要看得见才能诚实反馈"几次调用因何失败"）。让子 agent
+    按显式 N 填 return_findings 的 result_index，不靠自觉数数（混合成功/失败/不相关结果时 LLM 数数
+    必然错位，见 Stage 4 probe Q03 实测）。ToolMessage 内容保持干净——标注是独立 HumanMessage，
+    候选源抽取（citation JSON 解析）与 finalize（只数 ToolMessage）都不受影响。
+    """
+    new_msgs = tool_result.get("messages", []) if isinstance(tool_result, dict) else []
+    existing = sum(
+        1
+        for m in state.get("messages", [])
+        if isinstance(m, ToolMessage) and (getattr(m, "name", "") or "")
+    )
+    annotations: list[HumanMessage] = []
+    offset = 0
+    for tm in new_msgs:
+        if isinstance(tm, ToolMessage) and (getattr(tm, "name", "") or ""):
+            n = existing + offset + 1  # 1-based，与 finalize enumerate(tool_msgs, 1) 对齐
+            annotations.append(HumanMessage(content=f"第 {n} 次工具调用结果 · 工具 {tm.name}"))
+            offset += 1
+    return {"messages": list(new_msgs) + annotations}
 
 
 async def _subagent_finalize(state: AgentState) -> dict:
@@ -655,7 +691,7 @@ async def _subagent_finalize(state: AgentState) -> dict:
         }
         picked = [
             f"### 检索结果 #{i}（{tm.name}）\n{tm.content}"
-            for i, tm in enumerate(tool_msgs)
+            for i, tm in enumerate(tool_msgs, 1)
             if i in sel_indices
         ]
         if picked:
@@ -666,7 +702,7 @@ async def _subagent_finalize(state: AgentState) -> dict:
                 "## 检索结果\n\n"
                 + "\n\n".join(
                     f"### 检索结果 #{i}（{tm.name}）\n{tm.content}"
-                    for i, tm in enumerate(tool_msgs)
+                    for i, tm in enumerate(tool_msgs, 1)
                 )
             )
     else:
@@ -676,7 +712,7 @@ async def _subagent_finalize(state: AgentState) -> dict:
                 "## 检索结果（预算耗尽兜底）\n\n"
                 + "\n\n".join(
                     f"### 检索结果 #{i}（{tm.name}）\n{tm.content}"
-                    for i, tm in enumerate(tool_msgs)
+                    for i, tm in enumerate(tool_msgs, 1)
                 )
             )
 
@@ -736,6 +772,7 @@ def build_subagent(
         profile,
         terminator="return_findings",
         finalize_fn=_subagent_finalize,
+        annotate_tool_results=True,
     )
 
 
@@ -763,11 +800,11 @@ def _extract_findings(result: dict) -> str:
 # ── retrieve 出口状态分类（文本信封第一行 + agent_hint）──────────────────────────
 # 对齐 s2/openalex/arxiv/jina 的 agent_hint 约定：让主 agent 区分「无符合材料」与
 # 「上游硬伤」，两者作答措辞不同。分类信号全在子 agent state/messages（详见 plan）。
-_RETRIEVE_OK = "SUCCESS"            # 有甄选材料（ok>0 且收敛）
-_RETRIEVE_NO_MATCH = "NO_MATCH"     # 无任何成功工具结果、子 agent 收敛 → 语义空
-_RETRIEVE_INFRA = "INFRA_FAIL"      # 工具全部报错 → 管道断了、非「无文献」
-_RETRIEVE_INCOMPLETE = "INCOMPLETE" # 预算耗尽兜底、未经甄选
-_RETRIEVE_HARD = "HARD_FAIL"        # ainvoke 抛异常 → 图级硬伤
+_RETRIEVE_OK = "SUCCESS"  # 有甄选材料（ok>0 且收敛）
+_RETRIEVE_NO_MATCH = "NO_MATCH"  # 无任何成功工具结果、子 agent 收敛 → 语义空
+_RETRIEVE_INFRA = "INFRA_FAIL"  # 工具全部报错 → 管道断了、非「无文献」
+_RETRIEVE_INCOMPLETE = "INCOMPLETE"  # 预算耗尽兜底、未经甄选
+_RETRIEVE_HARD = "HARD_FAIL"  # ainvoke 抛异常 → 图级硬伤
 
 
 def _return_findings_called(messages) -> bool:
@@ -816,7 +853,7 @@ def _classify_retrieve_outcome(result, exception) -> tuple[str, str]:
     """
     if exception is not None:
         return _RETRIEVE_HARD, (
-            "检索因硬性故障未取得结果（子图异常/网络彻底不可达），非「无文献」。"
+            "检索因硬性故障未取得结果（检索异常/网络彻底不可达），非「无文献」。"
             "retrieve 仅一次寿命、无法重试；请基于背景知识作答，并说明检索受阻。"
         )
     messages = result.get("messages", []) if isinstance(result, dict) else []
@@ -829,49 +866,155 @@ def _classify_retrieve_outcome(result, exception) -> tuple[str, str]:
         )
     if ok > 0:
         if rf_called:
-            return _RETRIEVE_OK, "检索成功，已返回子 agent 甄选的相关结果。"
+            return _RETRIEVE_OK, "检索成功，已返回甄选后的检索结果。"
         return _RETRIEVE_INCOMPLETE, (
-            "子 agent 未在检索预算内收敛，结果为预算耗尽兜底（未经甄选），可能偏全。"
+            "检索未在预算内收敛，结果为预算耗尽兜底（未经甄选），可能偏全。"
             "请基于已有结果作答，措辞留余地。"
         )
     # ok==0 and err==0：无任何工具成功结果
     if rf_called:
         return _RETRIEVE_NO_MATCH, (
-            "子 agent 完成检索但未取得任何成功结果（语义空，非故障）。"
+            "检索完成但未取得任何成功结果（语义空，非故障）。"
             "可基于背景知识作答，或说明该方向暂无可用文献。"
         )
     return _RETRIEVE_INCOMPLETE, (
-        "子 agent 未在检索预算内取得任何结果。请基于背景知识作答，措辞留余地。"
+        "检索未在预算内取得任何结果。请基于背景知识作答，措辞留余地。"
     )
 
 
+def _dump_subagent_trace(question, result, status, hint, findings):
+    """env 门控（PS_DUMP_SUBAGENT=1）落盘 retrieve 壳内子 agent 的完整 transcript。
+
+    生产默认关闭（env 未设）。诊断用：--target main 只落主 agent 视角的 transcript，看不到
+    retrieve 壳内子 agent 的工具链 / return_findings selection / finalize 打包；本函数补这个
+    缺口，用于定性子 agent 是幻觉、引用错误、还是 finalize 打包不一致。每次 retrieve 调用
+    一个文件（timestamp 命名）。落盘失败只 warn，绝不影响检索主路径。
+    """
+    import os
+
+    if not os.environ.get("PS_DUMP_SUBAGENT"):
+        return
+    import json
+    from datetime import datetime
+    from pathlib import Path
+
+    try:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        dump_dir = (
+            Path(__file__).resolve().parents[2]
+            / "eval_framework"
+            / "results"
+            / "behavior"
+            / "transcripts"
+            / "subagent_inner"
+        )
+        dump_dir.mkdir(parents=True, exist_ok=True)
+        msgs = []
+        for m in result.get("messages", []) if result else []:
+            entry = {"type": m.type}
+            c = m.content
+            if isinstance(c, str):
+                entry["content"] = c
+            else:
+                try:
+                    json.dumps(c)
+                    entry["content"] = c
+                except (TypeError, ValueError):
+                    entry["content"] = repr(c)
+            if isinstance(m, AIMessage) and getattr(m, "tool_calls", None):
+                entry["tool_calls"] = [
+                    {"name": t.get("name"), "args": t.get("args"), "id": t.get("id")}
+                    for t in m.tool_calls
+                ]
+            if getattr(m, "name", None):
+                entry["name"] = m.name
+            if isinstance(m, ToolMessage):
+                entry["tool_call_id"] = getattr(m, "tool_call_id", None)
+            msgs.append(entry)
+        payload = {
+            "question": question,
+            "status": status,
+            "agent_hint": hint,
+            "findings": findings,
+            "remaining_calls": result.get("remaining_calls") if result else None,
+            "messages": msgs,
+        }
+        out = dump_dir / f"sub_{stamp}.json"
+        out.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        logger.info("[retrieve] 子 agent 内层 transcript 落盘 → %s", out)
+    except Exception as e:  # 落盘绝不影响检索主路径
+        logger.warning("[retrieve] 内层 transcript 落盘失败（不影响检索）: %s", e)
+
+
+class RetrieveRequest(BaseModel):
+    """retrieve 的 args_schema——教主 agent 如何下达检索指令（handoff 契约，T2 Stage 4 B 方案）。
+
+    主 agent 沿 CoT 甄别出缺口后调 retrieve；这里把「用户原问题 / 具体缺口 / 约束」三段拆开收，
+    子 agent 收到结构化指令、聚焦检索目标，而非从原话重新推导。各 Field 的 description 即是对
+    主 agent 的填写指引（schema 教 agent，对齐 CLAUDE.md「Tool text layering」）。
+    详见 plan/subagent-retrieval-decouple-plan.md。
+    """
+
+    question: str = Field(
+        description=(
+            "用户的原始问题（完整原文）。检索系统据此判断检索结果与真实需求的相关性、做甄选；"
+            "原样传入，不要自行改写或精简。"
+        ),
+    )
+    gap: str = Field(
+        description=(
+            "你沿 CoT 甄别出的具体信息缺口：需要什么证据、为什么需要。"
+            "这是检索系统的检索目标——写清具体缺口比复述问题更有用。"
+            "例：「需要 2020 年后关于 photonic microwave generation 的综述，用以支撑对近期进展的归纳」。"
+        ),
+    )
+    constraints: str = Field(
+        default="",
+        description=(
+            "检索约束（可选，留空=无）：年份范围、论文类型（综述/期刊）、时效要求、"
+            "本地优先或外部优先等。自然语言即可。"
+        ),
+    )
+
+
+# TODO(future, 见 plan Stage 4 deferred): retrieve 的工具特定 WHEN（「一次寿命」）暂栖其 docstring
+# ——主 agent 侧无 per-tool prompt 节（T2 删 tool_usage.py 后主 agent prompt 通用、不感知具体工具）。
+# 未来主 agent 绑定 >1 工具时，让 tool_usage 节回归，把 WHEN 从这里挪进该 prompt 节
+# （对齐 CLAUDE.md「Tool text layering —— prompt tool-introduction = WHEN」）。
 def make_retrieve_tool(user_id: str):
     """主 agent 的 retrieve 工具壳：把子 agent 图包成一个工具。
 
-    主 agent 调 retrieve(query) → 壳内 build_subagent().ainvoke（非流式同步阻塞）→
+    主 agent 调 retrieve(question, gap, constraints) → 壳内 build_subagent().ainvoke（非流式阻塞）→
     取 findings 作 content、子 agent 工具结果作 artifact，返回 (content, artifact)。
-    response_format='content_and_artifact' 让 BaseTool 把它包成 ToolMessage——
-    content 给主 agent LLM 读 findings，artifact 给 _consume_events 收候选源（T1 seam 兑现）。
-    Stage 1–4 不接流式 custom event：retrieve 调用期间前端只见一个工具节点转圈。
+    response_format='content_and_artifact' 让 BaseTool 包成 ToolMessage——content 给主 agent LLM 读
+    findings，artifact 给 _consume_events 收候选源（T1 seam 兑现）。Stage 1–4 不接流式 custom event。
     """
 
-    @tool(response_format="content_and_artifact")
-    async def retrieve(query: str):
+    @tool(args_schema=RetrieveRequest, response_format="content_and_artifact")
+    async def retrieve(question: str, gap: str, constraints: str = ""):
         """检索本地知识库与外部文献（Semantic Scholar / OpenAlex / arXiv / Jina 全文精读），
-        返回支撑当前问题的检索结果与可引用文献。问题需要外部文献证据或本地论文内容时调用。
+        返回支撑你所甄别缺口的检索结果与可引用文献。
 
-        **一次寿命**：你一回合只能调用 retrieve 一次——它内部已跑完整检索循环（多轮检索 +
-        降级链 s2→openalex→arxiv→jina + 本地 RAG），返回的即本轮最终结果。检索不够理想是
-        retrieve 内部子 agent 的事，**不要第二次调用、不要怀疑结果**：这次调用就代表你「已尝试
-        获取信息填补缺口」这个动作，结果高度置信，拿到就基于它作答。
-
-        返回是文本信封，第一行 `[检索状态: ...]` 说明结果性质，据此调整作答措辞：
+        ## 返回格式（文本信封）
+        第一行 `[检索状态: ...]` 说明结果性质，据此调整作答措辞：
         - SUCCESS：正常拿到材料。
         - NO_MATCH：检索完成但无符合材料（语义空，非故障）——可基于背景知识作答或说明该方向暂无文献。
         - INFRA_FAIL / HARD_FAIL：检索因网络/上游故障未取得结果（非「无文献」）——基于背景知识作答并说明检索受阻。
         - INCOMPLETE：预算耗尽兜底、结果未经甄选——基于已有结果作答、措辞留余地。
-        无论哪种状态，retrieve 寿命已用完，不再重调。
+        信封正文是检索系统甄选后的检索结果（含 source_id 前缀，供你写 lean ref）。
+
+        ## 一次寿命
+        你一回合只能调用 retrieve 一次——它内部已跑完整检索循环，返回的即本轮最终结果。
+        **不要第二次调用 retrieve**：结果不理想是客观事实——接受结果的**存在性**，不重试。
+        但对结果的**相关性与正确性始终保持你自己的判断**。
         """
+        # 打包成子 agent 的检索指令（结构化 HumanMessage；格式由本壳定，子 agent prompt 不写死标记）
+        instruction = f"[用户问题]\n{question}\n\n[信息缺口]\n{gap}"
+        if constraints.strip():
+            instruction += f"\n\n[检索约束]\n{constraints}"
+
         exception = None
         result = None
         try:
@@ -879,7 +1022,7 @@ def make_retrieve_tool(user_id: str):
             initial_state = {
                 "messages": [
                     SystemMessage(content=build_subagent_prompt()),
-                    HumanMessage(content=query),
+                    HumanMessage(content=instruction),
                 ],
                 "conv_id": "",
                 "user_id": user_id,
@@ -893,12 +1036,19 @@ def make_retrieve_tool(user_id: str):
             logger.warning("[retrieve] 子 agent 检索异常: %s", e)
 
         status, hint = _classify_retrieve_outcome(result, exception)
-        findings = _extract_findings(result) if result is not None else "(检索未返回结果)"
+        findings = (
+            _extract_findings(result) if result is not None else "(检索未返回结果)"
+        )
         # 候选源 = 子 agent 所有真实工具结果（经 artifact 冒泡给 _consume_events →
         # result['tool_results'] → _persist_and_enrich collect）。findings 本身不进候选收集
         # （它是拼接产物，候选层要原始工具结果做 source_id 提取）。状态信封不影响 artifact。
-        candidates = _tool_results_from_messages(result.get("messages", [])) if result else []
-        envelope = f"[检索状态: {status}]\n[agent_hint: {hint}]\n\n[检索结果]\n{findings}"
+        candidates = (
+            _tool_results_from_messages(result.get("messages", [])) if result else []
+        )
+        envelope = (
+            f"[检索状态: {status}]\n[agent_hint: {hint}]\n\n[检索结果]\n{findings}"
+        )
+        _dump_subagent_trace(question, result, status, hint, findings)
         return envelope, candidates
 
     return retrieve
@@ -1019,7 +1169,10 @@ def chat(
 
         # 候选 enrichment 落 sidecar（非流式测试兜底路径，只存不 enrich——见 plan 边界）
         _persist_and_enrich(
-            conversation_id, agent_res["message_id"], agent_msg_pure, result,
+            conversation_id,
+            agent_res["message_id"],
+            agent_msg_pure,
+            result,
             enrich=False,
         )
 
@@ -1091,7 +1244,10 @@ def regenerate(
 
         # 候选 enrichment 落 sidecar（非流式测试兜底路径，只存不 enrich——见 plan 边界）
         _persist_and_enrich(
-            conversation_id, agent_res["message_id"], agent_msg_pure, result,
+            conversation_id,
+            agent_res["message_id"],
+            agent_msg_pure,
+            result,
             enrich=False,
         )
 
@@ -1278,7 +1434,9 @@ async def _consume_events(agent, initial_state, request, result: dict):
             await aiter.aclose()
 
 
-def _tool_results_from_messages(messages: Sequence[BaseMessage]) -> list[tuple[str, str]]:
+def _tool_results_from_messages(
+    messages: Sequence[BaseMessage],
+) -> list[tuple[str, str]]:
     """从非流式 ainvoke 的完整 state messages 抽 (tool_name, content) 列表，
     供 _persist_and_enrich 候选收集（与流式 on_tool_end 累积同构）。
 
@@ -1324,7 +1482,8 @@ def _detect_and_mark_hallucination(
             logger.warning(
                 "[%s] 引用幻觉检测：model 引用了候选集没有的 source_id %s "
                 "（可能是编造 id 或候选收集漏抓）",
-                conversation_id, hallucinated,
+                conversation_id,
+                hallucinated,
             )
     except Exception as e:
         logger.warning("[%s] 幻觉检测异常（不影响回答）: %s", conversation_id, e)
@@ -1354,12 +1513,15 @@ def _persist_and_enrich(
     if candidates:
         try:
             save_candidates(
-                agent_msg_id, conversation_id,
+                agent_msg_id,
+                conversation_id,
                 [c.to_row(agent_msg_id, conversation_id) for c in candidates],
             )
         except Exception as e:
             # sidecar 写失败不阻断回答——展示降级为 lean（裸 source_id），回答正文不受影响
-            logger.warning("[%s] 候选 enrichment 落 sidecar 失败: %s", conversation_id, e)
+            logger.warning(
+                "[%s] 候选 enrichment 落 sidecar 失败: %s", conversation_id, e
+            )
 
     if not enrich:
         # 非流式测试兜底路径仍做幻觉检测 + is_cited 标记（不 enrich 展示，但信号要记）
@@ -1380,6 +1542,7 @@ def _persist_and_enrich(
     if missing:
         try:
             from src.core.citation_store import load_enrichment_map
+
             extra = load_enrichment_map(conversation_id, missing)
             enrich_map.update(extra)
         except Exception as e:

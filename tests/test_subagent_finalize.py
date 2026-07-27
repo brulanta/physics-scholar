@@ -119,8 +119,8 @@ def test_finalize_picks_selected_indices():
         _tm("[rag:d1 | 论文A, Page 3]\n本地 chunk 正文", "rag_tool", "c2"),
         AIMessage(content="", tool_calls=[_tc("return_findings", {
             "selection": [
-                {"result_index": 0, "reason": "外部主证"},
-                {"result_index": 1, "reason": "本地佐证"},
+                {"result_index": 1, "reason": "外部主证"},
+                {"result_index": 2, "reason": "本地佐证"},
             ],
             "summary": "覆盖了原理与本地实验",
         }, "c3")]),
@@ -129,8 +129,8 @@ def test_finalize_picks_selected_indices():
     findings = result["findings"]
 
     assert "覆盖了原理与本地实验" in findings  # summary 进 findings
-    assert "检索结果 #0（s2_search_tool）" in findings
-    assert "检索结果 #1（rag_tool）" in findings
+    assert "检索结果 #1（s2_search_tool）" in findings
+    assert "检索结果 #2（rag_tool）" in findings
     assert "PaperA" in findings  # s2 结果原文（不转写，原样吐）
     assert "本地 chunk 正文" in findings  # rag 结果原文
 
@@ -144,14 +144,14 @@ def test_finalize_skips_unselected_index():
         _ai_tool("arxiv_tool", {"query": "y"}, "c2"),
         _tm('{"papers":[{"arxiv_id":"B"}]}', "arxiv_tool", "c2"),
         AIMessage(content="", tool_calls=[_tc("return_findings", {
-            "selection": [{"result_index": 0, "reason": "只要这个"}],
+            "selection": [{"result_index": 1, "reason": "只要这个"}],
             "summary": "s",
         }, "c3")]),
     ]
     findings = asyncio.run(_subagent_finalize({"messages": messages}))["findings"]
-    assert "检索结果 #0" in findings
-    assert "arxiv_id" not in findings  # #1 未选，不进
-    assert "检索结果 #1" not in findings
+    assert "检索结果 #1" in findings
+    assert "arxiv_id" not in findings  # #2 未选，不进
+    assert "检索结果 #2" not in findings
 
 
 def test_finalize_budget_exhausted_picks_all():
@@ -206,7 +206,7 @@ def test_finalize_truncates_overlong():
         _ai_tool("jina_tool", {"url": "u"}, "c1"),
         _tm(long_blob, "jina_tool", "c1"),
         AIMessage(content="", tool_calls=[_tc("return_findings", {
-            "selection": [{"result_index": 0, "reason": "r"}], "summary": "s",
+            "selection": [{"result_index": 1, "reason": "r"}], "summary": "s",
         }, "c2")]),
     ]
     findings = asyncio.run(_subagent_finalize({"messages": messages}))["findings"]

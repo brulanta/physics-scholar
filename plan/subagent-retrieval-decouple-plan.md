@@ -43,6 +43,7 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - 子 agent = 独立编译的图（有自己的 State/预算/guard），`build_subagent` 产出；对主 agent 是 `retrieve` 工具（`bind_tools` 一项），对自己是图（有循环、guard、预算）。唯一桥是 `retrieve` 工具壳函数：主 agent 递 query → 子图 `ainvoke`（非流式、同步阻塞）→ 取 findings 回吐成主 agent 的 ToolMessage。
 - **`return_findings` 终止**：子 agent 工具，结构化参数 `selection=[{result_index, reason}], summary`。子 agent 检索够了就调它。`after_guard` 检测到该 tool_call → 路由 `finalize` 节点（不走 tool_node 回 call_llm）。
   > **实现定稿（偏离原计划）**：去掉了原计划的 `item_index`。编号单位是 **ToolMessage / 工具调用**（「第几次工具结果有用」），不做工具结果内部的 item 级筛选——主 agent 读整条选中的工具结果原文自己摘抄。item 级筛选（省 token）作为后续优化，第一版不上。
+  > **2026-07-27 修订（Stage 4.5 解冻）**：item 级精度排上进程（用户预设精度，非可选）。拱心石 = `citation.py` `extract_candidates` 对四检索工具给干净条目（s2/arxiv/openalex=论文、rag=chunk），lookup/jina 单条整体。设计见下「Stage 4.5」。
 - **`finalize` 节点**：从 state messages 找 `return_findings` args + 按顺序编号的真实 ToolMessage；**直接用 `ToolMessage.content` raw**（不经过 `citation.py` 的 `extract_candidates`——`Candidate` 只存元信息无 content 字段，而 finalize 要的是工具结果原文给主 agent 读），按 `result_index` 抠选中工具调用的整条 content 拼成 findings 写 `state['findings']`。候选 enrichment 收集仍复用 `collect_from_tool_results`（喂 retrieve 壳冒泡的原始工具结果，零改）。子 agent 全程**只点索引不转写元信息**（解中间商抄错 + 不白花 token 原样吐）。
 - **摘抄归属留主 agent**：桥接层传给主 agent 的是被选中工具调用的 content raw（限长兜底，`MAX_FINDINGS_LEN=12000` 截断，jina 长 blob 截断），主 agent 自己读自己摘抄进 ref——grounding 留主 agent 保反幻觉初衷。
 - **配置（修订后）**：`RETRIEVER = HarnessProfile(guard_mode="strict", prefill_level="minimal", final_prefill="light", budget_n=6)`。guard **strict**（与拆分前检索循环所在的 strict 对等——不因搬进子图就卸掉 per-call thinking 监管；「优先拆、之后考虑减」，先保对等基线，probe 验证后再议松到 soft/off）+ prefill **minimal**（非流式 ainvoke、不经流式 marker 闸门；⑤ minimal 破契约是流式空间的坑，子 agent 非流式不踩）+ budget **6**（对齐拆分前全局检索额度；子 agent 纯检索不写答案，6 次成功检索够用，且 guard 驳回重试不消耗预算——`call_llm` 扣、`thinking_guard` 驳回时 `+1` 还回）。**预算耗尽走 `finalize` 兜底**（`after_guard` 的 `budget_route=finalize`，拼已有工具结果作 findings）；`final_answer` 节点因共用 `_build_graph` 仍 add（子 agent 图里是死节点，永不路由到）。
@@ -50,7 +51,7 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 
 ## 实现阶段（每阶段独立可提交）
 
-> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅ + **修订**（见下「Stage 2」：TOOL_DECISION_PLUGIN/output_format/协议 B 回滚原版保 CoT phase 链 + retrieve docstring 承单次寿命契约 + 状态信封 5 分类 + RETRIEVER strict/budget6 + 子 agent thinking 收紧；核心测试全过）/ Stage 3 ✅（见下「Stage 3」：harness_probe `--target sub`/`--model` + `_prepare` 主 agent 种子 bug 修复（remaining_calls 6→1，单次 retrieve 的 budget 安全网才真正生效）+ `test_harness_probe_subagent.py`；probe 真跑留 Stage 4）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。
+> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅ + **修订**（见下「Stage 2」：TOOL_DECISION_PLUGIN/output_format/协议 B 回滚原版保 CoT phase 链 + retrieve docstring 承单次寿命契约 + 状态信封 5 分类 + RETRIEVER strict/budget6 + 子 agent thinking 收紧；核心测试全过）/ Stage 3 ✅（见下「Stage 3」：harness_probe `--target sub`/`--model` + `_prepare` 主 agent 种子 bug 修复（remaining_calls 6→1，单次 retrieve 的 budget 安全网才真正生效）+ `test_harness_probe_subagent.py`；probe 真跑留 Stage 4）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。 / **Stage 4 ✅**（task #9 v3 prompt 定版 + RETRIEVER minimal→light + 主/子agent metadata 清零沉淀进 CLAUDE.md + result_index 系统标注修复索引 bug + Q03 端到端验证通过——详见下「Stage 4」）。**Stage 4.5（item 级精度）进行中**。
 
 ### Stage 0 ✅ — 分支 + 抽 `_build_graph`（零行为变化地基）
 - 建分支 `t2-subagent-retrieval`。
@@ -92,10 +93,48 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - 子 agent probe 单测 `test_harness_probe_subagent.py`（复刻 `test_harness_probe_metrics.py` 的 `importlib.util` 文件加载）：`build_main_state` rem=1 回归门、`build_sub_state` 形状、`collect_metrics` 在子 agent 风格 transcript（return_findings 不计 tool_rounds、strict guard 哨兵真信号、预算耗尽无 BUDGET_SENTINEL）。5 例 + 既有 metrics 11 例全过；T2 核心 76 例无回归。
 - ⚠️ probe 真跑（gemini cross-model 轮测）留 Stage 4——本 stage 只交付量具 + 离线单测，未触网。
 
-### Stage 4 — probe 轮测验收（T2 验收门）
-- gemini 下验证 `RETRIEVER`（guard strict + prefill minimal 非流式）安全：`missing_thinking_calls`/`guard_hits` 合规、`tool_rounds` 合理、Tier-1 门 `tool_err_request` 不退化；子 agent prompt 轻量是否够（看 guard 拦截率/契约遵守）决定是否加料。
-- 验证主 agent 行为不退化：删 prompt 编排后主 agent 稳定「只调 1 次 retrieve」、marker 闸门流式正确。
-- 印证 memory `harness-vs-llm-change-stance`：probe 是回路（存活且搬子 agent 更值钱），校准点是 `RETRIEVER` 配置。
+### Stage 4 — probe 轮测验收（T2 验收门）→ 已转向「子 agent prompt 重构」（task #9）
+- **probe 冒烟已跑**（gemini-3.1-pro-preview，Q03，`--target sub`）：plumbing ✓、strict guard 拦 2 次漏 thinking ✓（挣到工资）、Tier-1 `tool_err_request=0` ✓、预算恢复机制 ✓。但暴露 v1 轻量子 agent prompt **退化性不收敛**：42KB 自发明 `[tool_loop]/[tool_call]/[tool_response]/[end]/[start]` 循环、从不调 return_findings。
+- **根因三连**：① 子 agent prompt 零标记教学真空；② guard 哨兵泄漏主 agent `[TOOL_LOOP]` 种子（**已修**：graph.py thinking_guard 哨兵去 `[TOOL_LOOP]`，与 correction_text 同口径）；③ minimal prefill 裸 `[start]` 无结构锚点。
+- **认知纠偏（沉淀进 CLAUDE.md「Tool text layering」）**：拆 ≠ 降级——子 agent 要把主 agent 工具循环那段 CoT（Phase 0-3 + Q1-Q3 申请书）**原样搬过来**（改编语境、去 marker、去答案侧），不是削成轻量；docstring/schema/prompt(tool-introduction 节)/CoT 四处分工不重复；CoT 通用不耦合具体工具。
+- **转向 task #9（clean-slate prompt 重构）**：handoff 契约改为 `retrieve(question, gap, constraints)`（B）；return_findings 折进工具介绍节、WHEN 不进 CoT；guard/prefill/budget-accounting 等「小头」挂起，待 prompt 定版（大头）后再调。
+- 验证主 agent 行为不退化：删 prompt 编排后主 agent 稳定「只调 1 次 retrieve」（种子修复后 budget 安全网真生效）、marker 闸门流式正确。
+- 印证 memory `harness-vs-llm-change-stance`：probe 是回路（存活且搬子 agent 更值钱），校准点是 `RETRIEVER` 配置 + 子 agent prompt。
+
+> **未来扩展（deferred 留痕）**：`retrieve` 的工具特定 WHEN（「一次寿命」）目前暂栖其 docstring——因主 agent 侧无 per-tool prompt 节（T2 删 tool_usage.py 后主 agent prompt 通用、不感知具体工具）。**未来主 agent 绑定 >1 工具时，让 tool_usage 节在主 agent 侧回归，把工具特定 WHEN 从 retrieve docstring 挪进该 prompt 节**（对齐「prompt tool-introduction = WHEN」铁律）。同批 deferred：~~prefill minimal→light~~ ✅（Stage 4：minimal 非流式也破契约）、~~Stage 4 全量 re-probe~~ ✅（Q03 通过）；仍 deferred：guard 调参、return_findings 预算豁免（代码）、retrieve WHEN relocation。**item 级精度**（原 deferred 的 `item_index`）已解冻 → 见「Stage 4.5」。
+
+
+### Stage 4 ✅ — task #9 prompt 定版 + result_index 系统标注修复 + 端到端验证
+
+**task #9（v3 子 agent prompt）定版**：clean-slate 重写——照搬主 agent 工具循环 CoT（Phase 0-3 + 申请书）改编语境（检索系统/降级链/`return_findings` 收敛协议），去 marker、去答案侧；Strategy 节列 7 工具含 `return_findings`（绑「收敛返回」动作 + 预算豁免声明）。文件：`src/rag/prompts/subagent_prompt.py`。
+
+**配置定版**：RETRIEVER `prefill_level` minimal→**light**。Q03 probe 实证 minimal（裸 `[start]` 无 `<think>` 锚点）compliance 0.0——模型吐空 content + tool_call 无 `<thinking>` 包裹，guard 连拒 3 次放弃；light 注入 `<think>…现在输出 [start]` 引导，compliance 1.0。**推翻旧认知「minimal 破契约仅限流式空间」——非流式 ainvoke 也踩**。文件：`src/rag/harness_profile.py`（注释带实证）。
+
+**主/子 agent metadata 清零（invariant 沉淀进 CLAUDE.md）**：LLM 可见文本（@tool docstring / Field.description / prompt / prefill / guard 哨兵 / 跨边消息）严禁出现 主/子agent/subagent/子系统/子图——9 处泄漏已修（retrieve docstring「返回支撑主 agent」→「支撑你」、instruction label「主 agent 甄别」→「信息缺口」、`_classify_retrieve` agent_hints 6 处去子 agent 措辞）。dev-facing 文本（模块/函数 docstring、logger、变量名 `build_subagent`）豁免。`thinking_guard` 哨兵去 `[TOOL_LOOP]`（避免给子 agent 泄主 agent marker 种子）。
+
+**result_index 索引 bug + 系统标注修复（用户设计）**：原实现子 agent 自数「有用结果」（主观）与 finalize 按 ToolMessage 顺序编号错位——子 agent 选 `result_index:0`（意图指 rag 综述）却映射到 s2 报错（首条 ToolMessage）。修复：①系统注入 1-based 序数标注——`_annotate_tool_results(state, tool_result)` 在每次工具后插 HumanMessage「第 N 次工具调用结果 · 工具 {name}」（N = 已有具名 ToolMessage 数 +1，与 finalize 同口径；ToolMessage content 保持干净，不影响候选抽取）；②finalize `enumerate(tool_msgs, 1)` 1-based；③**子 agent 也看到失败调用**（消耗预算无结果的调用照标 N——可诚实反馈「N 次因上游失败无果」，鼓励诚实而非掩盖）。ToolMessage content 不动（annotation 走独立 HumanMessage，候选抽取零影响）。
+
+**端到端验证（Q03，`--target main`，gemini-3.1-pro-preview，PS_DUMP_SUBAGENT=1）**：标注正确注入（第 1/2/3 次·s2/openalex/s2）、子 agent 按 N 选 `result_index:1,3`（正确命中 s2 综述结果，**非报错**）、findings 含「检索结果 #1/#3（s2_search_tool）」+ 诚实 summary（微波光子学/光频梳/铌酸锂三综述）、主 agent compliance 1.0 / 单次 retrieve / marker 1.0 / 非空 grounded 答案。
+
+**验收门全过**：compliance 1.0、单次 retrieve、marker 闸门、Tier-1 `tool_err_request=0`、主 agent 非空 grounded。probe 回路额外发现并修掉索引 bug（印证 memory `harness-vs-llm-change-stance`：回路是资产，校准梯度不校准点）。
+
+> **遗留（非阻塞）**：子 agent 偶把 `result_index` 当论文级用（多结果场景下选中整批=无害，单结果大集会顶 `MAX_FINDINGS_LEN` 截断丢相关项）——正是 Stage 4.5 item 级精度要根治的。
+
+### Stage 4.5 — item 级精度（`result_index` + `item_index`，进行中）
+
+**动机**：result_index 是**调用级**（一次工具调用=一条结果，s2 一次返 5-50 篇）。子 agent 只能选整批——大结果集会顶 `MAX_FINDINGS_LEN=12000` 截断、可能截掉相关项；且无法剔除同批里的离题项。原计划本含 `item_index`（Stage 1 实现时简化掉），现补完。
+
+**拱心石（已验）**：`citation.py` `extract_candidates(tool_name, content)` 对四检索工具给干净可选项——s2/arxiv/openalex=论文（每篇 Candidate，含 title/authors/year/source_id）、rag=chunk（正则提 `[rag:doc_id|title,Page N]` 串头，按 doc_id+page 去重）；lookup_local_paper_id/jina 不在分派表→`[]`，作单条整体（前者单 doc_id 查询、后者整篇全文不可切）。条目语义跨工具一致。
+
+**设计**：
+- **标注扩展**：`_annotate_tool_results` 在「第 N 次工具调用结果 · 工具 {name}」后扩 item 序号——`#1 {Candidate.title} ({authors}, {year})`（rag 用 `title, Page N`）。子 agent 看 N+K 双层序号选 `(result_index=N, item_index=K)`。lookup/jina 单条不列 item（或整体作 #1）。
+- **schema**：`return_findings.selection` 加可选 `item_index: int`（缺省=整条结果，向后兼容当前已验证路径）。
+- **finalize 切片**：按选中的 `(N, K)` 抠单 item raw——外部工具重包 `{"papers":[pk]}`、rag 按 `\n\n---\n\n` 切块对齐串头取第 K 块。`MAX_FINDINGS_LEN` 截断压力大幅降（只打包选中项）。
+- **Field 三层**：item_index 的 Field.description 只写格式+防呆（1-based、缺省整条），WHEN 不进；return_findings 用法不进 CoT（保持通用）。
+
+**文件**：`graph.py`（`_annotate_tool_results` 扩 item 序号 + finalize 切片 + `return_findings` schema 加 item_index）、`tests/test_subagent_finalize.py`（item 级选择 + 向后兼容）、probe 复测。
+
+**风险**：finalize 切片需 per-tool（外部重包/rag 切块对齐），但复用 extract 分派口径，风险可控；可选 item_index 保当前路径作回退。
 
 ### Stage 5（第二版）— 前端嵌套分组可视化
 - 子 agent 加 `adispatch_custom_event`（langchain-core 1.2.23 支持）：thinking start/end、每个内部 tool start/end dispatch，带 layer/parent 信号。
