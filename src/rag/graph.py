@@ -168,6 +168,8 @@ class AgentState(TypedDict):
     findings: (
         str  # 子 agent 专用：finalize 写检索结果拼接，retrieve 壳取；主 agent 不用
     )
+    selected_tool_results: list  # 子 agent 专用：finalize 写点选结果 per-item [(name, item_json), ...]，
+        # retrieve 壳取作 artifact 喂候选收集（仅选中项，不再全 raw——与 findings 同源，存储精度）
 
 
 def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
@@ -592,6 +594,10 @@ class RetrievalSelection(BaseModel):
     """return_findings 的 selection 项 schema：子 agent 点的检索结果索引 + 理由。"""
 
     result_index: int = Field(description="检索结果序号")
+    item_index: int | None = Field(
+        default=None,
+        description="该结果内具体条目序号（1-based，按工具返回顺序；缺省=整条结果）",
+    )
     reason: str = Field(
         description="一句话说明这个结果为什么有用（你的判断，不要抄工具返回内容）"
     )
@@ -612,12 +618,72 @@ def _make_return_findings_tool():
     ) -> str:
         """决定收敛返回时调用本工具终止检索。
 
-        - selection：你认为对回答有用的检索结果列表，每项含 result_index + reason。
+        - selection：你认为对回答有用的检索结果列表，每项含 result_index（哪次结果）
+          + item_index（可选，该结果内第几条；缺省=整条）+ reason。
         - summary：一句话诚实概括检索到了什么、覆盖了哪些缺口、还缺什么。
         """
         return ""  # 被 finalize 拦截，不真正执行
 
     return return_findings
+
+
+# item 级精度（Stage 4.5）：哪些工具结果可切到 item 级。
+# s2/arxiv/openalex 返回 JSON `papers` 数组（每篇一条）；rag 返回多 chunk（`\n\n---\n\n` 拼）。
+# lookup_local_paper_id（单 doc_id 查询）/ jina_tool（整篇全文）不可切 → 单条整体。
+_MULTI_ITEM_TOOLS = frozenset({"s2_search_tool", "arxiv_tool", "openalex_tool"})
+
+
+def _iter_tool_items(tool_name: str, content) -> list[str]:
+    """一条工具结果 → item raw 串列表（按工具返回顺序）。标注计数 + finalize 切片共用
+    同一事实源，编号必然对齐（标注说「共 M 条 #1..#M」，finalize 取 items[K-1]）。
+
+    - s2/arxiv/openalex：JSON `papers` 数组，每篇重包成 `{"papers":[p]}` 一条。
+    - rag：按 `\\n\\n---\\n\\n` 切 chunk（剔空串）。
+    - 其余（lookup/jina/未知）：`[content]` 单条整体。
+
+    解析失败/空 → `[content]` 兜底（finalize 取整条，与 item_index 缺省同行为）。
+    """
+    if not isinstance(content, str):
+        content = str(content) if content else ""
+    if not content:
+        return []
+    if tool_name in _MULTI_ITEM_TOOLS:
+        try:
+            payload = json.loads(content)
+        except (json.JSONDecodeError, TypeError):
+            return [content]
+        papers = payload.get("papers") if isinstance(payload, dict) else None
+        if isinstance(papers, list) and papers:
+            return [json.dumps({"papers": [p]}, ensure_ascii=False) for p in papers]
+        return [content]
+    if tool_name == "rag_tool":
+        chunks = [c for c in content.split("\n\n---\n\n") if c.strip()]
+        return chunks if chunks else [content]
+    return [content]
+
+
+def _select_items(tm: ToolMessage, wanted: list) -> list[str]:
+    """从一条 ToolMessage 按 wanted（item_index 列表，可含 None=整条）抠选中 item raw 列表。
+
+    返回 per-item 串列表（每个选中 item 一条）——findings 文本用它 `\\n\\n---\\n\\n` 拼展示，
+    selected_tool_results 用它逐条作 (name, item) 喂候选收集（每条合法 JSON，extract 可解析）。
+
+    - None 在 wanted（item_index 缺省）→ [整条 content]（向后兼容 call-level 已验证路径）。
+    - 否则按 item 切片：`_iter_tool_items` 取 items，抠 wanted 命中的（越界跳过）；
+      单条工具 / 全越界 → [整条 content] 兜底（graceful，不丢检索成果）。
+    """
+    content = tm.content if isinstance(tm.content, str) else (str(tm.content) if tm.content else "")
+    if None in wanted:
+        return [content]
+    items = _iter_tool_items(tm.name, content)
+    if len(items) <= 1:
+        return [content]
+    chosen = [
+        items[k - 1]
+        for k in sorted(set(wanted))
+        if isinstance(k, int) and 1 <= k <= len(items)
+    ]
+    return chosen if chosen else [content]
 
 
 def _annotate_tool_results(state, tool_result):
@@ -640,7 +706,11 @@ def _annotate_tool_results(state, tool_result):
     for tm in new_msgs:
         if isinstance(tm, ToolMessage) and (getattr(tm, "name", "") or ""):
             n = existing + offset + 1  # 1-based，与 finalize enumerate(tool_msgs, 1) 对齐
-            annotations.append(HumanMessage(content=f"第 {n} 次工具调用结果 · 工具 {tm.name}"))
+            m = len(_iter_tool_items(tm.name, tm.content))
+            note = f"（共 {m} 条候选，按返回顺序 #1..#{m}）" if m > 1 else ""
+            annotations.append(
+                HumanMessage(content=f"第 {n} 次工具调用结果 · 工具 {tm.name}{note}")
+            )
             offset += 1
     return {"messages": list(new_msgs) + annotations}
 
@@ -679,25 +749,34 @@ async def _subagent_finalize(state: AgentState) -> dict:
     ]
 
     sections: list[str] = []
+    selected: list[tuple[str, str]] = []  # per-item (name, item_json)，与 findings 同源、喂候选收集
     if rf_args is not None:
         summary = (rf_args.get("summary") or "").strip()
         if summary:
             sections.append(f"## 检索摘要\n{summary}")
         selection = rf_args.get("selection") or []
-        sel_indices = {
-            s.get("result_index")
-            for s in selection
-            if isinstance(s, dict) and isinstance(s.get("result_index"), int)
-        }
-        picked = [
-            f"### 检索结果 #{i}（{tm.name}）\n{tm.content}"
-            for i, tm in enumerate(tool_msgs, 1)
-            if i in sel_indices
-        ]
+        # 归一化 selection → {result_index: [item_index|None,...]}（同一结果可点多 item）
+        sel_map: dict[int, list] = {}
+        for s in selection:
+            if not isinstance(s, dict) or not isinstance(s.get("result_index"), int):
+                continue
+            ii = s.get("item_index")
+            sel_map.setdefault(s["result_index"], []).append(
+                ii if isinstance(ii, int) else None
+            )
+        picked = []
+        for i, tm in enumerate(tool_msgs, 1):
+            wanted = sel_map.get(i)
+            if not wanted:
+                continue
+            # per-item 列表（单次切片）：findings 文本 join 展示 + 候选收集逐条收，同源不漂移
+            items = _select_items(tm, wanted)
+            picked.append(f"### 检索结果 #{i}（{tm.name}）\n" + "\n\n---\n\n".join(items))
+            selected.extend((tm.name, it) for it in items)
         if picked:
             sections.append("## 检索结果\n\n" + "\n\n".join(picked))
         elif tool_msgs:
-            # selection 索引全部越界——兜底全拼，不丢检索成果
+            # selection 索引全部越界——兜底全拼，候选也全收（不丢检索成果）
             sections.append(
                 "## 检索结果\n\n"
                 + "\n\n".join(
@@ -705,8 +784,9 @@ async def _subagent_finalize(state: AgentState) -> dict:
                     for i, tm in enumerate(tool_msgs, 1)
                 )
             )
+            selected = [(tm.name, tm.content) for tm in tool_msgs]
     else:
-        # 预算耗尽兜底：全拼已有工具结果
+        # 预算耗尽兜底：全拼已有工具结果，候选也全收（未经甄选）
         if tool_msgs:
             sections.append(
                 "## 检索结果（预算耗尽兜底）\n\n"
@@ -715,11 +795,12 @@ async def _subagent_finalize(state: AgentState) -> dict:
                     for i, tm in enumerate(tool_msgs, 1)
                 )
             )
+            selected = [(tm.name, tm.content) for tm in tool_msgs]
 
     findings = "\n\n".join(sections) if sections else "(检索未返回结果)"
     if len(findings) > MAX_FINDINGS_LEN:
         findings = findings[:MAX_FINDINGS_LEN] + "\n\n[...检索结果过长，已截断]"
-    return {"findings": findings}
+    return {"findings": findings, "selected_tool_results": selected}
 
 
 def build_subagent(
@@ -1029,6 +1110,7 @@ def make_retrieve_tool(user_id: str):
                 "translation": False,
                 "remaining_calls": RETRIEVER.budget_n,
                 "findings": "",
+                "selected_tool_results": [],
             }
             result = await subagent.ainvoke(initial_state)
         except Exception as e:
@@ -1039,12 +1121,16 @@ def make_retrieve_tool(user_id: str):
         findings = (
             _extract_findings(result) if result is not None else "(检索未返回结果)"
         )
-        # 候选源 = 子 agent 所有真实工具结果（经 artifact 冒泡给 _consume_events →
-        # result['tool_results'] → _persist_and_enrich collect）。findings 本身不进候选收集
-        # （它是拼接产物，候选层要原始工具结果做 source_id 提取）。状态信封不影响 artifact。
-        candidates = (
-            _tool_results_from_messages(result.get("messages", [])) if result else []
-        )
+        # 候选源 = finalize 按点选吐的 selected_tool_results（per-item，仅选中项，与 findings 同源），
+        # 经 artifact 冒泡给 _consume_events → result['tool_results'] → _persist_and_enrich collect。
+        # 只收选中项的元数据（不再全 raw——存储精度：主 agent 只看 findings 选中项，raw 是子 agent
+        # 内部过程量）。finalize 异常未写时退回全 raw 兜底，不丢候选。状态信封不影响 artifact。
+        if result:
+            candidates = result.get("selected_tool_results")
+            if candidates is None:
+                candidates = _tool_results_from_messages(result.get("messages", []))
+        else:
+            candidates = []
         envelope = (
             f"[检索状态: {status}]\n[agent_hint: {hint}]\n\n[检索结果]\n{findings}"
         )

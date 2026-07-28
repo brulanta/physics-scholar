@@ -51,7 +51,7 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 
 ## 实现阶段（每阶段独立可提交）
 
-> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅ + **修订**（见下「Stage 2」：TOOL_DECISION_PLUGIN/output_format/协议 B 回滚原版保 CoT phase 链 + retrieve docstring 承单次寿命契约 + 状态信封 5 分类 + RETRIEVER strict/budget6 + 子 agent thinking 收紧；核心测试全过）/ Stage 3 ✅（见下「Stage 3」：harness_probe `--target sub`/`--model` + `_prepare` 主 agent 种子 bug 修复（remaining_calls 6→1，单次 retrieve 的 budget 安全网才真正生效）+ `test_harness_probe_subagent.py`；probe 真跑留 Stage 4）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。 / **Stage 4 ✅**（task #9 v3 prompt 定版 + RETRIEVER minimal→light + 主/子agent metadata 清零沉淀进 CLAUDE.md + result_index 系统标注修复索引 bug + Q03 端到端验证通过——详见下「Stage 4」）。**Stage 4.5（item 级精度）进行中**。
+> **进展**：Stage 0 ✅（commit `0a66a15`）/ Stage 1 ✅（commit `18902a5`，harness `RETRIEVER` + 子 agent 图 `build_subagent`/`return_findings`/`_subagent_finalize`/`retrieve` 壳 + 候选源经 `ToolMessage.artifact` 冒泡 + `_consume_events` artifact 分支 + `subagent_prompt.py`）/ Stage 2 ✅ + **修订**（见下「Stage 2」：TOOL_DECISION_PLUGIN/output_format/协议 B 回滚原版保 CoT phase 链 + retrieve docstring 承单次寿命契约 + 状态信封 5 分类 + RETRIEVER strict/budget6 + 子 agent thinking 收紧；核心测试全过）/ Stage 3 ✅（见下「Stage 3」：harness_probe `--target sub`/`--model` + `_prepare` 主 agent 种子 bug 修复（remaining_calls 6→1，单次 retrieve 的 budget 安全网才真正生效）+ `test_harness_probe_subagent.py`；probe 真跑留 Stage 4）。子 agent 真跑子图端到端验证（Stage 4 probe / dev 实跑）待续。 / **Stage 4 ✅**（task #9 v3 prompt 定版 + RETRIEVER minimal→light + 主/子agent metadata 清零沉淀进 CLAUDE.md + result_index 系统标注修复索引 bug + Q03 端到端验证通过——详见下「Stage 4」）。**Stage 4.5 ✅**（item 级切片 + collect-selected 存储精度——详见下「Stage 4.5」）。
 
 ### Stage 0 ✅ — 分支 + 抽 `_build_graph`（零行为变化地基）
 - 建分支 `t2-subagent-retrieval`。
@@ -120,7 +120,7 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 
 > **遗留（非阻塞）**：子 agent 偶把 `result_index` 当论文级用（多结果场景下选中整批=无害，单结果大集会顶 `MAX_FINDINGS_LEN` 截断丢相关项）——正是 Stage 4.5 item 级精度要根治的。
 
-### Stage 4.5 — item 级精度（`result_index` + `item_index`，进行中）
+### Stage 4.5 ✅ — item 级切片 + collect-selected（存储精度对偶）
 
 **动机**：result_index 是**调用级**（一次工具调用=一条结果，s2 一次返 5-50 篇）。子 agent 只能选整批——大结果集会顶 `MAX_FINDINGS_LEN=12000` 截断、可能截掉相关项；且无法剔除同批里的离题项。原计划本含 `item_index`（Stage 1 实现时简化掉），现补完。
 
@@ -135,6 +135,12 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 **文件**：`graph.py`（`_annotate_tool_results` 扩 item 序号 + finalize 切片 + `return_findings` schema 加 item_index）、`tests/test_subagent_finalize.py`（item 级选择 + 向后兼容）、probe 复测。
 
 **风险**：finalize 切片需 per-tool（外部重包/rag 切块对齐），但复用 extract 分派口径，风险可控；可选 item_index 保当前路径作回退。
+
+**✅ 完成（2026-07-28）**：
+- **item 级切片**：`return_findings` 加可选 `item_index`（缺省=整条，向后兼容）；`_iter_tool_items` 单一切片事实源（s2/arxiv/openalex=论文 `{"papers":[p]}`、rag=chunk 按 `---` 切、lookup/jina 单条）；`_select_items` 返 per-item 列表；标注扩「共 M 条候选，按返回顺序 #1..#M」（单条/失败调用不列）；finalize 按选 item 抠。Q03 probe 验：子 agent 用 `(result_index=1, item_index=2/4)` + `(4, item_index=3)` 精准点 3 篇，findings 不再整批+无越界（Stage 4 的 1,3,4 怪象消失）。
+- **collect-selected（存储精度）**：候选收集从「全 raw」（retrieve 壳 L1115 `_tool_results_from_messages` 收子 agent 全部 ToolMessage，~20 候选）改为「仅选中项」。finalize 拼 findings 时**同源**吐 `selected_tool_results: [(name, item_json), ...]` per-item 列表（每条合法 JSON，`extract_candidates` 可解析）；retrieve 壳 artifact 改读它（缺失退回全 raw 兜底，不丢候选）。候选集从 ~20 缩到 3，消存储噪声 + `is_cited=0` 噪声行，且候选集对齐主 agent 证据范围（findings）——原「要 raw 做 source_id 提取」是 Stage 1 findings≈raw 时的前提，item 切片后前提失效。
+- **findings 不合并**（用户定）：per-item 扁平 artifact 让 collect-selected 可行（每条合法 JSON）+ findings 文本保持两-blob（主 agent 按论文引用、不按调用；合并省 token 可忽略、且要 per-tool 特化，不值）。
+- **验证**：101 单测绿（含 `selected_tool_results` 排除未选结果 / 向后兼容 / 预算耗尽兜底全 raw / `_select_items` per-item 列表）；Q03 probe 主 agent 指标与改前逐字一致（compliance 1.0 / 单 retrieve / marker 1.0 / ~1.5k 字 grounded）—— collect-selected 是存储层改动，零可见回归（probe 绕开 `_persist_and_enrich`，候选落库由单测 + langgraph state 契约覆盖）。
 
 ### Stage 5（第二版）— 前端嵌套分组可视化
 - 子 agent 加 `adispatch_custom_event`（langchain-core 1.2.23 支持）：thinking start/end、每个内部 tool start/end dispatch，带 layer/parent 信号。

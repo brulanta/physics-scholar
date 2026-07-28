@@ -16,8 +16,11 @@ import json
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.rag.graph import (
+    _annotate_tool_results,
     _consume_events,
     _extract_findings,
+    _iter_tool_items,
+    _select_items,
     _subagent_finalize,
     after_guard,
 )
@@ -327,3 +330,194 @@ def test_consume_events_plain_tool_uses_content_when_no_artifact():
     ]
     result = _run_consume(events)
     assert result["tool_results"] == [("rag_tool", "[rag:d2 | T2]\n正文")]
+
+
+# ---- item 级精度（Stage 4.5）：_iter_tool_items / _select_result_body / finalize 切片 / 标注计数
+
+
+# _iter_tool_items：按工具返回顺序切 item
+def test_iter_items_s2_papers():
+    """s2 JSON papers 数组 → 每篇重包成 {"papers":[p]} 一条，保序。"""
+    content = json.dumps({"success": True, "papers": [
+        {"s2_paper_id": "A", "title": "PA"},
+        {"s2_paper_id": "B", "title": "PB"},
+        {"s2_paper_id": "C", "title": "PC"},
+    ]})
+    items = _iter_tool_items("s2_search_tool", content)
+    assert len(items) == 3
+    assert json.loads(items[0]) == {"papers": [{"s2_paper_id": "A", "title": "PA"}]}
+    assert json.loads(items[2]) == {"papers": [{"s2_paper_id": "C", "title": "PC"}]}
+
+
+def test_iter_items_rag_chunks():
+    """rag 多 chunk（\\n\\n---\\n\\n 拼）→ 切成 chunk 列表，剔空。"""
+    content = "[rag:d1 | T1, Page 1]\nbody1\n\n---\n\n[rag:d2 | T2, Page 3]\nbody2\n\n---\n\n[rag:d1 | T1, Page 5]\nbody3"
+    items = _iter_tool_items("rag_tool", content)
+    assert len(items) == 3
+    assert "body1" in items[0]
+    assert "body2" in items[1]
+    assert "body3" in items[2]
+
+
+def test_iter_items_single_item_tools():
+    """lookup/jina/未知工具 → [content] 单条整体（不可切）。"""
+    assert _iter_tool_items("jina_tool", "整篇全文 blob") == ["整篇全文 blob"]
+    assert _iter_tool_items("lookup_local_paper_id", '{"doc_id":"x"}') == ['{"doc_id":"x"}']
+    assert _iter_tool_items("unknown_tool", "xxx") == ["xxx"]
+
+
+def test_iter_items_parse_failure_falls_back_whole():
+    """JSON 解析失败 → [content] 兜底（不抛进 agent）。"""
+    assert _iter_tool_items("s2_search_tool", "not json") == ["not json"]
+
+
+def test_iter_items_empty():
+    assert _iter_tool_items("s2_search_tool", "") == []
+
+
+# _select_items：按 item_index 抠 per-item 列表（findings 文本 join + 候选收集逐条收共用）
+def test_select_items_none_returns_whole():
+    """wanted 含 None（item_index 缺省）→ [整条 content]（向后兼容 call-level 路径）。"""
+    tm = _tm('{"papers":[{"s2_paper_id":"A"},{"s2_paper_id":"B"}]}', "s2_search_tool", "c1")
+    assert _select_items(tm, [None]) == [tm.content]
+
+
+def test_select_items_picks_single():
+    """wanted=[2] → [第 2 篇重包]，长度 1（per-item，不拼接）。"""
+    tm = _tm(json.dumps({"papers": [
+        {"s2_paper_id": "A"}, {"s2_paper_id": "B"}, {"s2_paper_id": "C"},
+    ]}), "s2_search_tool", "c1")
+    items = _select_items(tm, [2])
+    assert len(items) == 1
+    assert json.loads(items[0]) == {"papers": [{"s2_paper_id": "B"}]}
+
+
+def test_select_items_picks_multiple():
+    """wanted=[1,3] → [第 1 篇, 第 3 篇]（per-item 列表，候选收集逐条收，每条合法 JSON）。"""
+    tm = _tm(json.dumps({"papers": [
+        {"s2_paper_id": "A"}, {"s2_paper_id": "B"}, {"s2_paper_id": "C"},
+    ]}), "s2_search_tool", "c1")
+    items = _select_items(tm, [1, 3])
+    assert len(items) == 2
+    assert json.loads(items[0]) == {"papers": [{"s2_paper_id": "A"}]}
+    assert json.loads(items[1]) == {"papers": [{"s2_paper_id": "C"}]}
+
+
+def test_select_items_out_of_range_whole():
+    """wanted 全越界 → [整条 content] 兜底（不丢检索成果）。"""
+    tm = _tm('{"papers":[{"s2_paper_id":"A"}]}', "s2_search_tool", "c1")
+    assert _select_items(tm, [99]) == [tm.content]
+
+
+def test_select_items_single_item_tool_whole():
+    """单条工具（jina）→ [整条 content]（item_index 无意义）。"""
+    tm = _tm("整篇全文", "jina_tool", "c1")
+    assert _select_items(tm, [1]) == ["整篇全文"]
+
+
+# _subagent_finalize：item_index 端到端
+def test_finalize_picks_specific_item():
+    """selection 带 item_index=2 → findings 只含该结果第 2 篇，不含第 1/3 篇。"""
+    messages = [
+        HumanMessage(content="Q"),
+        _ai_tool("s2_search_tool", {"query": "x"}, "c1"),
+        _tm(json.dumps({"papers": [
+            {"s2_paper_id": "A", "title": "PA"},
+            {"s2_paper_id": "B", "title": "PB"},
+            {"s2_paper_id": "C", "title": "PC"},
+        ]}), "s2_search_tool", "c1"),
+        AIMessage(content="", tool_calls=[_tc("return_findings", {
+            "selection": [{"result_index": 1, "item_index": 2, "reason": "只要 PB"}],
+            "summary": "s",
+        }, "c2")]),
+    ]
+    result = asyncio.run(_subagent_finalize({"messages": messages}))
+    findings = result["findings"]
+    assert "检索结果 #1（s2_search_tool）" in findings
+    assert "PB" in findings
+    assert "PA" not in findings  # 第 1 篇未选，不进
+    assert "PC" not in findings  # 第 3 篇未选，不进
+    # selected_tool_results：仅选中 item（per-item，候选收集只收这一条）
+    sel = result["selected_tool_results"]
+    assert len(sel) == 1
+    assert sel[0][0] == "s2_search_tool"
+    assert json.loads(sel[0][1]) == {"papers": [{"s2_paper_id": "B", "title": "PB"}]}
+
+
+def test_finalize_item_index_absent_backward_compat():
+    """selection 无 item_index（缺省）→ findings + selected 都是整条（与 Stage 4 行为一致，零回归）。"""
+    messages = [
+        HumanMessage(content="Q"),
+        _ai_tool("s2_search_tool", {"query": "x"}, "c1"),
+        _tm(json.dumps({"papers": [
+            {"s2_paper_id": "A", "title": "PA"},
+            {"s2_paper_id": "B", "title": "PB"},
+        ]}), "s2_search_tool", "c1"),
+        AIMessage(content="", tool_calls=[_tc("return_findings", {
+            "selection": [{"result_index": 1, "reason": "整条都要"}],
+            "summary": "s",
+        }, "c2")]),
+    ]
+    result = asyncio.run(_subagent_finalize({"messages": messages}))
+    findings = result["findings"]
+    assert "PA" in findings  # 整条=两篇都在
+    assert "PB" in findings
+    # selected_tool_results：整条（缺省 item_index，向后兼容）
+    sel = result["selected_tool_results"]
+    assert len(sel) == 1
+    assert "PA" in sel[0][1] and "PB" in sel[0][1]
+
+
+def test_finalize_selected_excludes_unselected_results():
+    """selected_tool_results 只含被选中的结果——未选中的结果不进候选收集（存储精度核心）。"""
+    messages = [
+        HumanMessage(content="Q"),
+        _ai_tool("s2_search_tool", {"query": "x"}, "c1"),
+        _tm(json.dumps({"papers": [{"s2_paper_id": "A", "title": "PA"}]}), "s2_search_tool", "c1"),
+        _ai_tool("arxiv_tool", {"query": "y"}, "c2"),
+        _tm(json.dumps({"papers": [{"arxiv_id": "B", "title": "TB"}]}), "arxiv_tool", "c2"),
+        AIMessage(content="", tool_calls=[_tc("return_findings", {
+            "selection": [{"result_index": 1, "reason": "只要 s2 的"}],
+            "summary": "s",
+        }, "c3")]),
+    ]
+    sel = asyncio.run(_subagent_finalize({"messages": messages}))["selected_tool_results"]
+    # 只收 result #1（s2），不收 result #2（arxiv 未选 → 不进候选）
+    assert len(sel) == 1
+    assert sel[0][0] == "s2_search_tool"
+    assert "PA" in sel[0][1]
+    assert not any("TB" in c for _, c in sel)
+
+
+def test_finalize_budget_exhausted_selected_all_raw():
+    """预算耗尽兜底（无 return_findings）→ selected_tool_results = 全部 raw（未经甄选，全收）。"""
+    messages = [
+        HumanMessage(content="Q"),
+        _ai_tool("s2_search_tool", {"query": "x"}, "c1"),
+        _tm("s2 结果原文", "s2_search_tool", "c1"),
+        _ai_tool("rag_tool", {"query": "y"}, "c2"),  # 预算耗尽，未执行
+    ]
+    sel = asyncio.run(_subagent_finalize({"messages": messages}))["selected_tool_results"]
+    assert sel == [("s2_search_tool", "s2 结果原文")]
+
+
+# _annotate_tool_results：item 计数标注
+def test_annotate_includes_item_count_for_multi_item():
+    """多 item 结果（s2 3 篇）→ 标注带「共 3 条候选，按返回顺序 #1..#3」。"""
+    state = {"messages": []}
+    tool_result = {"messages": [_tm(json.dumps({"papers": [
+        {"s2_paper_id": "A"}, {"s2_paper_id": "B"}, {"s2_paper_id": "C"},
+    ]}), "s2_search_tool", "c1")]}
+    out = _annotate_tool_results(state, tool_result)
+    ann = out["messages"][-1]
+    assert "共 3 条候选" in ann.content
+    assert "#1..#3" in ann.content
+
+
+def test_annotate_no_item_note_for_single_item():
+    """单条工具（jina）→ 标注无 item 计数（保持原 minimal 标注）。"""
+    state = {"messages": []}
+    tool_result = {"messages": [_tm("整篇全文", "jina_tool", "c1")]}
+    out = _annotate_tool_results(state, tool_result)
+    ann = out["messages"][-1]
+    assert ann.content == "第 1 次工具调用结果 · 工具 jina_tool"
