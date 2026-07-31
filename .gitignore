@@ -33,6 +33,7 @@ models/
 
 # ========= Eval 产物 =========
 scripts/eval_out/
+eval_framework/results/
 
 # ========= OS =========
 .DS_Store
