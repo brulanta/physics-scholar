@@ -593,7 +593,9 @@ def _build_graph(
 class RetrievalSelection(BaseModel):
     """return_findings 的 selection 项 schema：子 agent 点的检索结果索引 + 理由。"""
 
-    result_index: int = Field(description="检索结果序号")
+    result_index: int = Field(
+        description="检索结果序号（1-based：即工具结果上方标注「第 N 次工具调用结果」的 N；首次结果填 1，不是 0）"
+    )
     item_index: int | None = Field(
         default=None,
         description="该结果内具体条目序号（1-based，按工具返回顺序；缺省=整条结果）",
@@ -618,8 +620,9 @@ def _make_return_findings_tool():
     ) -> str:
         """决定收敛返回时调用本工具终止检索。
 
-        - selection：你认为对回答有用的检索结果列表，每项含 result_index（哪次结果）
-          + item_index（可选，该结果内第几条；缺省=整条）+ reason。
+        - selection：你认为对回答有用的检索结果列表，每项含 result_index（哪次结果，1-based，
+          填工具结果上方「第 N 次」的 N）+ item_index（可选，该结果内第几条，1-based；缺省=整条）
+          + reason。
         - summary：一句话诚实概括检索到了什么、覆盖了哪些缺口、还缺什么。
         """
         return ""  # 被 finalize 拦截，不真正执行
@@ -1405,6 +1408,18 @@ async def _consume_events(agent, initial_state, request, result: dict):
 
             etype = ev["event"]
             metadata = ev.get("metadata") or {}
+
+            # T2：跳过嵌套子 agent 事件。retrieve 壳内子图（build_subagent）经 astream_events
+            # 冒泡上来的内部事件——子 agent 的工具/chat/chain 事件若不滤，会致：
+            #   (1) 候选收集收全量 raw（on_tool_end elif 把子 agent s2/arxiv 全量当主结果收，
+            #       压过 retrieve 壳 artifact 的 collect-selected，DB 存全量而非选中项）；
+            #   (2) 前端 SSE 出现嵌套工具节点（违反"retrieve 期间只见一个工具节点"+ 主/子互不感知）；
+            #   (3) 子 agent 多轮 thinking 混入主 agent thinking 显示。
+            # 判据：langgraph checkpoint namespace 含 '|' = 嵌套子图命名空间。主图是单层图
+            # （retrieve 是 tool 不是 subgraph node），根层事件 ckpt_ns 单段、永不含 '|'；
+            # 子 agent 在 retrieve 工具内 ainvoke，其事件 ckpt_ns 形如 'tool_node:X|tool_node:Y'。
+            if "|" in (metadata.get("langgraph_checkpoint_ns") or ""):
+                continue
 
             # 图根 run_id：第一个无 langgraph_node 的 on_chain_start（根 runnable）
             if (

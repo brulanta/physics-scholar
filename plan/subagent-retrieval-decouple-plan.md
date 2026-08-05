@@ -142,9 +142,28 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - **findings 不合并**（用户定）：per-item 扁平 artifact 让 collect-selected 可行（每条合法 JSON）+ findings 文本保持两-blob（主 agent 按论文引用、不按调用；合并省 token 可忽略、且要 per-tool 特化，不值）。
 - **验证**：101 单测绿（含 `selected_tool_results` 排除未选结果 / 向后兼容 / 预算耗尽兜底全 raw / `_select_items` per-item 列表）；Q03 probe 主 agent 指标与改前逐字一致（compliance 1.0 / 单 retrieve / marker 1.0 / ~1.5k 字 grounded）—— collect-selected 是存储层改动，零可见回归（probe 绕开 `_persist_and_enrich`，候选落库由单测 + langgraph state 契约覆盖）。
 
+### Stage 4.5 修订 ✅ — collect-selected live 实证 + 嵌套事件泄漏修复（probe 够不着的真 bug）
+
+**触发**：Stage 6 子项「dev-live 验证候选落库」先行。probe 绕开 `_consume_events`/`_persist_and_enrich`，故 collect-selected 的 live 落库一直只有单测+state 契约覆盖。本次走 routes.py 唯一生产路径 `chat_stream` 真跑（`scripts/dev_live_verify_candidates.py`，Q03），**抓到 Stage 1 起的潜伏 bug——collect-selected 在 live 路径完全没生效**：两次跑 DB 都=10（全 raw），收敛比 1.00。
+
+**Bug 1（嵌套事件泄漏）— 确定性根因**：子 agent 图在 `retrieve` 工具内 `ainvoke`，其内部 `s2`/`arxiv` 工具事件经 `astream_events(v2)` 冒泡进主 `_consume_events`（`on_tool_start`/`on_tool_end`/`on_chat_model_stream` 均无 depth/run 过滤）。嵌套 `on_tool_end` 的 `artifact=None` → 走 elif 把子 agent 全量 raw 当主结果收 → 候选落库=全 raw，压过 retrieve 壳 artifact 的 collect-selected；同 handler 还发 SSE `tool_start/end`，前端出现嵌套工具节点（违反「只见一个 retrieve 节点」+ 主/子互不感知）。probe 之所以没抓到：probe 直跑 ainvoke、不经过 `_consume_events`。
+  - **修**：`_consume_events` 顶部加 depth 过滤——`metadata["langgraph_checkpoint_ns"]` 含 `|` = 嵌套子图命名空间（主图是单层图，retrieve 是 tool 非 subgraph node，根层事件 ckpt_ns 单段永不含 `|`；子 agent 在 retrieve 工具内 ainvoke，事件 ckpt_ns 形如 `tool_node:X|tool_node:Y`）。字段由 `scripts/probe_astream_events.py` 实测钉死。一处过滤三症状全修（候选+SSE+thinking）。
+  - **实证**：SSE 工具事件 `retrieve→s2→s2→retrieve`（4 嵌套帧）→ `retrieve` 单帧（0 嵌套）。
+
+**Bug 2（result_index 0-based）— 模型遵从度**：depth 过滤后 DB 仍=10，排查发现 retrieve 壳 artifact 本身=10——finalize 回退全拼。根因：子 agent 写 `result_index:0`（0-based），而契约是 1-based（标注「第 1 次」+ `enumerate(tool_msgs,1)`）→ `sel_map={0:...}` 匹配不到 1/2/3 → `picked` 空 → elif 兜底全 raw。`RetrievalSelection.result_index` Field.description 只写「检索结果序号」**未注明 1-based**（`item_index` 注了），模型按程序员惯性取 0-based。
+  - **修**：result_index Field.description + return_findings docstring 补「1-based，填上方「第 N 次」的 N；首次填 1 不是 0」（与 item_index 同款防呆）。
+  - **诚实边界**：depth 过滤是确定性修法；result_index 防呆**降低**而非消除模型 off-by-one（本次实跑模型写了合法 1-based，findings 3029≈3 项）。若复发，备选 = 代码容忍（selection 只含 0 且无 ≥1 时 0→1 启发式，有歧义风险）。
+
+**✅ 联合实证（2026-08-05，Q03，gemini-3.1-pro-preview，走 chat_stream）**：raw=5 / selected=3 / **DB=3**（Optical frequency combs / Lithium niobate / Microwave photonics，正是子 agent 选中且主 agent cited=1 的 3 篇），收敛比 1.00→**0.60**，SSE 嵌套帧 4→**0**。101 T2 单测绿。`dev_live_verify_candidates.py` 留作可复跑回归门。
+
+**旁路发现（未修，记follow-up）**：非流式 `chat()`/`regenerate()`（无 route 调用，测试兜底路径）的 `_tool_results_from_messages` 不读 retrieve 壳 artifact → 子 agent 架构下候选收集=0；L1230 注释称「与流式 on_tool_end 累积同构」已失真。生产用流式，故非阻塞。
+
+**dev 数据漂移（换机发现，已处理）**：本机 `data/chroma_db` 是旧 384 维 embedding 建的，与现配置 `bge-m3`(1024 维) 冲突——`rag_tool` 一查就崩，异常穿透子 agent 图拖整轮 HARD_FAIL。从换机前备份 `H:\离职携带资料\per_doc\physics-scholar\data`（1024 维、`ref_enrichment` 表齐全、7 篇入库）整体挪用；漂移旧 data 留底 `data.drifted_bak/`（本地，不入库，可删）。
+
 ### Stage 5（第二版）— 前端嵌套分组可视化
 - 子 agent 加 `adispatch_custom_event`（langchain-core 1.2.23 支持）：thinking start/end、每个内部 tool start/end dispatch，带 layer/parent 信号。
 - `_consume_events`（`graph.py:739`）加分支认 custom event，路由成新 SSE 帧（`subtask_*`，带 `parent_tool_id`=主 agent 那次 `retrieve` 的 `run_id`，复用 `run_id` 作 grouping key）。不动现有 9 帧。
+- ⚠️ **与 Stage4.5 修订 depth 过滤的交互**：修订加的 depth 过滤（`langgraph_checkpoint_ns` 含 `|` 即跳过）会一并跳过子 agent dispatch 的 custom event（它们也带嵌套 ckpt_ns）。Stage 5 须把 custom-event 分支**置于 depth 过滤之前**（先认 `on_custom_event`/`subtask_*` 再过滤），或细化过滤为「跳过嵌套的既有帧（tool/chat_model）、放行嵌套 custom event」。否则嵌套可视化的信号会被自己掐掉。
 - 前端：`ChatPage.vue` `streamingTools` 给 `retrieve` 条目加 `children`；`ThinkingTimeline.vue` `steps` 从单层 map 改支持工具节点展开成子时间轴（递归）；`makeStreamHandlers` 加新帧处理。`consumeSSE`（`chat.js:61`）按 `evt.type` 派发，加 key 即可。
 
 ### Stage 6 — frozen 端到端 + 收尾
