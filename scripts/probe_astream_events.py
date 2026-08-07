@@ -40,13 +40,18 @@ async def main() -> int:
         "next_prefill": None,
     }
 
-    print("event | name | run_id | parent_ids | tags | lg_node | ckpt_ns")
-    print("-" * 100)
+    print("event | name | run_id | parent_ids | tags | lg_node | ckpt_ns | data")
+    print("-" * 110)
     seen_retrieve_end = False
     n = 0
     async for ev in agent.astream_events(initial, version="v2"):
         et = ev.get("event", "")
-        if et not in ("on_tool_start", "on_tool_end", "on_chat_model_start"):
+        if et not in (
+            "on_tool_start",
+            "on_tool_end",
+            "on_chat_model_start",
+            "on_custom_event",
+        ):
             continue
         name = ev.get("name", "")
         run_id = ev.get("run_id", "")
@@ -55,10 +60,11 @@ async def main() -> int:
         md = ev.get("metadata") or {}
         lg_node = md.get("langgraph_node")
         ckpt = md.get("langgraph_checkpoint_ns")
+        data = ev.get("data") if et == "on_custom_event" else ""
         n += 1
         print(
             f"{et:20} | {name:22} | {_short(run_id)} | "
-            f"[{','.join(_short(p) for p in pids)}] | {tags} | {lg_node} | {ckpt}"
+            f"[{','.join(_short(p) for p in pids)}] | {tags} | {lg_node} | {ckpt} | {data}"
         )
         # 收到首个 retrieve on_tool_end 即够（嵌套结构已现）
         if et == "on_tool_end" and name == "retrieve":

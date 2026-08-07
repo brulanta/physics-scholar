@@ -91,6 +91,26 @@ def ev_tool_end(name, run_id, status="success"):
     }
 
 
+def ev_custom(kind, name=None, ok=None):
+    """Stage 5：子 agent dispatch 的 subagent_trace custom event。
+
+    ckpt_ns 故意带 '|'（嵌套子图命名空间，与 probe 实测一致）——证明 on_custom_event
+    分支在 depth 过滤之前处理（否则会被过滤丢弃，subtask 帧出不来）。
+    """
+    data = {"kind": kind}
+    if name is not None:
+        data["name"] = name
+    if ok is not None:
+        data["ok"] = ok
+    return {
+        "event": "on_custom_event",
+        "name": "subagent_trace",
+        "data": data,
+        "run_id": "sub-run",
+        "metadata": {"langgraph_checkpoint_ns": "tool_node:X|call_llm:Y"},
+    }
+
+
 def ev_chain_end_root(final_text):
     return {
         "event": "on_chain_end",
@@ -247,6 +267,64 @@ def test_final_answer_node():
     answer_text = "".join(p["text"] for p in parsed if p["type"] == "answer_delta")
     assert "兜底节点最终答案。" in answer_text
     assert result["final_content"] == "兜底节点最终答案。"
+
+
+def test_subtask_frames_from_custom_events():
+    """Stage 5：子 agent dispatch 的 subagent_trace → subtask 帧。
+
+    on_custom_event 分支在 depth 过滤之前，故嵌套 ckpt_ns（含 '|'，见 ev_custom）也能被
+    处理成 subtask；parent_tool_id = on_tool_start(retrieve) 捕获的 run_id，且仅在 retrieve
+    active 窗口内（on_tool_start 之后、on_tool_end 之前）有效。
+    """
+    events = [
+        ev_chain_start_root(),
+        ev_model_start("call_llm"),
+        ev_stream("<thinking>\n检索\n[TOOL_LOOP: PENDING]\n</thinking>"),
+        ev_model_end(content="x", tool_calls=[{"name": "retrieve", "id": "c1"}]),
+        ev_tool_start("retrieve", "ret-1"),  # 捕获 active_retrieve_run_id = ret-1
+        ev_custom("thinking_start"),
+        ev_custom("tool_start", name="s2_search_tool"),
+        ev_custom("tool_end", name="s2_search_tool", ok=True),
+        ev_custom("thinking_end"),
+        ev_tool_end("retrieve", "ret-1"),  # 清 active
+        ev_chain_end_root(""),
+    ]
+    types, parsed, result = run_consume(events)
+
+    subs = [p for p in parsed if p["type"] == "subtask"]
+    assert [s["kind"] for s in subs] == [
+        "thinking_start",
+        "tool_start",
+        "tool_end",
+        "thinking_end",
+    ]
+    # parent_tool_id 全部 = 捕获的 retrieve run_id
+    assert all(s["parent_tool_id"] == "ret-1" for s in subs)
+    # tool_start subtask 带工具名；tool_end 带 ok
+    assert subs[1]["name"] == "s2_search_tool"
+    assert subs[2]["ok"] is True
+    # subtask 夹在 retrieve 的 tool_start / tool_end 之间
+    i_ts = types.index("tool_start")
+    i_te = next(i for i, t in enumerate(types) if t == "tool_end")
+    i_sub = types.index("subtask")
+    assert i_ts < i_sub < i_te
+
+
+def test_subtask_outside_retrieve_has_null_parent():
+    """retrieve active 窗口外的 custom event → parent_tool_id=None（防御：不崩，降级）。"""
+    events = [
+        ev_chain_start_root(),
+        ev_model_start("call_llm"),
+        ev_custom("thinking_start"),  # retrieve 还没开始 → active=None
+        ev_stream("<thinking>\n[TOOL_LOOP: DONE]\n</thinking>"),
+        ev_stream("答案。"),
+        ev_model_end(content="<thinking>...</thinking>答案。"),
+        ev_chain_end_root("答案。"),
+    ]
+    _, parsed, _ = run_consume(events)
+    subs = [p for p in parsed if p["type"] == "subtask"]
+    assert len(subs) == 1
+    assert subs[0]["parent_tool_id"] is None
 
 
 def test_tool_error_sets_ok_false():

@@ -137,7 +137,8 @@ function ensureCache(convId) {
 const streamingSessionId = ref(null)
 const streamingContent = ref('')        // 仅 answer_delta 累加
 const streamingPhase = ref('idle')      // 'idle' | 'thinking' | 'tool' | 'answer'
-const streamingTools = ref([])          // [{ tool_id, name, status:'running'|'done'|'error', startedAt, endedAt }]
+const streamingTools = ref([])          // [{ tool_id, name, status:'running'|'done'|'error', startedAt, endedAt, children? }]
+                                        // retrieve 条目带 children: [{ key, kind:'thinking'|'tool', status, name?, startedAt, endedAt? }]（子 agent 内部步骤，live-only）
 let streamingCounter = 0
 let currentAbort = null                 // 当前流的 AbortController，用于切会话/卸载时中止
 
@@ -161,12 +162,40 @@ function makeStreamHandlers(myCount) {
       streamingTools.value.push({
         tool_id: e.tool_id, name: e.name,
         status: 'running', startedAt: Date.now(), endedAt: null,
+        // retrieve 内部跑子 agent 检索循环，其步骤经 subtask 帧挂到 children（嵌套时间轴）
+        children: e.name === 'retrieve' ? [] : undefined,
       })
     },
     tool_end: (e) => {
       if (!owns()) return
       const t = streamingTools.value.find(t => t.tool_id === e.tool_id)
       if (t) { t.status = e.ok ? 'done' : 'error'; t.endedAt = Date.now() }
+    },
+    // Stage 5：子 agent 内部 trace（子 agent 主动 dispatch 的 subagent_trace，经后端
+    // on_custom_event 分支转成 subtask 帧）。按 parent_tool_id 挂到 retrieve 条目的 children。
+    subtask: (e) => {
+      if (!owns()) return
+      const parent = streamingTools.value.find(t => t.tool_id === e.parent_tool_id)
+      if (!parent || !parent.children) return
+      const ch = parent.children
+      const last = ch[ch.length - 1]
+      if (e.kind === 'thinking_start') {
+        // 免叠：末条已是 thinking-running 则不新增
+        if (!(last && last.kind === 'thinking' && last.status === 'running')) {
+          ch.push({ key: `th-${Date.now()}-${ch.length}`, kind: 'thinking', status: 'running', startedAt: Date.now(), endedAt: null })
+        }
+      } else if (e.kind === 'thinking_end') {
+        if (last && last.kind === 'thinking' && last.status === 'running') { last.status = 'done'; last.endedAt = Date.now() }
+      } else if (e.kind === 'tool_start') {
+        ch.push({ key: `tool-${e.name}-${Date.now()}-${ch.length}`, kind: 'tool', name: e.name, status: 'running', startedAt: Date.now(), endedAt: null })
+      } else if (e.kind === 'tool_end') {
+        // 子 agent 串行：倒序找最近一个同名 running 的 tool 收尾
+        for (let i = ch.length - 1; i >= 0; i--) {
+          if (ch[i].kind === 'tool' && ch[i].name === e.name && ch[i].status === 'running') {
+            ch[i].status = e.ok ? 'done' : 'error'; ch[i].endedAt = Date.now(); break
+          }
+        }
+      }
     },
     answer_start: () => { if (owns()) streamingPhase.value = 'answer' },
     answer_delta: (e) => { if (owns()) streamingContent.value += e.text },

@@ -12,8 +12,22 @@
           </span>
         </div>
         <div class="step-body">
-          <span class="step-name">{{ s.label }}</span>
-          <span class="step-time">{{ fmt(s.dur) }}</span>
+          <div class="step-row">
+            <span class="step-name">{{ s.label }}</span>
+            <span class="step-time">{{ fmt(s.dur) }}</span>
+          </div>
+          <!-- 嵌套子时间轴：retrieve 内部子 agent 步骤（思考 + 各检索工具），1 层 -->
+          <div v-if="s.children && s.children.length" class="sub-steps">
+            <div v-for="c in s.children" :key="c.key" class="sub-step">
+              <span class="node-sm" :class="c.status">
+                <span v-if="c.spinning" class="spinner spinner-sm" />
+                <span v-else-if="c.status === 'done'" class="ic ok">✓</span>
+                <span v-else-if="c.status === 'error'" class="ic err">✕</span>
+                <span v-else class="node-dot" />
+              </span>
+              <span class="sub-name">{{ c.label }}</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -42,6 +56,7 @@ const TOOL_NAMES = {
   s2_search_tool: 'Semantic Scholar',
   openalex_tool: 'OpenAlex',
   jina_tool: '网页/PDF 阅读',
+  retrieve: '检索',  // 主 agent 的 retrieve 壳（内部跑子 agent 检索循环，步骤挂 children）
 }
 function toolName(n) {
   return TOOL_NAMES[n] || n
@@ -98,6 +113,16 @@ const steps = computed(() => {
       spinning: t.status === 'running',
       label: toolName(t.name),
       dur: toolDur(t),
+      // retrieve 的子 agent 内部步骤（思考 + 各检索工具），1 层嵌套
+      children: (t.children || []).map(c => ({
+        key: c.key,
+        status: c.status,
+        spinning: c.status === 'running',
+        kind: c.kind,
+        label: c.kind === 'thinking'
+          ? (c.status === 'running' ? '思考中…' : '已思考')
+          : toolName(c.name || ''),
+      })),
     })),
   ]
   list.forEach((s, i) => { s.last = i === list.length - 1 })
@@ -203,10 +228,16 @@ const summaryText = computed(() => {
 
 .step-body {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   padding-top: 3px;
   padding-bottom: 8px;
+}
+
+.step-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .step-name {
@@ -217,6 +248,56 @@ const summaryText = computed(() => {
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
   font-size: 0.92em;
+}
+
+/* ── 嵌套子时间轴（retrieve 内部子 agent 步骤）── */
+.sub-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-left: 2px;
+  padding: 2px 0 2px 10px;
+  border-left: 1.5px dashed var(--border);
+}
+
+.sub-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.node-sm {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--bg-2);
+  border: 1.3px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.node-sm.done {
+  border-color: #2e9e5b;
+}
+
+.node-sm.error {
+  border-color: #c0392b;
+}
+
+.node-sm.active {
+  border-color: var(--accent);
+}
+
+.spinner-sm {
+  width: 7px;
+  height: 7px;
+}
+
+.sub-name {
+  color: var(--text-3);
+  font-size: 0.95em;
 }
 
 /* ── answer 折叠摘要 ── */

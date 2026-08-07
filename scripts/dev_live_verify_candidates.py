@@ -107,6 +107,8 @@ async def main() -> int:
     n_frames = 0
     last_err = None
     tool_events: list[str] = []  # 抓 SSE 里 tool_start/tool_end 的 name（查嵌套事件泄漏）
+    retrieve_tool_id = None
+    subtask_events: list[dict] = []  # Stage 5：抓 subtask 帧（子 agent 内部 trace）
     async for frame in chat_stream(QUESTION, conv_id, request=None, user_id="default"):
         n_frames += 1
         payload = _parse_sse(frame) if isinstance(frame, str) else None
@@ -119,11 +121,27 @@ async def main() -> int:
             last_err = payload.get("message")
         elif et in ("tool_start", "tool_end"):
             tool_events.append(f"{et}:{payload.get('name')}")
+            if et == "tool_start" and payload.get("name") == "retrieve":
+                retrieve_tool_id = payload.get("tool_id")
+        elif et == "subtask":
+            subtask_events.append(payload)
 
     print(f"[live-verify] stream done: {n_frames} frames, agent_msg_id={agent_msg_id}")
     print(f"[SSE tool events] {' '.join(tool_events) if tool_events else '(none)'}")
     nested = [t for t in tool_events if "retrieve" not in t]
     print(f"[SSE nested leak] {len(nested)} 帧非 retrieve 工具事件（应为 0，>0 = 子 agent 事件泄漏到前端/候选路径）")
+    # Stage 5：subtask 帧（retrieve 内部子 agent 步骤）
+    print(f"\n[Stage5 subtask] {len(subtask_events)} 帧（retrieve 内部 trace）")
+    for s in subtask_events:
+        print(f"  kind={s.get('kind'):14} name={s.get('name') or '-':16} ok={s.get('ok')} parent={(s.get('parent_tool_id') or '')[:8]}")
+    if subtask_events:
+        kinds = [s.get("kind") for s in subtask_events]
+        n_think = kinds.count("thinking_start")
+        n_tools = kinds.count("tool_start")
+        print(f"  → {n_think} 轮思考 + {n_tools} 次工具调用透出")
+        bad_parent = [s for s in subtask_events if s.get("parent_tool_id") != retrieve_tool_id]
+        print(f"  parent_tool_id 对齐 retrieve({(retrieve_tool_id or '')[:8]}): "
+              f"{'✓ 全部对齐' if not bad_parent else f'✗ {len(bad_parent)} 帧错位'}")
     if last_err:
         print(f"[live-verify] !! stream emitted error: {last_err}")
     if agent_msg_id is None:

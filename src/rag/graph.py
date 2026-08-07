@@ -10,6 +10,7 @@ from langchain_core.messages import (
 from langgraph.graph.message import add_messages
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
+from langchain_core.callbacks.manager import adispatch_custom_event
 from typing import TypedDict, Annotated, Sequence
 from pydantic import BaseModel, Field
 import os
@@ -433,6 +434,19 @@ def build_final_prefill(profile: HarnessProfile = FLASH) -> str:
     return f"{runtime_status}\n\n{lead}"
 
 
+async def _safe_dispatch_trace(data: dict) -> None:
+    """子 agent 内部 trace：安全 dispatch custom event（Stage 5）。
+
+    adispatch_custom_event 失败（无 parent run / 回调未挂）只 debug 记录，绝不阻断节点——
+    trace 是展示增强，挂了不能影响检索主路径。子 agent 节点（call_llm/tool_node）在
+    astream_events 上下文里跑，dispatch 经同套回调冒泡到主 _consume_events 的 on_custom_event。
+    """
+    try:
+        await adispatch_custom_event("subagent_trace", data)
+    except Exception as e:
+        logger.debug("[trace] adispatch_custom_event 失败（忽略）: %s", e)
+
+
 def _build_graph(
     llm,
     tools,
@@ -441,6 +455,7 @@ def _build_graph(
     terminator: str | None = None,
     finalize_fn=None,
     annotate_tool_results: bool = False,
+    emit_trace: bool = False,
 ):
     """共享图组装层（薄、无业务逻辑）：主 agent 与子 agent 共用同一套图骨架。
 
@@ -459,7 +474,25 @@ def _build_graph(
         _base_tool_node = ToolNode(tools)
 
         async def tool_node(state):
+            # Stage 5 trace：ainvoke 前报 tool_start（工具名从末条 AIMessage 的 tool_calls 读）
+            if emit_trace:
+                last_ai = next(
+                    (m for m in reversed(state["messages"]) if isinstance(m, AIMessage)),
+                    None,
+                )
+                for tc in (last_ai.tool_calls or []) if last_ai else []:
+                    if isinstance(tc, dict) and tc.get("name"):
+                        await _safe_dispatch_trace(
+                            {"kind": "tool_start", "name": tc["name"]}
+                        )
             result = await _base_tool_node.ainvoke(state)
+            # Stage 5 trace：ainvoke 后报 tool_end（ok 复用 _tool_ok 判 ToolMessage.status）
+            if emit_trace:
+                for tm in result.get("messages", []) if isinstance(result, dict) else []:
+                    if isinstance(tm, ToolMessage) and (getattr(tm, "name", "") or ""):
+                        await _safe_dispatch_trace(
+                            {"kind": "tool_end", "name": tm.name, "ok": _tool_ok(tm)}
+                        )
             return _annotate_tool_results(state, result)
     else:
         tool_node = ToolNode(tools)
@@ -494,7 +527,12 @@ def _build_graph(
         else:
             invoke_messages = messages + [AIMessage(content=prefill)]
 
+        # Stage 5 trace：thinking 前后报（子 agent emit_trace 时）
+        if emit_trace:
+            await _safe_dispatch_trace({"kind": "thinking_start"})
         response = await ainvoke_with_retry(llm_with_tools, invoke_messages)
+        if emit_trace:
+            await _safe_dispatch_trace({"kind": "thinking_end"})
 
         # 检查 reasoning_content 是否有内容
         reasoning = getattr(response, "additional_kwargs", {}).get(
@@ -857,6 +895,7 @@ def build_subagent(
         terminator="return_findings",
         finalize_fn=_subagent_finalize,
         annotate_tool_results=True,
+        emit_trace=True,
     )
 
 
@@ -1384,6 +1423,7 @@ async def _consume_events(agent, initial_state, request, result: dict):
     buf = ""
     cur_node = None
     root_run_id = None
+    active_retrieve_run_id = None  # Stage 5：当前 retrieve 工具的 run_id，作嵌套 subtask 帧的 parent_tool_id
 
     aiter = agent.astream_events(initial_state, version="v2").__aiter__()
     pending = None
@@ -1408,6 +1448,18 @@ async def _consume_events(agent, initial_state, request, result: dict):
 
             etype = ev["event"]
             metadata = ev.get("metadata") or {}
+
+            # Stage 5：子 agent 内部 trace（custom event）。必须在 depth 过滤之前处理——
+            # custom event 也来自嵌套子图（ckpt_ns 含 '|'），depth 过滤会一并丢弃。受控通道：
+            # 只放子 agent 主动 dispatch 的 subagent_trace（thinking/tool 进度）成 subtask 帧；
+            # 原生嵌套事件仍被下面 depth 过滤掐断（collect-selected / SSE 不泄漏的修复不回退）。
+            if etype == "on_custom_event" and ev.get("name") == "subagent_trace":
+                yield _format_sse(
+                    "subtask",
+                    parent_tool_id=active_retrieve_run_id,
+                    **(ev.get("data") or {}),
+                )
+                continue
 
             # T2：跳过嵌套子 agent 事件。retrieve 壳内子图（build_subagent）经 astream_events
             # 冒泡上来的内部事件——子 agent 的工具/chat/chain 事件若不滤，会致：
@@ -1480,6 +1532,11 @@ async def _consume_events(agent, initial_state, request, result: dict):
             elif etype == "on_tool_start":
                 # 真实工具执行（guard 伪造的 ToolMessage 不经工具节点，不触发）
                 yield _format_sse("thinking_end")
+                # Stage 5：捕获 retrieve 工具 run_id 作嵌套 subtask 帧的 parent_tool_id
+                # （单次 retrieve 契约保证同时只有一个 active；其内子 agent trace 在
+                # on_tool_start 之后、on_tool_end 之前到达，恰好命中 active 窗口）
+                if ev.get("name") == "retrieve":
+                    active_retrieve_run_id = ev.get("run_id")
                 yield _format_sse(
                     "tool_start", name=ev.get("name", ""), tool_id=ev.get("run_id", "")
                 )
@@ -1509,6 +1566,9 @@ async def _consume_events(agent, initial_state, request, result: dict):
                         result.setdefault("tool_results", []).append(
                             (tool_name, tool_content)
                         )
+                # Stage 5：retrieve 结束，清 active（其内子 agent trace 已全部发完）
+                if tool_name == "retrieve":
+                    active_retrieve_run_id = None
                 yield _format_sse(
                     "tool_end",
                     name=ev.get("name", ""),

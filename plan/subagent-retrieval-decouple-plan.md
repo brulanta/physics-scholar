@@ -166,6 +166,14 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - ⚠️ **与 Stage4.5 修订 depth 过滤的交互**：修订加的 depth 过滤（`langgraph_checkpoint_ns` 含 `|` 即跳过）会一并跳过子 agent dispatch 的 custom event（它们也带嵌套 ckpt_ns）。Stage 5 须把 custom-event 分支**置于 depth 过滤之前**（先认 `on_custom_event`/`subtask_*` 再过滤），或细化过滤为「跳过嵌套的既有帧（tool/chat_model）、放行嵌套 custom event」。否则嵌套可视化的信号会被自己掐掉。
 - 前端：`ChatPage.vue` `streamingTools` 给 `retrieve` 条目加 `children`；`ThinkingTimeline.vue` `steps` 从单层 map 改支持工具节点展开成子时间轴（递归）；`makeStreamHandlers` 加新帧处理。`consumeSSE`（`chat.js:61`）按 `evt.type` 派发，加 key 即可。
 
+**✅ 完成（2026-08-07）—— 专用 custom-event 通道方案（不放行原生嵌套事件）**：
+- **设计落定**：用 `adispatch_custom_event("subagent_trace", {kind,...})` 作受控通道透出子 agent 进度；`_consume_events` 在 **depth 过滤之前**加 `on_custom_event` 分支转成新 `subtask` 帧（带 `parent_tool_id`=retrieve run_id）。原生嵌套 `on_tool_*`/`on_chat_model_*` 仍被 depth 过滤掐断 → collect-selected / SSE 不泄漏的修复**不回退**。两全（trace 走 custom event，原生事件照滤）。
+- **后端**（`graph.py`）：`_build_graph` 加 `emit_trace` kwarg（主 agent 不传=零变化）；`call_llm` 闭包 ainvoke 前后 dispatch thinking_start/end；`tool_node` 闭包（子 agent 专属）dispatch tool_start（工具名从末条 AIMessage tool_calls 读）/tool_end（ok 复用 `_tool_ok`）；`build_subagent(emit_trace=True)`；`_consume_events` 加 `active_retrieve_run_id`（on_tool_start 捕获 / on_tool_end 清）+ on_custom_event 分支（depth 过滤前）。`_safe_dispatch_trace` 包 try/except，dispatch 失败只 debug 不阻断检索。
+- **前端**：`ChatPage.vue` retrieve 条目带 `children: []` + `subtask` handler（按 parent_tool_id 挂 children，按 kind 增改 thinking/tool 子步）；`ThinkingTimeline.vue` 加 `retrieve:检索` 标签 + steps 映射 children + 模板内联 1 层嵌套子时间轴（虚线缩进，复用 spinner/✓/✕）；live-only（done 后 resetStreaming 清，不动 DB）。
+- **probe 实证**（`probe_astream_events.py`，首要风险已除）：custom event **能**从子 agent 节点冒泡到主 astream_events，data 正确（kind/name/ok）；ckpt_ns 含 `|`（证必须放过滤前）；到达时机夹在 retrieve on_tool_start/end 之间（active 窗口命中）。
+- **dev-live 实证**（`dev_live_verify_candidates.py`，Q03）：`subtask` 帧 10 个（3 轮思考 + s2/openalex 2 工具），序列对、`parent_tool_id` 全对齐 retrieve run_id；**DB 仍=3 选中项**（collect-selected 未回退，收敛比 0.60）；SSE 嵌套泄漏 0 帧。前端 `npm run build` 干净（`✓ built`）。78 单测绿（含 2 个 subtask 路由：含 `|` ckpt_ns 也能成帧 + active 窗口外 parent=None 降级）。
+- **未验**：浏览器视觉渲染（需 `npm run dev` + 人眼看 retrieve 节点下嵌套轴实时更新）——SSE 管线 + 前端编译 + handler 逻辑（照搬主时间轴已验证模式）均过，视觉为最后确认项。
+
 ### Stage 6 — frozen 端到端 + 收尾
 - `scripts/build_release.py` 打包；frozen exe 验证子 agent 路径（spec hiddenimports 补子 agent 新模块 + return_findings）。
 - 回归：`test_prompt_byte_equivalence`（语义断言会因 Phase 3 改动变红，确认是真信号）、`test_consume_events`、`test_citation`、`test_harness_probe_metrics`。
