@@ -165,9 +165,9 @@
 - **漂亮格式**：双格式——model 向 lean（机器友好 id+摘抄）/展示向 rich（人友好完整引用+可点 url，type-aware：论文给 doi/url，RAG 给 doc_id+page）。
 - **scope**：是个有边界的小模块（①工具层补 source_id，RAG 加 doc_id ②enrichment sidecar 表 ③展示期 merge ④prompt 改 lean ref 格式），不是一行改动，但独立于想法 1/3 不挡路。
 
-### 想法 3：解耦 CoT，子 Agent 专注检索
+### 想法 3：解耦 CoT，子 Agent 专注检索  ✅ 闭环（T2 Stage 0–6，2026-08-14）
 
-**结论**：轻量可行（主 graph 零改动），走「把子 agent 包成一个工具」路径。成本核算成立。子 agent 内部配置大幅瘦身是核心收益。
+**结论**：轻量可行（主 graph 零改动），走「把子 agent 包成一个工具」路径。成本核算成立。子 agent 内部配置大幅瘦身是核心收益。**已落地**——见 T2 完成注（Stage 0–6 全绿，frozen 验证通过）。
 
 **现状关键事实**：
 
@@ -255,6 +255,15 @@
 | --- | ----------------------------------- | ------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 4   | 想法 3：解耦 CoT，子 agent 专注检索 | 【五】想法 3 | 先 #1 更顺 | 主 graph 零改动、子 agent 包成工具；子 agent guard off + prefill minimal（非流式新配置空间）+ 独立预算；`return_findings` 工具终止；流式走 `adispatch_custom_event` 阶段边界 dispatch + 前端嵌套分组渲染；删主 agent prompt 工具编排细节，`[TOOL_LOOP]` 改名 `TOOL_PENDING`/`RETRIEVAL_PENDING`。**cross-model probe 的 `--model` 加法并入本项新 probe 轮**（正协同一次到位） |
 
+> **✅ T2 完成（2026-08-14，Stage 0→6 全闭环）**：详见 [subagent-retrieval-decouple-plan.md](./subagent-retrieval-decouple-plan.md)。
+> - **Stage 0–3**：抽 `_build_graph` 共享组装层 + 子 agent 图（`RETRIEVER` profile）+ `retrieve` 工具壳 + `return_findings`/`finalize` + 主 agent prompt 去水 + harness_probe 搬子 agent + `--model`。
+> - **Stage 4/4.5**：子 agent prompt v3 + result_index 系统标注 + **item 级精度**（`item_index`，子 agent 点单篇）+ **collect-selected**（候选落库只收选中项，消存储噪声）。
+> - **Stage 4.5 修订（live 抓的真 bug）**：probe 够不着的 `_consume_events` 盲区——collect-selected 在 live 路径被嵌套事件泄漏打穿（DB 存全量 raw）。修法：`_consume_events` 加 ckpt_ns `\|` depth 过滤（确定性）+ result_index 1-based 防呆。dev-live 验证 DB=选中项（收敛比 0.60）。→ 教训入 memory `probe-blind-spot-streaming-path`。
+> - **Stage 5**：子 agent 检索进度透出——专用 custom-event 通道（`adispatch_custom_event`，不放行原生嵌套事件），`_consume_events` 转成 `subtask` 帧带 `parent_tool_id`，前端 retrieve 节点下嵌套时间轴（live-only）。
+> - **Stage 6**：frozen exe 验证子 agent 路径（`build_release.py` 打包，retrieve + subtask 帧流经 frozen exe，`/api/ask 200`）；全量回归绿（含 `test_prompt_byte_equivalence`）；顺带修 `build_release.py` 在 GBK 控制台因 ✅ 编码误报失败的 bug。
+> - **解阻塞**：T3（Harness B/F 接线、Profile 产品化）的接线对象 settle（检索循环 owner = 子 agent）。
+> - **遗留（非阻塞）**：`[TOOL_LOOP]` 改名（牵动正则/prompt/probe/test，可选单做）；非流式 `chat()` 候选收集=0（无 route 调用）；result_index 模型 off-by-one 监控（防呆降低非消除）。
+
 ### T3 — 随想法 3 定（决策 §三.12 落地）
 
 | 序  | 项                                                  | 来源          | 依赖           | 开工指引                                                                                                                                                                                                        |
@@ -290,4 +299,5 @@
 | D    | MCP 迁移 + 启动重启 + 打包      | [mcp-tool-migration-plan.md](./mcp-tool-migration-plan.md) / [startup-restart-refactor-plan.md](./startup-restart-refactor-plan.md) | ✅ 封存 / ✅           |
 | E    | 评测/量具（召回 + 行为 probe）  | [harness-behavior-runner-plan.md](./harness-behavior-runner-plan.md) + rag-fix Part4                                                | ✅                     |
 | T0   | prompt 模块化 A 半 + 死代码清理 | [prompt-modularization-t0.md](./prompt-modularization-t0.md)                                                                        | ✅ 完成（想法 3 地基） |
+| T2   | 想法 3：解耦 CoT，子 agent 专注检索 | [subagent-retrieval-decouple-plan.md](./subagent-retrieval-decouple-plan.md)                                                      | ✅ 完成（Stage 0–6，2026-08-14） |
 | —    | profile 产品侧（决策未编码）    | [profile-selection-decision.md](./profile-selection-decision.md)                                                                    | ⏸                      |

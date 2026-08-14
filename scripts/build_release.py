@@ -24,6 +24,14 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Windows GBK 控制台编不出 ✅ 等 emoji 会让脚本的完工 print 抛 UnicodeEncodeError、
+# 误报失败（构建其实已成功）。强制 stdout/stderr 用 utf-8，避免「构建成功却 exit 1」。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 # 脚本在 scripts/ 下，仓库根是其父目录的父目录
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"

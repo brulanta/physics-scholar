@@ -174,11 +174,13 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - **dev-live 实证**（`dev_live_verify_candidates.py`，Q03）：`subtask` 帧 10 个（3 轮思考 + s2/openalex 2 工具），序列对、`parent_tool_id` 全对齐 retrieve run_id；**DB 仍=3 选中项**（collect-selected 未回退，收敛比 0.60）；SSE 嵌套泄漏 0 帧。前端 `npm run build` 干净（`✓ built`）。78 单测绿（含 2 个 subtask 路由：含 `|` ckpt_ns 也能成帧 + active 窗口外 parent=None 降级）。
 - **未验**：浏览器视觉渲染（需 `npm run dev` + 人眼看 retrieve 节点下嵌套轴实时更新）——SSE 管线 + 前端编译 + handler 逻辑（照搬主时间轴已验证模式）均过，视觉为最后确认项。
 
-### Stage 6 — frozen 端到端 + 收尾
-- `scripts/build_release.py` 打包；frozen exe 验证子 agent 路径（spec hiddenimports 补子 agent 新模块 + return_findings）。
-- 回归：`test_prompt_byte_equivalence`（语义断言会因 Phase 3 改动变红，确认是真信号）、`test_consume_events`、`test_citation`、`test_harness_probe_metrics`。
-- 可选收尾：`[TOOL_LOOP]` 改名 `RETRIEVAL_PENDING/RETRIEVAL_DONE`（牵动 `_MARKER_RE`+prompt+probe 哨兵+test，单做）。
-- 更新 `plan/top-level-progress-log.md`（T2 完成、T3 解阻塞、想法 3 闭环）。
+### Stage 6 ✅ — frozen 端到端 + 收尾（2026-08-14）
+- **spec 审计**：T2 新增全在 graph.py（`build_subagent`/`return_findings`/`_subagent_finalize` 等已在 hiddenimports 的 `src.rag.graph` 内）+ `subagent_prompt.py`（graph.py 顶层 import + `datas` 整个 src/ 打包，双覆盖）；`adispatch_custom_event`（langchain_core，graph.py 顶层 import）。**结论：spec 零改动**。
+- **frozen 构建 + 验证**：`build_release.py` 打包成功（216M bundle）；frozen exe 起得来（`/api/health` 200、前端 200、`/api/conversations` 200 = 全 T2 模块 frozen 解析 OK）；走 `/api/ask` 本地检索题，**retrieve + subtask 帧（custom-event 通道）流经 frozen exe**（`parent_tool_id` 对齐），`POST /api/ask 200`。子 agent 路径 frozen 实证通过。
+- **回归**：`test_prompt_byte_equivalence`（plan 预测会红——实际绿，Phase 3 改动已带测试更新，无红灯）+ `test_harness_probe_metrics`/`_subagent` + `test_consume_events`/`test_subagent_finalize`/`test_citation`/`test_retrieve_classify` 全绿（32 + 78）。
+- **顺带修**：`build_release.py` 在 GBK 控制台因 `✅` emoji 编不出抛 UnicodeEncodeError、误报失败（构建已成功）——加 `sys.stdout.reconfigure(utf-8)`。
+- **收尾文档**：`top-level-progress-log.md` 标 T2 ✅ + 想法 3 闭环 + T3 解阻塞。
+- **遗留（非阻塞）**：`[TOOL_LOOP]` 改名（牵动正则/prompt/probe/test，可选单做）；非流式 `chat()` 候选=0（无 route）；result_index 模型 off-by-one 监控。
 
 ## 关键文件
 
