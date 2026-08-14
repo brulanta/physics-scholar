@@ -182,7 +182,8 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - **收尾文档**：`top-level-progress-log.md` 标 T2 ✅ + 想法 3 闭环 + T3 解阻塞。
 - **遗留（非阻塞）**：`[TOOL_LOOP]` 改名（牵动正则/prompt/probe/test，可选单做）；非流式 `chat()` 候选=0（无 route）；result_index 模型 off-by-one 监控；**子 agent 点选步 LLM 截断**（见下）。
 - **顺带：引入 LangSmith dev 观测（T2 验收触发）**：T2 把检索挪进子 agent，系统折叠度升高、真实 LLM IO 不再直观。装 LangSmith（`langsmith` 早是 langchain 依赖，零新包、零埋点——env 一开自动 trace 主图/子 agent/未来子图嵌套）。dev-only 铁门：`config.py` 加 frozen 加固（packaged exe 强制关 tracing，用户数据不上云），`.env`（含 key）gitignored 不入包。project=`physics-scholar-dev`。**测试管回归、trace 管「合不合场景」，互补，trace 不进 CI。**
-  - **首个分红**：trace 当场定位到一个 logs/probe 够不着的边缘 case——子 agent S2 正常返回后，**点选步 LLM 截断**（`finish_reason=length`，return_findings 参数没填全）→ 没走 finalize → 兜底返回 → 0 候选。优雅降级（不崩、兜底给答案），但触发时丢候选/引用。模型相关、低频。**修法（deferred）**：子 agent 调大 max_tokens，或检测 `finish_reason=length` 兜底重试。
+  - **首个分红**：trace 当场定位到一个 logs/probe 够不着的边缘 case——子 agent S2 正常返回后，**点选步 LLM 截断**（return_findings 参数没填全）→ 没走 finalize → 兜底返回 → 0 候选。优雅降级（不崩、兜底给答案），但触发时丢候选/引用。模型相关、低频。
+  - **截断根因已查证（2026-08-14）**：`main_llm`（主/子 agent 共用）**未设 max_tokens**（provider 默认，上限很大）；`sub_llm` 的 1024 只用于 Jina 打分（无关）。**非我方配置所掐，是上游不稳定自断**。修法（deferred，用户定暂不实操）：检测 `finish_reason` 截断 + 注入「继续」重试；**若实操主 agent 优先**——用户可见的回答截断比子 agent 内部截断（有兜底）更值得救。
 
 ## 关键文件
 
