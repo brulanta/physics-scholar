@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from src.api.routes import router
+from src.config import IS_DEV
 from src.core.init_SQLite import init_db
 from src.rag.tool_runtime import USE_MCP
 from src.rag import mcp_client
@@ -40,6 +41,13 @@ app.add_middleware(
 )
 
 app.include_router(router, prefix="/api")
+
+# 开发态调试路由组（Prompt 模块调控 GUI 等）：frozen 下不 import = 路由不存在（404
+# by construction）。铁门见 src/config.py IS_DEV 与 src/api/dev_routes.py 模块头。
+if IS_DEV:
+    from src.api.dev_routes import router as dev_router
+
+    app.include_router(dev_router, prefix="/api/dev")
 
 
 # 所有API路由注册完之后，最后挂载静态文件

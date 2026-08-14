@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Response, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from src.config import PDF_DIR, get_config_dict, save_config_dict
+from src.config import PDF_DIR, IS_DEV, get_config_dict, save_config_dict
 from src.core import registry
 from src.core.ingestor import ingest_pdf, confirm_and_index, delete_paper
 from src.rag.graph import chat_stream, regenerate_stream
@@ -33,6 +33,8 @@ def health():
         "status": "ok",
         "version": "0.1.0",
         "restarting": service_state.is_restarting(),
+        # dev：开发态标志（frozen=false），前端据此渲染开发态入口（如 Prompt 模块调控 GUI）
+        "dev": IS_DEV,
     }
 
 

@@ -64,6 +64,18 @@
         </div>
       </section>
 
+      <!-- 开发section（dev-only：后端 /api/health 报 dev=true 才渲染；frozen 下不存在） -->
+      <section v-if="isDev" class="section">
+        <div class="section-title">开发</div>
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Prompt 模块调控</div>
+            <div class="setting-desc">可视化调整系统 prompt 模块开关与顺序（下一问生效）</div>
+          </div>
+          <button class="resume-btn" @click="showPromptTuner = true">打开</button>
+        </div>
+      </section>
+
       <!-- 论文库section：section-title用sticky卡住 -->
       <section class="section paper-section">
         <!-- ⑦ 这个title会在滚动到顶时sticky -->
@@ -165,6 +177,10 @@
     <Teleport to="body">
       <ConfigModal v-if="showConfig" @close="showConfig = false" />
     </Teleport>
+    <!-- dev-only：Prompt 模块调控 GUI -->
+    <Teleport to="body">
+      <PromptTunerModal v-if="showPromptTuner" @close="showPromptTuner = false" />
+    </Teleport>
   </div>
 </template>
 
@@ -175,8 +191,14 @@ import { listPapers, confirmPaper, deletePaper } from '../../api/paper.js'
 import MultiUploadPanel from '../Paper/MultiUploadPanel.vue'
 import Toggle from './Toggle.vue'
 import ConfigModal from './ConfigModal.vue'   // ✨ 新增
+import PromptTunerModal from './PromptTunerModal.vue'   // dev-only
 
 const showConfig = ref(false)   // ✨ 新增
+const showPromptTuner = ref(false)   // dev-only
+
+// dev-only 入口门：后端 /api/health 报 dev=true（frozen=false）才渲染「开发」区。
+// frozen 下 /api/dev 路由组整个不存在，即便手改前端也只得到 404。
+const isDev = ref(false)
 
 defineEmits(['close'])
 
@@ -221,7 +243,14 @@ async function fetchPapers() {
   }
 }
 
-onMounted(fetchPapers)
+onMounted(() => {
+  fetchPapers()
+  // dev-only 门：读 /api/health 的 dev 字段（失败视为非 dev，入口不渲染）
+  fetch('/api/health')
+    .then(r => (r.ok ? r.json() : null))
+    .then(d => { isDev.value = !!d?.dev })
+    .catch(() => {})
+})
 
 // 严格模式切换时立即更新settings，不需要刷新列表
 function onStrictChange(val) {

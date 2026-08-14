@@ -30,6 +30,13 @@ if getattr(sys, "frozen", False) and os.getenv("LANGSMITH_TRACING", "").lower() 
         flush=True,
     )
 
+# ── 开发态总开关 ──────────────────────────────────────────
+# dev-only 功能的统一铁门（首个消费者：/api/dev 调试路由组——Prompt 模块调控 GUI）。
+# 语义与上方 LangSmith 铁门同源：frozen（PyInstaller）= 打包发行态，一切开发态功能默认关。
+# main.py 按它条件挂载 dev 路由（不 import = 404 by construction）；前端读 /api/health
+# 的 dev 字段决定是否渲染开发入口。
+IS_DEV: bool = not getattr(sys, "frozen", False)
+
 # ── 路径 ──────────────────────────────────────────────────
 # frozen（PyInstaller onedir）下 __file__ 指向 _MEIPASS 临时解压目录，data/chroma/SQLite
 # 与用户 yaml 若写进那里会在重启/退出时丢失。故 ROOT 必须指向 **exe 真实所在目录**（可写、
