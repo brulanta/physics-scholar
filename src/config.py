@@ -6,6 +6,30 @@ from pydantic import BaseModel
 
 load_dotenv()
 
+# ── LangSmith 观测：dev-only 铁门 ──────────────────────────
+# LangSmith 自动 trace（langsmith 包，已是 langchain 依赖；零额外埋点，主图/子 agent/
+# 未来子图全嵌套自动 trace）只由 env 激活：LANGSMITH_TRACING=true + LANGSMITH_API_KEY
+# + LANGSMITH_PROJECT（写 dev .env）。用途：T2 后系统折叠度升高，trace 是「真实 LLM IO」
+# 的持续观测入口（测试管回归，trace 管「合不合场景」——互补，trace 不进 CI）。
+# 铁门：.env 不入包（spec datas 只带 config/ yaml），packaged exe 默认无此 env = 不 trace。
+# 加固：frozen 运行下若检测到 tracing 意外开着，强制清掉——用户数据绝不上云。
+if getattr(sys, "frozen", False) and os.getenv("LANGSMITH_TRACING", "").lower() in (
+    "true",
+    "1",
+    "yes",
+):
+    for _k in (
+        "LANGSMITH_TRACING",
+        "LANGSMITH_API_KEY",
+        "LANGSMITH_PROJECT",
+        "LANGSMITH_ENDPOINT",
+    ):
+        os.environ.pop(_k, None)
+    print(
+        "[config] frozen 运行下检测到 LangSmith tracing 开启——已强制关闭（用户数据不上云）。",
+        flush=True,
+    )
+
 # ── 路径 ──────────────────────────────────────────────────
 # frozen（PyInstaller onedir）下 __file__ 指向 _MEIPASS 临时解压目录，data/chroma/SQLite
 # 与用户 yaml 若写进那里会在重启/退出时丢失。故 ROOT 必须指向 **exe 真实所在目录**（可写、

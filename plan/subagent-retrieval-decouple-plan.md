@@ -180,7 +180,9 @@ _build_graph(llm, tools, profile, *, terminator=None, finalize_fn=None)
 - **回归**：`test_prompt_byte_equivalence`（plan 预测会红——实际绿，Phase 3 改动已带测试更新，无红灯）+ `test_harness_probe_metrics`/`_subagent` + `test_consume_events`/`test_subagent_finalize`/`test_citation`/`test_retrieve_classify` 全绿（32 + 78）。
 - **顺带修**：`build_release.py` 在 GBK 控制台因 `✅` emoji 编不出抛 UnicodeEncodeError、误报失败（构建已成功）——加 `sys.stdout.reconfigure(utf-8)`。
 - **收尾文档**：`top-level-progress-log.md` 标 T2 ✅ + 想法 3 闭环 + T3 解阻塞。
-- **遗留（非阻塞）**：`[TOOL_LOOP]` 改名（牵动正则/prompt/probe/test，可选单做）；非流式 `chat()` 候选=0（无 route）；result_index 模型 off-by-one 监控。
+- **遗留（非阻塞）**：`[TOOL_LOOP]` 改名（牵动正则/prompt/probe/test，可选单做）；非流式 `chat()` 候选=0（无 route）；result_index 模型 off-by-one 监控；**子 agent 点选步 LLM 截断**（见下）。
+- **顺带：引入 LangSmith dev 观测（T2 验收触发）**：T2 把检索挪进子 agent，系统折叠度升高、真实 LLM IO 不再直观。装 LangSmith（`langsmith` 早是 langchain 依赖，零新包、零埋点——env 一开自动 trace 主图/子 agent/未来子图嵌套）。dev-only 铁门：`config.py` 加 frozen 加固（packaged exe 强制关 tracing，用户数据不上云），`.env`（含 key）gitignored 不入包。project=`physics-scholar-dev`。**测试管回归、trace 管「合不合场景」，互补，trace 不进 CI。**
+  - **首个分红**：trace 当场定位到一个 logs/probe 够不着的边缘 case——子 agent S2 正常返回后，**点选步 LLM 截断**（`finish_reason=length`，return_findings 参数没填全）→ 没走 finalize → 兜底返回 → 0 候选。优雅降级（不崩、兜底给答案），但触发时丢候选/引用。模型相关、低频。**修法（deferred）**：子 agent 调大 max_tokens，或检测 `finish_reason=length` 兜底重试。
 
 ## 关键文件
 
