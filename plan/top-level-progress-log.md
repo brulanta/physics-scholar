@@ -4,7 +4,7 @@
 > 不是季度总结、不是 plans 压缩版——是 base 项目总体的决策落实处，随 session 持续演进。
 >
 > 「近期波及」列的字母 = 工作线编号，见末尾[子计划索引](#子计划索引)的映射。
-> 最后更新 2026-08-14（T4：想法 1 B 半 GUI 落地）。
+> 最后更新 2026-08-16（T4 v2：GUI 内容编辑/新增/删除模块）。
 
 ---
 
@@ -104,9 +104,9 @@
 > 跨 session 讨论后方案已成型、但尚未开工落实的想法。开工某一项时，从这里提炼成独立 plan 文件。
 > 本节记**最终结论**，不记商榷中间过程。三想法独立但都改 `graph.py`/`thinking.py`，有耦合见末尾。
 
-### 想法 1：可视化 Prompt 调控界面  ✅ 闭环（A 半 T0 + B 半 2026-08-14）
+### 想法 1：可视化 Prompt 调控界面  ✅ 闭环（A 半 T0 + B 半 2026-08-14/16）
 
-**结论**：现成工具（Langfuse/LangSmith/PromptLayer）模型不匹配，GUI 得自己写；拆两半推进，A 半纯收益先做，B 半看调 prompt 频率再说。**两半均已落地**——A 半 T0（见上）、B 半 2026-08-14（dev-only GUI：模块开关/调序/实时预览/内容只读查看，保存落 yaml 下一问生效无需重启；`/api/dev` 铁门 frozen 下 404 by construction）。→ `prompt-tuner-gui-plan.md`
+**结论**：现成工具（Langfuse/LangSmith/PromptLayer）模型不匹配，GUI 得自己写；拆两半推进，A 半纯收益先做，B 半看调 prompt 频率再说。**两半均已落地**——A 半 T0（见上）、B 半 2026-08-14 v1（dev-only GUI：模块开关/调序/实时预览/内容只读查看，保存落 yaml 下一问生效无需重启；`/api/dev` 铁门 frozen 下 404 by construction）+ 2026-08-16 v2（内容编辑覆盖 .py 默认 + yaml 定义新模块 + 删除，builder.apply_config 的 yaml `content` 字段扩展；顺手修 pkgutil 共享对象被 apply_config 原地污染的架构级 bug——所有注册点 copy.copy 防御）。→ `prompt-tuner-gui-plan.md`
 
 **现状关键事实**：
 
@@ -264,9 +264,11 @@
 > - **解阻塞**：T3（Harness B/F 接线、Profile 产品化）的接线对象 settle（检索循环 owner = 子 agent）。
 > - **遗留（非阻塞）**：`[TOOL_LOOP]` 改名（牵动正则/prompt/probe/test，可选单做）；非流式 `chat()` 候选收集=0（无 route 调用）；result_index 模型 off-by-one 监控（防呆降低非消除）。
 
-### T4 — 想法 1 B 半：Prompt 模块调控 GUI（dev-only）✅ 已完成（2026-08-14）
+### T4 — 想法 1 B 半：Prompt 模块调控 GUI（dev-only）✅ 已完成（v1 08-14 + v2 08-16）
 
 > 独立小项，不占 T3 依赖链。dev-only GUI：Settings「开发」区入口（`/api/health` dev 字段门控）→ 双栏模态（模块开关/上下移调序/拼装实时预览/模块内容只读查看）→ 保存手写渲染 yaml + 写前 sanity 门 + 原子落盘，下一问生效无需重启。后端 `/api/dev` 路由组 frozen 下不挂载（404 by construction，双层铁门含 router 级 `_dev_guard`）。10 例单测 + live 端到端（save→不重启 build_prompt 立即反映）全过。详见 [prompt-tuner-gui-plan.md](./prompt-tuner-gui-plan.md)。
+>
+> **v2（2026-08-16）**：内容编辑（yaml `content` 覆盖 .py 默认）+ 新增/删除 yaml 定义模块 + 覆盖/恢复默认/删除徽标与操作；builder `apply_config` 扩展（未知名带 content=动态注册、无 content 仍 KeyError）；顺手修 pkgutil 共享对象被 apply_config 原地污染的架构级 bug（所有注册点 copy.copy 防御，含生产 `build_prompt`）。28 例单测 + 全量回归 191 passed + live e2e（覆盖/新增不重启生效）全过。
 
 ### T3 — 随想法 3 定（决策 §三.12 落地）
 
@@ -304,5 +306,5 @@
 | E    | 评测/量具（召回 + 行为 probe）  | [harness-behavior-runner-plan.md](./harness-behavior-runner-plan.md) + rag-fix Part4                                                | ✅                     |
 | T0   | prompt 模块化 A 半 + 死代码清理 | [prompt-modularization-t0.md](./prompt-modularization-t0.md)                                                                        | ✅ 完成（想法 3 地基） |
 | T2   | 想法 3：解耦 CoT，子 agent 专注检索 | [subagent-retrieval-decouple-plan.md](./subagent-retrieval-decouple-plan.md)                                                      | ✅ 完成（Stage 0–6，2026-08-14） |
-| T4   | 想法 1 B 半：Prompt 模块调控 GUI   | [prompt-tuner-gui-plan.md](./prompt-tuner-gui-plan.md)                                                                            | ✅ 完成（2026-08-14） |
+| T4   | 想法 1 B 半：Prompt 模块调控 GUI   | [prompt-tuner-gui-plan.md](./prompt-tuner-gui-plan.md) *| ✅ 完成（v1 08-14 + v2 08-16） |
 | —    | profile 产品侧（决策未编码）    | [profile-selection-decision.md](./profile-selection-decision.md)                                                                    | ⏸                      |

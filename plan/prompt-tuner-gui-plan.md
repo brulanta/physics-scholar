@@ -1,13 +1,35 @@
-# 想法 1 B 半：Prompt 模块调控 GUI（dev-only）✅ 完成（2026-08-14）
+# 想法 1 B 半：Prompt 模块调控 GUI（dev-only）✅ 完成（2026-08-14，v2 扩展 2026-08-16）
 
-> 来源：`plan/top-level-progress-log.md` 【五】想法 1 / harness-ablation-plan A3。A 半（4 硬边界 + 漂移 bug）已于 T0 完成，YAML 已是可写配置；本 plan 落实 B 半——把 YAML 编辑可视化。落成后同步更新总纲（【五】想法 1 标 ✅、子计划索引加行）。
+> 来源：`plan/top-level-progress-log.md` 【五】想法 1 / harness-ablation-plan A3。A 半（4 硬边界 + 漂移 bug）已于 T0 完成，YAML 已是可写配置；本 plan 落实 B 半——把 YAML 编辑可视化（v2 起含内容编辑/新增/删除）。落成后同步更新总纲（【五】想法 1 标 ✅、子计划索引加行）。
 
 ## 状态
 
 - 2026-08-14：plan 落地，开工。
-- 2026-08-14：**完成**。后端（`IS_DEV` 铁门 + `/api/dev` 三端点 + 原子写 + 写前 sanity 门）+ 前端（`PromptTunerModal.vue` 双栏 + `SettingsDrawer` dev-gated 入口）+ 10 例单测全绿；全量回归无新增失败（`test_backend` 4 error + `test_s2_tool` 1 fail 为 pre-existing 漂移，stash 对照确认；`test_rag_chain` collection error 亦为已知旧漂移）。
+- 2026-08-14：**v1 完成**（开关/排序/预览/内容只读）。后端（`IS_DEV` 铁门 + `/api/dev` 三端点 + 原子写 + 写前 sanity 门）+ 前端（`PromptTunerModal.vue` 双栏 + `SettingsDrawer` dev-gated 入口）+ 10 例单测全绿；全量回归无新增失败（`test_backend` 4 error + `test_s2_tool` 1 fail 为 pre-existing 漂移，stash 对照确认；`test_rag_chain` collection error 亦为已知旧漂移）。
 - **live 端到端验证通过**：GET→preview→save 幂等回传 200；live 服务器不重启，save 禁用 CODE_RULES 后 `build_prompt` 立即不含该模块、恢复 enabled 后立即回来——「下一问生效、无需重启」实证。验证后 yaml 已 git checkout 还原原状。
-- 实现偏离 plan 两处：①重复模块名校验从路由层 400 改为 pydantic `field_validator` 层 422（更早拦截，测试同步改）；②save 响应的 path 字段对「profiles 目录不在仓库内」（测试 monkeypatch 场景）退回绝对路径。
+- v1 实现偏离 plan 两处：①重复模块名校验从路由层 400 改为 pydantic `field_validator` 层 422（更早拦截，测试同步改）；②save 响应的 path 字段对「profiles 目录不在仓库内」（测试 monkeypatch 场景）退回绝对路径。
+
+## v2 扩展：内容编辑 + 新增/删除模块（2026-08-16，用户拍板「方案 B 全套」）
+
+**语义**（`builder.apply_config` 的 yaml 可选 `content` 字段扩展）：
+- 已注册模块条目带 `content` → 覆盖 .py 默认内容（GUI 编辑→确定）
+- 未注册名带 `content` → 动态注册「yaml 定义模块」（GUI 新增，不经 .py）
+- yaml 定义模块从 yaml 缺席 = 真删（GUI 删除钮只对 `deletable` 模块渲染）；.py 模块条目删除 = 回退默认+禁用（GUI 里「仅可禁用」）
+- 内容等于 .py 默认 → 落盘自动省略 content 键（「恢复默认」的收敛路径）
+- 校验：未注册名必须带 content、新名 UPPER_SNAKE、content 占位符 ⊆ {history, citation_plugin, tool_decision_plugin}（防 build 期 KeyError）
+- 未注册名且无 content 仍 KeyError（疏漏/漂移名不静默宽容——旧语义保留）
+
+**落盘格式**：多行内容 yaml literal block（`|-`，尾换行归一——模块内容尾换行无语义）；单行 json.dumps 双引号标量。实测 PyYAML `|` 对物理末行不追加换行，故统一 rstrip+`|-` 最稳。
+
+**⚠ 过程中抓到的架构级 bug（本扩展最重要收获）**：pkgutil 扫描缓存是**进程级共享模块对象**，`apply_config` 原地改写 content/enabled/order——v2 的 yaml 内容覆盖会污染「.py 默认值」（default_content==content、overridden 永假、「恢复默认」传回覆盖值）。修法：**所有注册点一律 `copy.copy()` 深防**——`build_prompt`（生产路径，同样受益：yaml 覆盖不再泄漏进全局）、dev_routes 的 GET/_apply_candidate/save sanity、测试本地参照。回归测试 `test_v2_global_state_not_polluted` 守住该不变量。
+
+**v2 验证**：
+- builder 级 4 例进 `test_prompt_byte_equivalence.py`（覆盖/新模块/KeyError 保留/无 content 键零变化）；路由级 +8 例（覆盖 round-trip、yaml 模块生命周期、三条校验、缺席语义、全局无污染）——28 例全绿。
+- 全量回归 191 passed 0 failed（排除 3 个 pre-existing 漂移文件）。
+- live e2e：覆盖 ROLE_BASE + 新增 LIVE_YAML_MOD → 服务器不重启 `build_prompt` 立即含覆盖与新模块、原版被覆盖；还原后立即回来。GET 的 overridden/deletable/default_content 全部正确。
+- 注：GUI 保存会把 yaml 重排为 10/20/30… 序 + 去空行 + 换头注释（语义等价的格式归一），git diff 会显示格式变化——这是「yaml 交给 GUI 管理后的预期形态」。
+
+**前端**：右栏内容 tab 可编辑（编辑/确定/取消 + 覆盖中可「恢复默认」）；左栏底部「＋新增模块（yaml 定义）」（名字即时校验 UPPER_SNAKE + 查重）；yaml 模块行带删除钮；`覆盖`（黄）/`yaml`（蓝边）徽标；保存成功后自动重取（overridden 等标记以后端为准）。
 
 ## Context
 

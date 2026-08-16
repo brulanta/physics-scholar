@@ -26,7 +26,7 @@
           ⚠ 模块清单加载失败（确认后端为 dev 模式且已挂载 /api/dev）
         </div>
 
-        <!-- 双栏：左模块列表 / 右预览或内容 -->
+        <!-- 双栏：左模块列表 / 右预览或内容编辑 -->
         <div v-else class="pt-body">
 
           <!-- 左栏 -->
@@ -36,25 +36,42 @@
               <div v-for="(m, i) in modules" :key="m.name" class="module-row" :class="{ off: !m.enabled }">
                 <Toggle :model-value="m.enabled" @update:model-value="onToggle(i, $event)" />
                 <button class="module-name" :class="{ selected: viewing === m.name && tab === 'content' }"
-                  :title="'查看 ' + m.name + ' 内容'" @click="viewContent(m.name)">{{ m.name }}</button>
-                <span class="source-badge" :class="m.source">{{ m.source === 'shared' ? '共用' : '模式' }}</span>
+                  :title="'查看/编辑 ' + m.name + ' 内容'" @click="viewContent(m.name)">{{ m.name }}</button>
+                <span v-if="m.source === 'yaml'" class="source-badge yaml" title="yaml 定义模块（可删除）">yaml</span>
+                <span v-else class="source-badge" :class="m.source">{{ m.source === 'shared' ? '共用' : '模式' }}</span>
+                <span v-if="m.overridden" class="ovr-badge" title="内容已覆盖 .py 默认（可恢复默认）">覆盖</span>
                 <div class="arrow-btns">
-                  <button class="arrow-btn" :disabled="i === 0" title="上移"
-                    @click="move(i, -1)">
+                  <button class="arrow-btn" :disabled="i === 0" title="上移" @click="move(i, -1)">
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                       <path d="M8 3v10M8 3L3.5 7.5M8 3l4.5 4.5" stroke="currentColor" stroke-width="1.6"
                         stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                   </button>
-                  <button class="arrow-btn" :disabled="i === modules.length - 1" title="下移"
-                    @click="move(i, 1)">
+                  <button class="arrow-btn" :disabled="i === modules.length - 1" title="下移" @click="move(i, 1)">
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
                       <path d="M8 13V3M8 13l-4.5-4.5M8 13l4.5-4.5" stroke="currentColor" stroke-width="1.6"
                         stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
                   </button>
+                  <button v-if="m.deletable" class="arrow-btn del" title="删除该 yaml 定义模块"
+                    @click="removeModule(i)">
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                      <path d="M3 4h10M6.5 4V2.5h3V4M4.5 4l.6 9h5.8l.6-9M6.7 6.5v4M9.3 6.5v4"
+                        stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                  </button>
                 </div>
               </div>
+            </div>
+            <!-- 新增模块 -->
+            <div class="add-module">
+              <template v-if="adding">
+                <input v-model="newName" class="add-input" placeholder="UPPER_SNAKE 名" spellcheck="false"
+                  @keyup.enter="confirmAdd" @keyup.esc="adding = false" ref="addInput" />
+                <button class="mini-btn primary" :disabled="!newNameOk" title="创建" @click="confirmAdd">✓</button>
+                <button class="mini-btn" title="取消" @click="adding = false">✕</button>
+              </template>
+              <button v-else class="add-btn" @click="startAdd">＋ 新增模块（yaml 定义）</button>
             </div>
           </div>
 
@@ -65,6 +82,16 @@
               <button class="right-tab" :class="{ active: tab === 'content' }" @click="tab = 'content'">
                 模块内容{{ viewing ? ` · ${viewing}` : '' }}
               </button>
+              <!-- 内容 tab 的操作条 -->
+              <template v-if="tab === 'content' && viewingModule">
+                <button v-if="!editing" class="mini-btn" @click="startEdit">编辑</button>
+                <template v-else>
+                  <button class="mini-btn primary" @click="confirmEdit">确定</button>
+                  <button class="mini-btn" @click="cancelEdit">取消</button>
+                </template>
+                <button v-if="viewingModule.overridden && !editing" class="mini-btn warn"
+                  @click="resetDefault">恢复默认</button>
+              </template>
               <span class="pt-right-meta">
                 <span v-if="previewing" class="spin">⟳</span>
                 <template v-else-if="tab === 'preview' && preview">
@@ -72,11 +99,18 @@
                 </template>
               </span>
             </div>
+
             <div v-if="tab === 'preview'" class="pt-preview-pane">
               <pre class="pt-pre">{{ previewError || (preview ? preview.prompt : '加载中…') }}</pre>
             </div>
             <div v-else class="pt-preview-pane">
-              <pre class="pt-pre">{{ viewingContent || '（点击左侧模块名查看内容）' }}</pre>
+              <template v-if="viewingModule">
+                <textarea v-if="editing" v-model="editBuffer" class="pt-editarea" spellcheck="false"></textarea>
+                <pre v-else class="pt-pre">{{ viewingModule.content }}</pre>
+                <div v-if="editing" class="edit-hint">占位符可用：{history} {citation_plugin} {tool_decision_plugin}（保存时后端校验）</div>
+                <div v-else-if="viewingModule.overridden" class="edit-hint">此模块内容已覆盖 .py 默认（「恢复默认」收回 yaml 覆盖）</div>
+              </template>
+              <pre v-else class="pt-pre">（点击左侧模块名查看内容）</pre>
             </div>
             <div v-if="tab === 'preview'" class="pt-preview-note">结构预览：占位符（对话历史/引用插件）填的是标记文本，非逐字节生产 prompt</div>
           </div>
@@ -102,7 +136,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import Toggle from './Toggle.vue'
 import { getPromptConfig, previewPrompt, savePromptConfig } from '../../api/prompt.js'
 
@@ -113,7 +147,8 @@ const close = () => emit('close')
 const modes = ['normal', 'discuss']
 const mode = ref('normal')
 
-// 模块列表（顺序即拼装序）
+// 模块列表（顺序即拼装序）。字段：name/source/enabled/order/content/
+// deletable(yaml 定义模块)/overridden(内容覆盖 .py 默认)/default_content(.py 原版)
 const modules = ref([])
 const loadError = ref(false)
 
@@ -125,10 +160,18 @@ const previewError = ref('')
 // 右栏 tab：拼装预览 / 模块内容
 const tab = ref('preview')
 const viewing = ref('') // 当前查看的模块名
-const viewingContent = computed(() => {
-  const m = modules.value.find(x => x.name === viewing.value)
-  return m ? m.content : ''
-})
+const viewingModule = computed(() => modules.value.find(x => x.name === viewing.value) || null)
+
+// 内容编辑
+const editing = ref(false)
+const editBuffer = ref('')
+
+// 新增模块
+const adding = ref(false)
+const newName = ref('')
+const addInput = ref(null)
+const newNameOk = computed(() => /^[A-Z][A-Z0-9_]*$/.test(newName.value.trim())
+  && !modules.value.some(m => m.name === newName.value.trim()))
 
 // 保存状态
 const saving = ref(false)
@@ -140,6 +183,8 @@ const activeCount = computed(() => modules.value.filter(m => m.enabled).length)
 
 // ── 加载（也用于「重新加载」弃改动） ──
 async function load() {
+  editing.value = false
+  adding.value = false
   try {
     const { data } = await getPromptConfig(mode.value)
     modules.value = data.modules
@@ -152,7 +197,7 @@ async function load() {
   }
 }
 
-// ── 防抖预览：任何 toggle/移动/mode 切换后 400ms 重取 ──
+// ── 防抖预览：任何 toggle/移动/mode 切换/内容变更后 400ms 重取 ──
 let previewTimer = null
 let previewSeq = 0 // 请求序号：防过期响应覆盖新状态
 function schedulePreview() {
@@ -165,10 +210,7 @@ async function doPreview() {
   previewing.value = true
   previewError.value = ''
   try {
-    const { data } = await previewPrompt(
-      mode.value,
-      modules.value.map(m => ({ name: m.name, enabled: m.enabled }))
-    )
+    const { data } = await previewPrompt(mode.value, payloadModules())
     if (seq !== previewSeq) return // 过期响应丢弃
     preview.value = data
   } catch (e) {
@@ -179,19 +221,29 @@ async function doPreview() {
   }
 }
 
+// preview/save 的 payload：全量有序列表；content 仅在「覆盖中或 yaml 定义」时带
+// （未覆盖的 .py 模块带 content=null = 不改，后端同理省略）
+function payloadModules() {
+  return modules.value.map(m => ({
+    name: m.name,
+    enabled: m.enabled,
+    content: m.overridden || m.source === 'yaml' ? m.content : null,
+  }))
+}
+
 // ── 编辑操作 ──
+function markDirty() { dirty.value = true; schedulePreview() }
+
 function onToggle(i, enabled) {
   modules.value[i].enabled = enabled
-  dirty.value = true
-  schedulePreview()
+  markDirty()
 }
 function move(i, delta) {
   const j = i + delta
   if (j < 0 || j >= modules.value.length) return
   const arr = modules.value
   ;[arr[i], arr[j]] = [arr[j], arr[i]]
-  dirty.value = true
-  schedulePreview()
+  markDirty()
 }
 function switchMode(m) {
   if (m === mode.value) return
@@ -205,18 +257,72 @@ function viewContent(name) {
   tab.value = 'content'
 }
 
+// ── 内容编辑 ──
+function startEdit() {
+  if (!viewingModule.value) return
+  editBuffer.value = viewingModule.value.content
+  editing.value = true
+}
+function confirmEdit() {
+  if (!viewingModule.value) return
+  viewingModule.value.content = editBuffer.value
+  // yaml 定义模块始终 overridden 语义；.py 模块编辑后标覆盖（恢复默认即收回）
+  viewingModule.value.overridden =
+    viewingModule.value.source === 'yaml'
+    || editBuffer.value !== viewingModule.value.default_content
+  editing.value = false
+  markDirty()
+}
+function cancelEdit() { editing.value = false }
+function resetDefault() {
+  if (!viewingModule.value || viewingModule.value.default_content == null) return
+  viewingModule.value.content = viewingModule.value.default_content
+  viewingModule.value.overridden = false
+  markDirty()
+}
+
+// ── 新增 / 删除 ──
+function startAdd() {
+  adding.value = true
+  newName.value = ''
+  nextTick(() => addInput.value?.focus())
+}
+function confirmAdd() {
+  const name = newName.value.trim()
+  if (!newNameOk.value) return
+  modules.value.push({
+    name,
+    source: 'yaml',
+    enabled: true,
+    order: (modules.value.length + 1) * 10,
+    content: `## ${name}\n\n（新模块内容，点击模块名 → 编辑）\n`,
+    deletable: true,
+    overridden: false, // yaml 定义模块无「覆盖」语义（无 .py 默认）
+    default_content: null,
+  })
+  adding.value = false
+  viewContent(name)
+  markDirty()
+}
+function removeModule(i) {
+  const m = modules.value[i]
+  if (!m.deletable) return // .py 模块「仅可禁用」——删除按钮只对 yaml 模块渲染
+  modules.value.splice(i, 1)
+  if (viewing.value === m.name) { viewing.value = ''; tab.value = 'preview' }
+  markDirty()
+}
+
 // ── 保存 ──
 async function doSave() {
+  if (editing.value) confirmEdit() // 编辑中的缓冲先落进列表
   saving.value = true
   saveMsg.value = ''
   try {
-    const { data } = await savePromptConfig(
-      mode.value,
-      modules.value.map(m => ({ name: m.name, enabled: m.enabled }))
-    )
+    const { data } = await savePromptConfig(mode.value, payloadModules())
     saveOk.value = true
     saveMsg.value = `✓ ${data.message}（${data.path}）`
     dirty.value = false
+    load() // 重取：overridden/deletable 等标记以后端为准
   } catch (e) {
     saveOk.value = false
     saveMsg.value = `✗ ${e?.response?.data?.detail || e.message}`
@@ -386,7 +492,7 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
 .module-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 7px 8px;
   border-radius: 6px;
   transition: background 0.12s, opacity 0.15s;
@@ -397,7 +503,8 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
 }
 
 .module-row.off .module-name,
-.module-row.off .source-badge {
+.module-row.off .source-badge,
+.module-row.off .ovr-badge {
   opacity: 0.45;
 }
 
@@ -437,6 +544,20 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
   flex-shrink: 0;
 }
 
+.source-badge.yaml {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.ovr-badge {
+  font-size: 0.66em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--yellow, #fbbf24);
+  color: #1a1a2e;
+  flex-shrink: 0;
+}
+
 .arrow-btns {
   display: flex;
   gap: 2px;
@@ -463,6 +584,88 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
 .arrow-btn:disabled {
   opacity: 0.25;
   cursor: default;
+}
+
+.arrow-btn.del:hover:not(:disabled) {
+  color: var(--red, #f87171);
+}
+
+/* 新增模块条 */
+.add-module {
+  padding: 8px 10px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.add-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 6px;
+  font-size: 0.76em;
+  color: var(--text-3);
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.add-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.add-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 0.78em;
+  font-family: Consolas, 'Courier New', monospace;
+  color: var(--text);
+  outline: none;
+}
+
+.add-input:focus {
+  border-color: var(--accent);
+}
+
+.mini-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 10px;
+  font-size: 0.74em;
+  cursor: pointer;
+  color: var(--text-2);
+  font-family: inherit;
+  transition: all 0.12s;
+}
+
+.mini-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-light, var(--border));
+}
+
+.mini-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.mini-btn.primary:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.mini-btn.warn {
+  color: var(--yellow, #fbbf24);
+  border-color: var(--yellow, #fbbf24);
 }
 
 /* 右栏：预览/内容 */
@@ -511,6 +714,8 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
   flex: 1;
   overflow: auto;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .pt-pre {
@@ -522,6 +727,31 @@ onBeforeUnmount(() => { if (previewTimer) clearTimeout(previewTimer) })
   color: var(--text-2);
   white-space: pre-wrap;
   word-break: break-word;
+  flex: 1;
+}
+
+.pt-editarea {
+  flex: 1;
+  margin: 10px 12px;
+  padding: 12px 14px;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 0.74em;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  resize: none;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.edit-hint {
+  padding: 6px 14px 10px;
+  font-size: 0.7em;
+  color: var(--text-3);
+  flex-shrink: 0;
 }
 
 .pt-preview-note {

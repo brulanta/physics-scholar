@@ -14,6 +14,7 @@ PromptBuilder — 模块化prompt拼装引擎
 from __future__ import annotations
 from dataclasses import dataclass, field
 from string import Formatter
+import copy
 import yaml
 import os
 
@@ -88,6 +89,11 @@ class PromptBuilder:
         self._get(name).order = order
         return self
 
+    def set_content(self, name: str, content: str) -> "PromptBuilder":
+        """覆盖模块内容（dev GUI 内容编辑的底层；名字须已注册）。"""
+        self._get(name).content = content
+        return self
+
     # ── 变量注入 ──────────────────────────────────────────────────────────── #
 
     def set_vars(self, **kwargs) -> "PromptBuilder":
@@ -102,6 +108,11 @@ class PromptBuilder:
         """
         从yaml文件读取模块开关和顺序配置，应用到已注册的模块上。
         yaml格式见 profiles/ 目录。
+
+        条目可选 `content` 字段（dev GUI 内容编辑，v2）：
+        - 已注册模块带 content → 覆盖该模块内容（yaml 是运行时真相）
+        - 未注册名带 content → 动态注册「yaml 定义模块」（不经 .py，GUI 新增模块）
+        - 未注册名且无 content → 仍是 KeyError（与旧语义一致——疏漏/漂移名不做静默宽容）
         """
         with open(config_path, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
@@ -110,6 +121,17 @@ class PromptBuilder:
             name = item["name"]
 
             if name not in self._modules:
+                if "content" in item:
+                    # yaml 定义模块：动态注册（order 默认放最末，通常 yaml 会显式给 order）
+                    self.register(
+                        PromptModule(
+                            name=name,
+                            content=item["content"],
+                            enabled=item.get("enabled", True),
+                            order=item.get("order", 1000),
+                        )
+                    )
+                    continue
                 raise KeyError(f"Unknown module in yaml: {name}")
 
             module = self._modules[name]
@@ -119,6 +141,9 @@ class PromptBuilder:
 
             if "order" in item:
                 module.order = item["order"]
+
+            if "content" in item:
+                module.content = item["content"]
 
         return self
 
@@ -191,13 +216,15 @@ def build_prompt(
 
     builder = PromptBuilder()
 
-    # 注册共用模块
+    # 注册共用模块（拷贝注册：pkgutil 缓存是进程级共享对象，apply_config 的 yaml 覆盖
+    # 会原地改写 content/enabled/order——共享注册会让 dev GUI 的 yaml 覆盖污染
+    # 「.py 默认值」，跨请求泄漏 dry-run 状态）
     for module in get_shared_modules():
-        builder.register(module)
+        builder.register(copy.copy(module))
 
     # 注册模式专用模块
     for module in get_mode_modules(mode):
-        builder.register(module)
+        builder.register(copy.copy(module))
 
     # 从profile配置应用开关和顺序
     profile_path = os.path.join(

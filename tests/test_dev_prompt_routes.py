@@ -63,11 +63,16 @@ def test_get_modules_shape(client) -> None:
     assert yaml_names <= got_names  # 注册全量 ⊇ yaml 已列
 
     for m in data["modules"]:
-        assert set(m) == {"name", "source", "enabled", "order", "content"}
-        assert m["source"] in ("shared", "mode")
+        assert set(m) == {
+            "name", "source", "enabled", "order", "content",
+            "deletable", "overridden", "default_content",
+        }
+        assert m["source"] in ("shared", "mode", "yaml")
         assert isinstance(m["enabled"], bool)
         assert isinstance(m["order"], int)
         assert isinstance(m["content"], str)
+        assert isinstance(m["deletable"], bool)
+        assert isinstance(m["overridden"], bool)
 
     assert client.get("/api/dev/prompt/bogus").status_code == 404
 
@@ -117,10 +122,14 @@ def test_preview_equals_builder_output(client) -> None:
     r = client.post("/api/dev/prompt/preview", json={"mode": "normal", "modules": items})
     assert r.status_code == 200
 
-    # 本地参照：register + apply_config(真实 yaml) + 同款 vars
+    # 本地参照：register + apply_config(真实 yaml) + 同款 vars。
+    # ⚠ 必须拷贝注册——pkgutil 缓存是进程级共享引用，apply_config 原地改写会污染
+    # 后续测试（test_v2_global_state_not_polluted 断言的就是这个不变量）
+    import copy
+
     ref = PromptBuilder()
     for m in get_shared_modules() + get_mode_modules("normal"):
-        ref.register(m)
+        ref.register(copy.copy(m))
     import pathlib
 
     ref.apply_config(
@@ -222,3 +231,151 @@ def test_dev_guard_frozen_404(monkeypatch) -> None:
     assert exc.value.status_code == 404
     monkeypatch.setattr(dr, "IS_DEV", True)
     dr._dev_guard()  # 恢复后不抛
+
+
+# ── v2：内容覆盖 + yaml 定义模块（新增/删除） ────────────────
+
+
+def _get_items(client, mode="normal"):
+    mods = client.get(f"/api/dev/prompt/{mode}").json()["modules"]
+    return mods, [{"name": m["name"], "enabled": m["enabled"]} for m in mods]
+
+
+def test_v2_content_override_round_trip(client, tmp_profiles) -> None:
+    """覆盖 .py 模块内容 → GET 报 overridden + default_content 保持 .py 原版；
+    传回 default_content（恢复默认）→ 收敛，落盘无 content 键。"""
+    _, items = _get_items(client)
+    for it in items:
+        if it["name"] == "ROLE_BASE":
+            it["content"] = "## 覆盖版身份 {history}"
+    r = client.post("/api/dev/prompt/save", json={"mode": "normal", "modules": items})
+    assert r.status_code == 200
+
+    mods = client.get("/api/dev/prompt/normal").json()["modules"]
+    rb = next(m for m in mods if m["name"] == "ROLE_BASE")
+    assert rb["overridden"] is True
+    assert rb["content"] == "## 覆盖版身份 {history}"
+    assert "## Core Identity" in rb["default_content"]  # .py 原版未被污染
+
+    # 恢复默认 → 落盘无模块条目 content 键（逐行查，头注释里的 # content: 不算）
+    items3 = [
+        {"name": m["name"], "enabled": m["enabled"], "content": m["default_content"]}
+        for m in mods
+    ]
+    assert client.post("/api/dev/prompt/save", json={"mode": "normal", "modules": items3}).status_code == 200
+    lines = (tmp_profiles / "normal.yaml").read_text(encoding="utf-8").split("\n")
+    cur = None
+    for ln in lines:
+        if ln.startswith("  - name:"):
+            cur = ln
+        assert not ln.startswith("    content:"), f"恢复默认后仍带 content 键: {cur}"
+    mods3 = client.get("/api/dev/prompt/normal").json()["modules"]
+    assert next(m for m in mods3 if m["name"] == "ROLE_BASE")["overridden"] is False
+
+
+def test_v2_yaml_defined_module_lifecycle(client, tmp_profiles) -> None:
+    """新增（未注册名+content）→ 生效 source=yaml/deletable=True；
+    preview 含其内容；缺席保存 = 真删。"""
+    _, items = _get_items(client)
+    items.append({"name": "MY_YAML_MOD", "enabled": True, "content": "新模块内容\n第二行"})
+    r = client.post("/api/dev/prompt/save", json={"mode": "normal", "modules": items})
+    assert r.status_code == 200
+
+    mods = client.get("/api/dev/prompt/normal").json()["modules"]
+    my = next(m for m in mods if m["name"] == "MY_YAML_MOD")
+    assert my["source"] == "yaml"
+    assert my["deletable"] is True
+    assert my["default_content"] is None
+
+    r = client.post(
+        "/api/dev/prompt/preview",
+        json={
+            "mode": "normal",
+            "modules": [
+                {"name": m["name"], "enabled": m["enabled"], "content": m["content"]}
+                for m in mods
+            ],
+        },
+    )
+    assert r.status_code == 200
+    assert "新模块内容" in r.json()["prompt"]
+
+    # 缺席保存（不发 MY_YAML_MOD）→ 真删
+    items2 = [
+        {"name": m["name"], "enabled": m["enabled"]} for m in mods if m["name"] != "MY_YAML_MOD"
+    ]
+    assert client.post("/api/dev/prompt/save", json={"mode": "normal", "modules": items2}).status_code == 200
+    mods2 = client.get("/api/dev/prompt/normal").json()["modules"]
+    assert not any(m["name"] == "MY_YAML_MOD" for m in mods2)
+
+
+def test_v2_new_module_requires_content(client) -> None:
+    """未注册名不带 content → 400（区分于 .py 模块的未注册 400：文案带新模块指引）。"""
+    r = client.post(
+        "/api/dev/prompt/preview",
+        json={"mode": "normal", "modules": [{"name": "NEW_ONE", "enabled": True}]},
+    )
+    assert r.status_code == 400
+    assert "content" in r.json()["detail"]
+
+
+def test_v2_bad_module_name_400(client) -> None:
+    """新模块名不匹配 UPPER_SNAKE → 400。"""
+    r = client.post(
+        "/api/dev/prompt/preview",
+        json={"mode": "normal", "modules": [{"name": "bad-name", "enabled": True, "content": "x"}]},
+    )
+    assert r.status_code == 400
+
+
+def test_v2_unknown_placeholder_400(client) -> None:
+    """content 含未知占位符（拼错等）→ 400 且 detail 列出占位符名——防 build 期 KeyError。"""
+    r = client.post(
+        "/api/dev/prompt/preview",
+        json={
+            "mode": "normal",
+            "modules": [
+                {"name": "ROLE_BASE", "enabled": True, "content": "用 {histroy} 拼错"},
+                {"name": "ROLE_NORMAL_EXT", "enabled": True, "content": "用 {history} 正确"},
+            ],
+        },
+    )
+    assert r.status_code == 400
+    assert "histroy" in r.json()["detail"]
+
+
+def test_v2_py_module_absent_save_kept_disabled(client, tmp_profiles) -> None:
+    """v2 语义：.py 模块缺席补禁用；yaml 模块缺席 = 真删（两者并存时的兜底）。"""
+    _, items = _get_items(client)
+    items.append({"name": "TMP_YAML_MOD", "enabled": True, "content": "临时模块"})
+    assert client.post("/api/dev/prompt/save", json={"mode": "normal", "modules": items}).status_code == 200
+
+    # 只发一个 .py 模块：其余 .py 补禁用，TMP_YAML_MOD 真删
+    r = client.post(
+        "/api/dev/prompt/save",
+        json={"mode": "normal", "modules": [{"name": "ROLE_BASE", "enabled": True}]},
+    )
+    assert r.status_code == 200
+    mods = client.get("/api/dev/prompt/normal").json()["modules"]
+    assert not any(m["name"] == "TMP_YAML_MOD" for m in mods)
+    rb = next(m for m in mods if m["name"] == "ROLE_BASE")
+    assert rb["enabled"] is True
+    others = [m for m in mods if m["name"] != "ROLE_BASE" and m["source"] != "yaml"]
+    assert all(m["enabled"] is False for m in others)
+
+
+def test_v2_global_state_not_polluted(client, tmp_profiles) -> None:
+    """dry-run（preview/_apply_candidate）不得污染 pkgutil 进程级模块缓存——
+    preview 改了 enabled/order/content 后，生产 build_prompt 状态不受影响。"""
+    from src.rag.prompts.modules import get_shared_modules
+
+    _, items = _get_items(client)
+    for it in items:
+        if it["name"] == "ROLE_BASE":
+            it["content"] = "POLLUTION-TEST"
+    r = client.post("/api/dev/prompt/preview", json={"mode": "normal", "modules": items})
+    assert r.status_code == 200
+
+    g = next(m for m in get_shared_modules() if m.name == "ROLE_BASE")
+    assert "POLLUTION-TEST" not in g.content
+    assert g.enabled is False  # pkgutil 注册默认 enabled=False（apply_config 才开）

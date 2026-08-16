@@ -93,6 +93,11 @@ Defined retrieval hierarchy (the prompt instructs the agent to follow coarse→f
 
 `build_prompt(mode, history, citation_plugin, debug)` assembles the system prompt from modules via `builder.py` + `plugins.py`. Structure: `profiles/` (mode configs: normal / discuss / debug), `modules/shared/` (role, constraints, citation format), `modules/normal/`, `modules/discuss/`. **Mode switching (normal vs discuss) and bilingual-citation toggle are entirely prompt-layer** — the graph never forks for them. To adapt to a different research field, swap the domain-knowledge modules; the tool chain stays untouched.
 
+Two invariants worth knowing:
+
+- Profile yaml entries may carry an optional `content` field — it overrides the `.py` default (or defines a whole new module when the name is unregistered). The dev-only Prompt Tuner GUI (`/api/dev`, frozen = not mounted) edits these; the yaml is re-read on every chat request, so GUI saves apply to the next question without restart.
+- pkgutil module objects are **process-level shared references** and `apply_config` mutates them in place — always `copy.copy()` modules before `register()`ing them into a builder (see `build_prompt`), or yaml overrides pollute the ".py defaults" across requests.
+
 ### Tool text layering — docstring / schema / prompt (who says what)
 
 Tool-facing text the LLM sees is split across three layers with a strict division of labor:
