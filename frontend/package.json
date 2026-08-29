@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/check-dist.cjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -18,6 +18,6 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.5",
-    "vite": "^8.0.4"
+    "vite": "^8.2.2"
   }
 }

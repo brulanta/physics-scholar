@@ -8,7 +8,5 @@ export default defineConfig({
       "/api": "http://localhost:8000",
     },
   },
-  build: {
-    outDir: "../dist",
-  },
+  build: { outDir: '../dist', emptyOutDir: true },
 });
