@@ -34,7 +34,8 @@ PhysicsScholar is a locally-running academic research assistant agent, designed 
 | Feature                        | Description                                                                                                                                            |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **PDF Upload & Parsing**       | Drag-and-drop or click to upload; auto-chunking, embedding, and indexing; concurrent multi-file support                                                |
-| **RAG Q&A + Citation Tracing** | Retrieves relevant chunks, injects into prompt, returns answers annotated with source title and location                                               |
+| **Streaming + Thinking Timeline** | Answers stream token-by-token over SSE; a vertical thinking timeline renders reasoning and retrieval steps (including the retrieval subsystem's inner process) live while the answer is generated |
+| **RAG Q&A + Citation Tracing** | Hybrid retrieval (vector + BM25, RRF fusion) + cross-encoder reranking; answers annotated with source title and location, and reference entries carry clickable [DOI]·[PDF] links |
 | **Bilingual Citation**         | Displays English original alongside Chinese translation for every cited passage (toggleable in frontend)                                               |
 | **Multi-turn Memory**          | Context-aware within session; supports continuous follow-up questions                                                                                  |
 | **Structured Academic Prompt** | Strict CoT + role anchoring + mandatory citation mechanism — grounds answers in verifiable sources rather than hallucination                           |
@@ -42,7 +43,7 @@ PhysicsScholar is a locally-running academic research assistant agent, designed 
 
 ### Agent Tools
 
-The agent decides which tools to call each turn based on CoT reasoning (hard limit: 6 tool calls per turn):
+The main agent focuses on reasoning and answering: it delegates retrieval in a single `retrieve` call to an independent **retrieval sub-agent**. The retrieval loop runs inside the sub-agent, which follows a coarse-to-fine tiered chain and decides autonomously among the tools below (hard limit: 6 tool calls per retrieval):
 
 | Tool                      | Role                        | Description                                                                                                                                    |
 | ------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -57,7 +58,7 @@ The agent decides which tools to call each turn based on CoT reasoning (hard lim
 
 | Feature                         | Description                                                                                                       |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| **In-app Config Page**          | Fill in Key and Base URL in the settings panel, click "Fetch Models", select and save; takes effect after restart |
+| **In-app Config Page**          | Fill in Key and Base URL in the settings panel, click "Fetch Models", select and save; the app restarts automatically on save and the new config takes effect |
 | **Paper Library Management**    | Keyword search, sorting, ingestion status visualization, and deletion (syncs disk + vector store)                 |
 | **System Tray**                 | Minimizes to tray; right-click to restart or quit                                                                 |
 | **Multi-session Management**    | Create, switch, rename, and delete sessions; data persisted in SQLite                                             |
@@ -73,10 +74,12 @@ The agent decides which tools to call each turn based on CoT reasoning (hard lim
 ┌─────────────────────────────────────────────┐
 │                  Vue 3 Frontend              │
 │  Chat UI · Paper Manager · Config · Sessions │
+│  SSE stream consumer · Thinking Timeline     │
+│  · Service overlay                            │
 │  KaTeX · Markdown · Syntax Highlighting      │
 │  Light/Dark Theme · Font Switch · Bilingual Toggle │
 └──────────────────┬──────────────────────────┘
-                   │ HTTP (same port, relative-path API)
+                   │ HTTP + SSE streaming (same port, relative-path API)
 ┌──────────────────▼──────────────────────────┐
 │              FastAPI Backend                 │
 │  Routers · Session Mgmt · File · Config      │
@@ -84,18 +87,21 @@ The agent decides which tools to call each turn based on CoT reasoning (hard lim
 └──────────────────┬──────────────────────────┘
                    │
 ┌──────────────────▼──────────────────────────┐
-│           LangGraph Agent                    │
+│      LangGraph Agent (main + sub-agent)      │
 │                                              │
-│  ┌─────────┐   ┌──────────────────────────┐ │
-│  │ Main LLM │   │  Tool Set (CoT-driven)   │ │
-│  │(OpenAI- │   │  RAG · S2 · OpenAlex    │ │
-│  │compatible│   │  arXiv · Jina            │ │
-│  └─────────┘   └──────────────────────────┘ │
+│  ┌─────────────┐  ┌───────────────────────┐ │
+│  │ Main Agent   │  │ Retrieval Sub-agent    │ │
+│  │ reason +     │  │ (via `retrieve` tool)  │ │
+│  │ answer;      │  │ Tools (CoT-driven, ≤6) │ │
+│  │ single       │  │ RAG · S2 · OpenAlex    │ │
+│  │ retrieve     │  │ arXiv · Jina · ID lookup│ │
+│  └─────────────┘  └───────────────────────┘ │
+│      Tools served over MCP (default in packaged build) │
 │                                              │
 │  ┌──────────────┐   ┌──────────────────────┐ │
 │  │   ChromaDB   │   │       SQLite          │ │
-│  │ (vector search)  │ Sessions · Messages   │ │
-│  │              │   │ Paper Registry        │ │
+│  │ vector + BM25 │   │ Sessions · Messages   │ │
+│  │   hybrid      │   │ Paper Registry        │ │
 │  └──────────────┘   └──────────────────────┘ │
 └─────────────────────────────────────────────┘
                    │
@@ -104,6 +110,7 @@ The agent decides which tools to call each turn based on CoT reasoning (hard lim
 │  Main LLM (DeepSeek / Gemini / any OpenAI-compat) │
 │  Secondary LLM (Jina chunk scoring; low-cost, large-context recommended) │
 │  SiliconFlow Embedding (BAAI/bge-m3, free)   │
+│  SiliconFlow Rerank (bge-reranker-v2-m3, same key) │
 │  Jina Reader · arXiv · S2 · OpenAlex        │
 └─────────────────────────────────────────────┘
 ```
@@ -112,16 +119,22 @@ The agent decides which tools to call each turn based on CoT reasoning (hard lim
 
 ```
 User message
-  → LangGraph: enter LLM node — CoT analyzes intent + identifies information gaps
-  → If tool needed: jump to Tool node, result returns to LLM node
-  → LLM node CoT again: enough information? Call another tool?
-  → Loop (LLM ↔ Tool), max 6 tool calls then forced to answer
-  → Every tool call must include CoT; calls without reasoning are rejected
-  → LLM generates answer: all external sources annotated with inline citation markers
-  → Frontend renders markers + footer Reference section, typewriter display effect
+  → Main agent: CoT analyzes intent, decides whether retrieval is needed
+  → If retrieval needed: delegates in ONE `retrieve` call to the retrieval sub-agent
+      → Sub-agent runs its own loop: CoT → tool call → result injected → re-evaluate
+        follows a coarse-to-fine tiered chain, stops when information suffices
+        (hard limit: 6 tool calls per retrieval)
+      → Every tool call must include CoT; calls without reasoning are rejected
+      → Retrieval progress (which tools were called, what was found) streams to the
+        frontend in real time and renders as a nested timeline
+      → Retrieval ends; structured findings return to the main agent
+  → Main agent generates the answer from findings: all external sources annotated
+    with inline citation markers
+  → Answer streams out over SSE; frontend renders the timeline and text live,
+    footer Reference section carries clickable [DOI]·[PDF] links
 
 Note: tool results are only visible within the current graph cycle.
-      The next user message starts a new cycle with a fresh 6-call budget;
+      The next user message starts a new cycle with a fresh budget;
       tool results not written into the answer are not carried forward.
 ```
 
@@ -152,26 +165,31 @@ physics-scholar/
 │   │   ├── init_SQLite.py        # Database initialization
 │   │   └── trim_thinking.py      # Strip LLM chain-of-thought from output
 │   ├── rag/                      # RAG and Agent core
-│   │   ├── graph.py              # LangGraph agent graph definition
-│   │   ├── chain.py              # Conversation chain
-│   │   ├── retriever.py          # Vector retrieval
+│   │   ├── graph.py              # LangGraph main/sub agent graphs + streaming state machine
+│   │   ├── chain.py              # Non-streaming fallback conversation chain
+│   │   ├── citation.py           # Citation binding (bind-by-id) + metadata enrichment
+│   │   ├── harness_profile.py    # Agent constraint profiles (dev-time)
+│   │   ├── mcp_client.py         # MCP tool client
+│   │   ├── tool_runtime.py       # Tool runtime (serialization / rate control)
 │   │   ├── memory.py             # Multi-turn conversation memory
-│   │   ├── prompt.py             # Prompt entry point
 │   │   ├── prompts/              # Modular prompt system
 │   │   │   ├── builder.py        # Prompt assembler
 │   │   │   ├── plugins.py        # Plugin registration
+│   │   │   ├── subagent_prompt.py # Retrieval sub-agent prompt
 │   │   │   ├── profiles/         # Mode configs (normal / discuss / debug)
 │   │   │   └── modules/          # Prompt modules
 │   │   │       ├── shared/       # Shared modules (role, constraints, citation format, etc.)
 │   │   │       ├── normal/       # Standard Q&A mode
 │   │   │       └── discuss/      # Academic discussion mode
-│   │   └── tools/                # Agent tools
-│   │       ├── rag_tool.py                # Local RAG retrieval
+│   │   └── tools/                # Retrieval tools (bound to the sub-agent)
+│   │       ├── rag_tool.py                # Local RAG retrieval (hybrid + rerank)
 │   │       ├── arxiv_tool.py              # arXiv search
 │   │       ├── s2_tool.py                 # Semantic Scholar search
 │   │       ├── openalex_tool.py           # OpenAlex search
 │   │       ├── jina_tool.py               # Jina full-text reader
 │   │       └── lookup_local_paper_id.py   # Local paper ID lookup
+│   ├── mcp_servers/              # MCP tool servers (local / web / jina)
+│   ├── service_state.py          # Service state flags (restart overlay etc.)
 │   └── utils/
 │       └── logger.py             # Logging config
 │
@@ -195,7 +213,7 @@ physics-scholar/
 ├── data/                         # Runtime data (gitignored)
 │   ├── pdfs/                     # User-uploaded PDF files
 │   ├── chroma_db/                # Vector store
-│   └── SQLite/                   # Paper registry database
+│   └── SQLite/                   # Sessions · messages · paper registry database
 │
 ├── seed_builder/                 # Seed library build scripts (dev only)
 ├── eval_framework/               # Evaluation framework (dev only)
@@ -256,7 +274,7 @@ npm run build
 
 ## Configuration
 
-All configuration is done through the in-app **Settings** panel. Changes take effect after restarting the program.
+All configuration is done through the in-app **Settings** panel. Saving triggers an automatic restart, after which the new config takes effect (no manual restart needed).
 
 | Field           | Description                                                                                  | Required      |
 | --------------- | -------------------------------------------------------------------------------------------- | ------------- |
@@ -276,11 +294,14 @@ All configuration is done through the in-app **Settings** panel. Changes take ef
 
 ## Packaging
 
-Built with PyInstaller onedir mode. Users unzip and run — no installation needed.
+Built with PyInstaller onedir mode. Users unzip and run — no installation needed. **Always build distributions with**:
 
 ```bash
-pyinstaller physics_scholar.spec
+python scripts/build_release.py   # frontend build + clear stale bundle + PyInstaller in one shot
 ```
+
+> Do not run `pyinstaller physics_scholar.spec` directly — it may ship a stale frontend
+> or recurse into the previous `dist/PhysicsScholar/` bundle.
 
 Distribution layout:
 
@@ -306,6 +327,14 @@ The project started with a LangChain Chain for conversation logic and JSON for s
 **Tiered External Search Design**
 
 The three retrieval tools are not interchangeable fallbacks — they have distinct roles in a defined degradation chain. S2 is the primary tool (richest metadata: citation count, venue, tldr). OpenAlex handles abstract completion (higher abstract coverage than S2; batches missing abstracts in one call) and becomes the primary search when S2 is rate-limited. arXiv is the final fallback and the dedicated channel for latest preprints, since both S2 and OpenAlex have multi-week indexing delays for new uploads. The degradation chain is explicitly defined in the agent's tool-usage prompt.
+
+**Why the Retrieval Loop Was Split Out of the Main Agent**
+
+In v1.0 the main agent ran the retrieval loop itself: every turn re-injected all tool schemas into the context, and the control logic (mandatory reasoning checks, call budget) was entangled with the agent's core job of reasoning and answering. In v2.0 the loop lives in a separately compiled retrieval sub-agent, exposed to the main agent as a single `retrieve` tool. The main agent focuses on thinking and output; the retrieval side can be tuned under its own constraint profile; and retrieval progress can be streamed to the frontend as a nested timeline. Tools are served over MCP (enabled by default in the packaged build); the two graphs exchange only retrieval findings, never shared context.
+
+**Hybrid Recall and Reranking for Local RAG**
+
+Local retrieval is no longer a single vector channel: chunks are cut at calibrated token-semantic capacity (separate coefficients for Chinese and English), queries run dual-channel vector + BM25 keyword recall fused by RRF, and results are re-ranked by the bge-reranker-v2-m3 cross-encoder (SiliconFlow API, sharing the embedding key, currently free). Literal-match cases — exact terminology, formula names, abbreviations — retrieve markedly better.
 
 **The Role of Local Paper ID Lookup**
 
@@ -334,6 +363,10 @@ The local torch dependency made the packaged binary several GB in size with slow
 - [x] Vue 3 frontend + multi-session management (M9)
 - [x] Error handling & robustness: atomic ingestion rollback, exponential backoff, 429 circuit breaking, LLM auto-retry (M10)
 - [x] PyInstaller exe packaging (M11)
+- [x] True SSE streaming output + thinking timeline (v2.0)
+- [x] Main/sub agent split: retrieval loop as its own subgraph, retrieval process visualized (v2.0)
+- [x] Local RAG upgrade: calibrated chunking + hybrid recall (vector + BM25) + reranking (v2.0)
+- [x] Tools fully MCP-ized + clickable [DOI]·[PDF] citation links (v2.0)
 - [ ] Seed paper library (curated microwave photonics corpus — in progress)
 
 ---
@@ -341,6 +374,8 @@ The local torch dependency made the packaged binary several GB in size with slow
 ## Extensibility
 
 The prompt system is modular. Modules under `src/rag/prompts/modules/` (role definition, constraints, citation format, domain knowledge framework, etc.) are maintained independently and decoupled from tool logic. To adapt PhysicsScholar for another research domain, replace the domain knowledge module — no changes to the tool chain required. (Note: a small amount of prefill logic lives in `graph.py`; if you restructure the chain-of-thought, check there too.)
+
+A dev-only Prompt Tuner GUI (`/api/dev`, not included in the packaged build) lets you edit, add, and delete prompt modules directly in the browser; saves apply to the next question without a restart.
 
 Forks and adaptations are welcome.
 
