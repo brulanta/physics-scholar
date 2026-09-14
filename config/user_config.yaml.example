@@ -4,7 +4,7 @@ main_llm:
   base_url: ""
   model: ""
 
-# ── 副 LLM（选填，留空则复用主 LLM）
+# ── 副 LLM（选填，留空则复用主 LLM；驱动 检索子 Agent / Jina 全文打分 / 论文元信息提取）
 sub_llm:
   api_key: ""
   base_url: ""

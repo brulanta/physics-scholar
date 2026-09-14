@@ -91,7 +91,7 @@ def _error_payload(error_type: str, error: str, retryable: bool) -> str:
             "agent_hint": (
                 "arXiv API 暂时不可用或触发速率限制。"
                 "请勿在同一对话内反复重试相同查询。"
-                "如需继续检索，可尝试 s2_search_tool。"
+                "如需继续检索，可尝试其他工具。"
             ),
             "papers": [],
         },
@@ -287,7 +287,7 @@ def arxiv_tool(
                 "error_type": "recent_failed_query",
                 "error": "Recent identical query failed",
                 "retryable": False,
-                "agent_hint": "相同的查询在近期刚刚失败过，已被系统拦截。请改变搜索关键词，或者直接回退至 s2_search_tool。",
+                "agent_hint": "相同的查询在近期刚刚失败过，已被系统拦截。请改变搜索关键词，或者直接回退至其他工具。",
                 "papers": [],
             },
             ensure_ascii=False,
@@ -337,7 +337,7 @@ def arxiv_tool(
                         "error_type": "bad_request",
                         "error": last_error,
                         "retryable": False,
-                        "agent_hint": "查询语法被 arXiv API 拒绝。建议简化关键词并重试，或者回退至 s2_search_tool。",
+                        "agent_hint": "查询语法被 arXiv API 拒绝。建议简化关键词并重试，或者回退至其他工具。",
                         "papers": [],
                     },
                     ensure_ascii=False,
@@ -388,7 +388,7 @@ def arxiv_tool(
                 "error_type": "parse_error",
                 "error": "Failed to parse arXiv response (might be a false 200 OK)",
                 "retryable": True,
-                "agent_hint": "获取数据时遭遇内容损坏（非学术论文的假结果），请重新尝试，或回退至 s2_search_tool。",
+                "agent_hint": "获取数据时遭遇内容损坏（非学术论文的假结果），请重新尝试，或回退至其他工具。",
                 "papers": [],
             },
             ensure_ascii=False,
@@ -436,7 +436,7 @@ def arxiv_tool(
             )
         else:
             # 真没搜到
-            agent_hint = "未检索到任何符合条件的论文。请尝试减少关键词数量、使用更宽泛的词汇、移除 category 限制，或直接使用 s2_search_tool 进行跨平台广搜。"
+            agent_hint = "未检索到任何符合条件的论文。请尝试减少关键词数量、使用更宽泛的词汇、移除 category 限制，或直接使用其他工具进行跨平台广搜。"
 
     return json.dumps(
         {

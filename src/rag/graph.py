@@ -70,6 +70,7 @@ from openai import (
     RateLimitError,
 )
 from src.llm import main_llm as llm
+from src.rag.token_usage import new_usage, set_usage, reset_usage, acc, snapshot
 
 MAX_THINKING_RETRIES = 3
 
@@ -169,8 +170,10 @@ class AgentState(TypedDict):
     findings: (
         str  # 子 agent 专用：finalize 写检索结果拼接，retrieve 壳取；主 agent 不用
     )
-    selected_tool_results: list  # 子 agent 专用：finalize 写点选结果 per-item [(name, item_json), ...]，
-        # retrieve 壳取作 artifact 喂候选收集（仅选中项，不再全 raw——与 findings 同源，存储精度）
+    selected_tool_results: (
+        list  # 子 agent 专用：finalize 写点选结果 per-item [(name, item_json), ...]，
+    )
+    # retrieve 壳取作 artifact 喂候选收集（仅选中项，不再全 raw——与 findings 同源，存储精度）
 
 
 def thinking_guard(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
@@ -292,7 +295,16 @@ def after_guard(
     return END
 
 
-async def final_answer(state: AgentState, profile: HarnessProfile = FLASH) -> dict:
+async def final_answer(
+    state: AgentState,
+    profile: HarnessProfile = FLASH,
+    llm=None,
+    usage_bucket: str = "main",
+) -> dict:
+    # llm=None 回落模块全局 main_llm（保持主 agent 行为不变）；子 agent 经 _final 闭包
+    # 注入其子 LLM。usage_bucket 由 _build_graph 按 finalize_fn 派生，token 累加用。
+    if llm is None:
+        from src.llm import main_llm as llm
     messages = list(state["messages"])
     last_msg = messages[-1]
 
@@ -307,6 +319,7 @@ async def final_answer(state: AgentState, profile: HarnessProfile = FLASH) -> di
     final_prefill = build_final_prefill(profile)
     invoke_messages = messages + [AIMessage(content=final_prefill)]
     response = await ainvoke_with_retry(llm, invoke_messages)
+    acc(usage_bucket, response)
 
     return {"messages": [response]}
 
@@ -477,7 +490,11 @@ def _build_graph(
             # Stage 5 trace：ainvoke 前报 tool_start（工具名从末条 AIMessage 的 tool_calls 读）
             if emit_trace:
                 last_ai = next(
-                    (m for m in reversed(state["messages"]) if isinstance(m, AIMessage)),
+                    (
+                        m
+                        for m in reversed(state["messages"])
+                        if isinstance(m, AIMessage)
+                    ),
                     None,
                 )
                 for tc in (last_ai.tool_calls or []) if last_ai else []:
@@ -488,7 +505,9 @@ def _build_graph(
             result = await _base_tool_node.ainvoke(state)
             # Stage 5 trace：ainvoke 后报 tool_end（ok 复用 _tool_ok 判 ToolMessage.status）
             if emit_trace:
-                for tm in result.get("messages", []) if isinstance(result, dict) else []:
+                for tm in (
+                    result.get("messages", []) if isinstance(result, dict) else []
+                ):
                     if isinstance(tm, ToolMessage) and (getattr(tm, "name", "") or ""):
                         await _safe_dispatch_trace(
                             {"kind": "tool_end", "name": tm.name, "ok": _tool_ok(tm)}
@@ -531,6 +550,7 @@ def _build_graph(
         if emit_trace:
             await _safe_dispatch_trace({"kind": "thinking_start"})
         response = await ainvoke_with_retry(llm_with_tools, invoke_messages)
+        acc(usage_bucket, response)
         if emit_trace:
             await _safe_dispatch_trace({"kind": "thinking_end"})
 
@@ -574,14 +594,17 @@ def _build_graph(
             "pending_correction": "",  # 清除
         }
 
-    # thinking_guard / final_answer 是模块级函数（便于单测），此处闭包注入 profile。
+    # thinking_guard / final_answer 是模块级函数（便于单测），此处闭包注入 profile + llm + usage_bucket。
     # after_guard 路由：soft/off 不 set is_thinking_correction，路由不变；
     # terminator（子 agent 专属）经 _after_guard 闭包注入。
+    # usage_bucket：子 agent（有 finalize_fn）→ "sub"，主 agent → "main"。token 计量分桶用。
+    usage_bucket = "sub" if finalize_fn is not None else "main"
+
     def _guard(state):
         return thinking_guard(state, profile)
 
     async def _final(state):
-        return await final_answer(state, profile)
+        return await final_answer(state, profile, llm, usage_bucket)
 
     def _after_guard(state):
         # 子 agent（有 finalize_fn）预算耗尽走 finalize 拼工具结果；
@@ -713,7 +736,11 @@ def _select_items(tm: ToolMessage, wanted: list) -> list[str]:
     - 否则按 item 切片：`_iter_tool_items` 取 items，抠 wanted 命中的（越界跳过）；
       单条工具 / 全越界 → [整条 content] 兜底（graceful，不丢检索成果）。
     """
-    content = tm.content if isinstance(tm.content, str) else (str(tm.content) if tm.content else "")
+    content = (
+        tm.content
+        if isinstance(tm.content, str)
+        else (str(tm.content) if tm.content else "")
+    )
     if None in wanted:
         return [content]
     items = _iter_tool_items(tm.name, content)
@@ -746,7 +773,9 @@ def _annotate_tool_results(state, tool_result):
     offset = 0
     for tm in new_msgs:
         if isinstance(tm, ToolMessage) and (getattr(tm, "name", "") or ""):
-            n = existing + offset + 1  # 1-based，与 finalize enumerate(tool_msgs, 1) 对齐
+            n = (
+                existing + offset + 1
+            )  # 1-based，与 finalize enumerate(tool_msgs, 1) 对齐
             m = len(_iter_tool_items(tm.name, tm.content))
             note = f"（共 {m} 条候选，按返回顺序 #1..#{m}）" if m > 1 else ""
             annotations.append(
@@ -790,7 +819,9 @@ async def _subagent_finalize(state: AgentState) -> dict:
     ]
 
     sections: list[str] = []
-    selected: list[tuple[str, str]] = []  # per-item (name, item_json)，与 findings 同源、喂候选收集
+    selected: list[
+        tuple[str, str]
+    ] = []  # per-item (name, item_json)，与 findings 同源、喂候选收集
     if rf_args is not None:
         summary = (rf_args.get("summary") or "").strip()
         if summary:
@@ -812,7 +843,9 @@ async def _subagent_finalize(state: AgentState) -> dict:
                 continue
             # per-item 列表（单次切片）：findings 文本 join 展示 + 候选收集逐条收，同源不漂移
             items = _select_items(tm, wanted)
-            picked.append(f"### 检索结果 #{i}（{tm.name}）\n" + "\n\n---\n\n".join(items))
+            picked.append(
+                f"### 检索结果 #{i}（{tm.name}）\n" + "\n\n---\n\n".join(items)
+            )
             selected.extend((tm.name, it) for it in items)
         if picked:
             sections.append("## 检索结果\n\n" + "\n\n".join(picked))
@@ -858,7 +891,14 @@ def build_subagent(
     对主 agent 它是 retrieve 工具（make_retrieve_tool 包一层），对自己是图。
     """
     if llm is None:
-        from src.llm import main_llm as llm
+        # 子 agent 接入子 LLM：combo 走 SUB_ENDPOINT（未填则 config 层 fallback 到主），
+        # 只继承 model/api/url；运行参数按子 agent 用途定制——
+        # temp 0.15（与主 agent 一致；0.0 是 jina/extractor 的设定不是子 agent 的）、
+        # 非流式（retrieve 壳 subagent.ainvoke 是非流式图，LLM 须 non-streaming，
+        #   否则非流式图 + streaming LLM 会丢内容——实测截断）、不设 max_tokens（检索推理不截断）。
+        from src.llm import build_llm, SUB_ENDPOINT
+
+        llm = build_llm(SUB_ENDPOINT, temperature=0.15)
 
     paper_id_search_tool = make_paper_id_search_tool(user_id)
     rag_tool = make_rag_tool(user_id)
@@ -1259,6 +1299,8 @@ def chat(
     # 1.在invoke之前先构建SystemMessage，这时候有所有需要的参数
     conversation_id = f"{user_id}_{conv_id}"
     memory = ConversationMemory(conversation_id)
+    usage = new_usage()
+    _usage_tok = set_usage(usage)  # per-request token 累加器进 ContextVar
     try:
         # 2. call agent
         agent, initial_state = _prepare(
@@ -1292,7 +1334,9 @@ def chat(
 
         user_res = memory.add(HumanMessage(content=user_message), parent_id=parent_id)
         agent_res = memory.add(
-            AIMessage(content=agent_msg_pure), parent_id=user_res["message_id"]
+            AIMessage(content=agent_msg_pure),
+            parent_id=user_res["message_id"],
+            usage=usage,
         )
 
         # 候选 enrichment 落 sidecar（非流式测试兜底路径，只存不 enrich——见 plan 边界）
@@ -1316,8 +1360,10 @@ def chat(
             "user_msg_id": user_res["message_id"],
             "agent_msg_id": agent_res["message_id"],
             "warning": warning,
+            "usage": snapshot(usage),
         }
     finally:
+        reset_usage(_usage_tok)
         memory.close()
 
 
@@ -1333,6 +1379,8 @@ def regenerate(
     # 在invoke之前先构建SystemMessage，这时候有所有需要的参数
     conversation_id = f"{user_id}_{conv_id}"
     memory = ConversationMemory(conversation_id)
+    usage = new_usage()
+    _usage_tok = set_usage(usage)  # per-request token 累加器进 ContextVar
     try:
         # 流程：
         #   1. memory.regenerate(old_agent_msg_id, parent_id) → 拿到 version
@@ -1367,7 +1415,10 @@ def regenerate(
             logger.warning("[%s] 写入空回答占位文本", conversation_id)
 
         agent_res = memory.add(
-            AIMessage(content=agent_msg_pure), parent_id=parent_id, version=version
+            AIMessage(content=agent_msg_pure),
+            parent_id=parent_id,
+            version=version,
+            usage=usage,
         )
 
         # 候选 enrichment 落 sidecar（非流式测试兜底路径，只存不 enrich——见 plan 边界）
@@ -1391,8 +1442,10 @@ def regenerate(
             "user_msg_id": parent_id,
             "agent_msg_id": agent_res["message_id"],
             "warning": warning,
+            "usage": snapshot(usage),
         }
     finally:
+        reset_usage(_usage_tok)
         memory.close()
 
 
@@ -1423,7 +1476,9 @@ async def _consume_events(agent, initial_state, request, result: dict):
     buf = ""
     cur_node = None
     root_run_id = None
-    active_retrieve_run_id = None  # Stage 5：当前 retrieve 工具的 run_id，作嵌套 subtask 帧的 parent_tool_id
+    active_retrieve_run_id = (
+        None  # Stage 5：当前 retrieve 工具的 run_id，作嵌套 subtask 帧的 parent_tool_id
+    )
 
     aiter = agent.astream_events(initial_state, version="v2").__aiter__()
     pending = None
@@ -1723,7 +1778,12 @@ async def chat_stream(
     """流式问答生成器：边推理边推 SSE，跑完后落库并发 done。"""
     conversation_id = f"{user_id}_{conv_id}"
     memory = ConversationMemory(conversation_id)
-    result: dict = {"tool_results": []}  # _consume_events 在 on_tool_end 累积
+    usage = new_usage()
+    _usage_tok = set_usage(usage)  # per-request token 累加器进 ContextVar
+    result: dict = {
+        "tool_results": [],
+        "usage": usage,
+    }  # _consume_events 在 on_tool_end 累积
     try:
         agent, initial_state = _prepare(
             memory, user_message, conv_id, user_id, translation, mode, parent_id
@@ -1751,7 +1811,9 @@ async def chat_stream(
 
         user_res = memory.add(HumanMessage(content=user_message), parent_id=parent_id)
         agent_res = memory.add(
-            AIMessage(content=agent_msg_pure), parent_id=user_res["message_id"]
+            AIMessage(content=agent_msg_pure),
+            parent_id=user_res["message_id"],
+            usage=usage,
         )
         warning = (
             f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
@@ -1763,6 +1825,7 @@ async def chat_stream(
             user_msg_id=user_res["message_id"],
             agent_msg_id=agent_res["message_id"],
             warning=warning,
+            usage=snapshot(usage),
             answer=_persist_and_enrich(
                 conversation_id, agent_res["message_id"], agent_msg_pure, result
             ),  # 权威文本：落 lean 入库 + enrich 出 rich 给前端覆盖
@@ -1774,6 +1837,7 @@ async def chat_stream(
         logger.exception("[%s] 流式问答异常", conversation_id)
         yield _format_sse("error", message=str(e))
     finally:
+        reset_usage(_usage_tok)
         memory.close()
 
 
@@ -1791,7 +1855,12 @@ async def regenerate_stream(
     断连不留悬挂。done.user_msg_id 固定为 parent_id。"""
     conversation_id = f"{user_id}_{conv_id}"
     memory = ConversationMemory(conversation_id)
-    result: dict = {"tool_results": []}  # _consume_events 在 on_tool_end 累积
+    usage = new_usage()
+    _usage_tok = set_usage(usage)  # per-request token 累加器进 ContextVar
+    result: dict = {
+        "tool_results": [],
+        "usage": usage,
+    }  # _consume_events 在 on_tool_end 累积
     try:
         agent, initial_state = _prepare(
             memory, user_message, conv_id, user_id, translation, mode, parent_id
@@ -1816,7 +1885,10 @@ async def regenerate_stream(
         version = regen_res.get("version")
 
         agent_res = memory.add(
-            AIMessage(content=agent_msg_pure), parent_id=parent_id, version=version
+            AIMessage(content=agent_msg_pure),
+            parent_id=parent_id,
+            version=version,
+            usage=usage,
         )
         warning = (
             f"当前对话存储已超上限{WARN_THRESHOLD}，建议开启新对话以保证回答质量。"
@@ -1828,6 +1900,7 @@ async def regenerate_stream(
             user_msg_id=parent_id,
             agent_msg_id=agent_res["message_id"],
             warning=warning,
+            usage=snapshot(usage),
             answer=_persist_and_enrich(
                 conversation_id, agent_res["message_id"], agent_msg_pure, result
             ),  # 权威文本：落 lean 入库 + enrich 出 rich 给前端覆盖
@@ -1838,4 +1911,5 @@ async def regenerate_stream(
         logger.exception("[%s] 流式重生成异常", conversation_id)
         yield _format_sse("error", message=str(e))
     finally:
+        reset_usage(_usage_tok)
         memory.close()

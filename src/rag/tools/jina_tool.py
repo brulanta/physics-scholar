@@ -46,6 +46,7 @@ from src.utils.logger import get_logger
 import re
 from langchain_core.messages import SystemMessage, HumanMessage
 from src.llm import sub_llm
+from src.rag.token_usage import acc
 
 # ══════════════════════════════════════════════════════════════════
 # 外部配置注入
@@ -287,6 +288,7 @@ def _score_chunk(chunk: str, query: str) -> int:
 
     try:
         res = score_llm.invoke(messages)
+        acc("jina", res)
         content = res.content.strip()
 
         # 兼容处理

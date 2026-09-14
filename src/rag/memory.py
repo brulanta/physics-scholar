@@ -2,6 +2,7 @@
 from langchain_core.messages import HumanMessage, BaseMessage, AIMessage
 from src.core.init_SQLite import get_conn
 import sqlite3
+import json
 from typing import Literal
 
 INSERT_MESSAGES_SQL = """
@@ -11,9 +12,10 @@ INSERT INTO messages (
     content,
     parent_id,
     status,
-    version
+    version,
+    usage_json
 )
-VALUES (?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 """
 
 SELECT_MESSAGES_PARTIAL_SQL = """SELECT id, role, content FROM messages WHERE status='normal' AND conversation_id = ? ORDER BY id ASC"""
@@ -114,11 +116,20 @@ class MessageRepo:
         parent_id: int = None,
         status="normal",
         version=1,
+        usage: dict | None = None,
     ):
         try:
             self.cur.execute(
                 INSERT_MESSAGES_SQL,
-                (conversation_id, role, content, parent_id, status, version),
+                (
+                    conversation_id,
+                    role,
+                    content,
+                    parent_id,
+                    status,
+                    version,
+                    json.dumps(usage, ensure_ascii=False) if usage else None,
+                ),
             )
             self.conn.commit()
             return {"success": True, "message_id": self.cur.lastrowid}
@@ -227,8 +238,8 @@ class ConversationMemory:
         self.conversation_id = conversation_id
         self._repo = MessageRepo()
 
-    def add(self, message: BaseMessage, parent_id=None, version: int = 1):
-        """单条插入，返回成功/消息id/总量超限预警"""
+    def add(self, message: BaseMessage, parent_id=None, version: int = 1, usage: dict | None = None):
+        """单条插入，返回成功/消息id/总量超限预警。usage 为该回答的 token 计量（仅 assistant 有值）。"""
         role = "user" if isinstance(message, HumanMessage) else "assistant"
         res = self._repo.insert(
             self.conversation_id,
@@ -237,6 +248,7 @@ class ConversationMemory:
             parent_id,
             status="normal",
             version=version,
+            usage=usage,
         )
         warning = self.warning()
         return res | warning
@@ -289,9 +301,20 @@ class ConversationMemory:
         return history
 
     def get_tree(self) -> list:
-        """返回本对话id下的所有记录（含废弃），返回list[dict]"""
+        """返回本对话id下的所有记录（含废弃），返回list[dict]。
+        usage_json（JSON 串）解析为 usage dict 便于前端直接用。"""
         rows = self._repo.get_messages(self.conversation_id, fields="full")
-        return [dict(row) for row in rows]
+        out = []
+        for row in rows:
+            msg = dict(row)
+            raw = msg.pop("usage_json", None)
+            if raw:
+                try:
+                    msg["usage"] = json.loads(raw)
+                except (ValueError, TypeError):
+                    pass
+            out.append(msg)
+        return out
 
     def warning(self):
         """对话达到tokens上限则触发预警"""

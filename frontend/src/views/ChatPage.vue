@@ -337,6 +337,7 @@ function buildTree(convId, msgs) {
       content: m.content,
       liked: m.liked ?? 0,
       createdAt: m.created_at,
+      usage: m.usage ?? null,
       // 分支信息：兄弟节点数量和当前是第几个
       siblings: getSiblings(nodeMap, m),
     }))
@@ -417,6 +418,7 @@ function switchBranch(msgId, direction) {
     content: m.content,
     liked: m.liked ?? 0,
     createdAt: m.created_at,
+    usage: m.usage ?? null,
     siblings: getSiblings(cache.tree, m),
   }))
 
@@ -613,7 +615,7 @@ async function _doSend(convId, text, overrideParentId = undefined) {
     }
 
     // ── 正常完成：以权威 done 落库（answer 覆盖流式累计文本，消除漂移）──
-    const { user_msg_id, agent_msg_id, warning } = state.done
+    const { user_msg_id, agent_msg_id, warning, usage } = state.done
     const fullText = state.done.answer || '（无回复）'
     tempUserMsg.id = user_msg_id
 
@@ -655,6 +657,7 @@ async function _doSend(convId, text, overrideParentId = undefined) {
         content: fullText,
         liked: 0,
         createdAt: new Date().toISOString(),
+        usage: usage || null,
         siblings: getSiblings(sessionCache[convId].tree, agentNode),
       })
       sessionCache[convId].activeMessageId = agent_msg_id
@@ -724,7 +727,7 @@ async function handleRegenerate({ msgId, parentId, question }) {
       return
     }
 
-    const { agent_msg_id, warning } = state.done
+    const { agent_msg_id, warning, usage } = state.done
     const fullText = state.done.answer || '（无回复）'
 
     // 写回缓存（而不是 treeMessages）
@@ -765,6 +768,7 @@ async function handleRegenerate({ msgId, parentId, question }) {
           content: fullText,
           liked: 0,
           createdAt: new Date().toISOString(),
+          usage: usage || null,
           siblings: getSiblings(cache.tree, newNode),
         })
       }

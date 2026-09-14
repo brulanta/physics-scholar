@@ -74,7 +74,7 @@
           <!-- ── 副 LLM ── -->
           <section class="cfg-section">
             <div class="cfg-section-title">副 LLM <span class="optional-tag">可选</span></div>
-            <div class="cfg-section-desc">留空则全部复用主 LLM 配置</div>
+            <div class="cfg-section-desc">留空则全部复用主 LLM 配置；驱动 检索子 Agent / Jina 全文打分 / 论文元信息提取</div>
 
             <div class="field-row">
               <label>API Key</label>

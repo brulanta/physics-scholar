@@ -4,7 +4,7 @@
       <div class="messages">
         <MessageItem v-for="msg in messages" :key="msg.id ?? msg.createdAt"
           :siblings="msg.siblings ?? { total: 1, index: 0 }" :msg-id="msg.id" :parent-id="msg.parentId" :role="msg.role"
-          :content="msg.content" :liked="msg.liked" :created-at="msg.createdAt"
+          :content="msg.content" :liked="msg.liked" :created-at="msg.createdAt" :usage="msg.usage"
           :prev-user-content="getPrevUserContent(msg)" @regenerate="$emit('regenerate', $event)"
           @edit-branch="$emit('edit-branch', $event)" />
         <!-- streaming 占位：思考/工具时间轴 + 正文（正文有内容才渲染气泡）-->

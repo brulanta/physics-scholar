@@ -16,6 +16,9 @@
         <div v-else class="md-body" v-html="rendered" />
       </div>
 
+      <!-- token 计量（仅 assistant，有 usage 才显） -->
+      <div v-if="role === 'assistant' && usageText" class="usage-line" :title="usageTitle">{{ usageText }}</div>
+
       <!-- 操作栏 -->
       <div v-if="content" class="action-bar" :class="[role, { visible: hovered }]">
         <template v-if="role === 'assistant'">
@@ -101,6 +104,7 @@ const props = defineProps({
   createdAt: { type: String, default: '' },
   prevUserContent: { type: String, default: '' },
   siblings: { type: Object, default: () => ({ total: 1, index: 0 }) },
+  usage: { type: Object, default: null },  // token 计量 {main/sub/jina:{input,output}}
 })
 
 const switchBranch = inject('switchBranch')
@@ -119,6 +123,28 @@ watch(() => props.liked, (v) => { localLiked.value = v })
 watch(globalLoading, (v) => { if (!v) regenerating.value = false })
 
 const rendered = computed(() => renderMarkdown(props.content))
+
+// token 计量：usage 形如 {main/sub/jina:{input,output}}（snapshot 省略零值桶）。
+// 展示输入/输出合计；hover title 给主/子/Jina 分桶明细。
+const usageText = computed(() => {
+  const u = props.usage
+  if (!u || typeof u !== 'object') return ''
+  let i = 0, o = 0
+  for (const k of ['main', 'sub', 'jina']) {
+    if (u[k]) { i += u[k].input || 0; o += u[k].output || 0 }
+  }
+  if (!i && !o) return ''
+  return `输入 ${i} · 输出 ${o} tokens`
+})
+const usageTitle = computed(() => {
+  const u = props.usage
+  if (!u) return ''
+  const parts = []
+  for (const [k, label] of [['main', '主 agent'], ['sub', '子 agent'], ['jina', 'Jina 打分']]) {
+    if (u[k] && (u[k].input || u[k].output)) parts.push(`${label}: ${u[k].input}/${u[k].output}`)
+  }
+  return parts.join('  ')
+})
 
 // 时间戳格式：当天只显时间，隔天加日期，隔年加年份
 function formatTime(iso) {
@@ -355,6 +381,15 @@ async function toggleLike(val) {
   user-select: none;
   margin-right: auto;
   /* row-reverse 下把时间戳推到视觉最左端 */
+}
+
+.usage-line {
+  font-size: 0.7em;
+  color: var(--text-3);
+  margin-top: 2px;
+  padding: 0 2px;
+  line-height: 1.4;
+  user-select: none;
 }
 
 .act.active {

@@ -28,12 +28,19 @@ def init_db():
 
         liked INTEGER DEFAULT 0,  -- 1 like, -1 dislike, 0 none
 
-        version INTEGER DEFAULT 1 -- 重发版本
+        version INTEGER DEFAULT 1, -- 重发版本
+
+        usage_json TEXT            -- 本条回答的 token 计量（仅 assistant；JSON：{main/sub/jina: {input,output}}）
 )
     """)
 
     cur.execute("""CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)
 """)
+
+    # 幂等迁移：老库补 usage_json 列（新库由 CREATE 自带）
+    cols = {row[1] for row in cur.execute("PRAGMA table_info(messages)").fetchall()}
+    if "usage_json" not in cols:
+        cur.execute("ALTER TABLE messages ADD COLUMN usage_json TEXT")
 
     # papers
     cur.execute("""

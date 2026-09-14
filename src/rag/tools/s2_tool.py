@@ -147,7 +147,7 @@ def _error_payload(error_type: str, error: str, retryable: bool) -> str:
                 "S2 API 暂时不可用、网络超时或触发了服务商的速率限制(429)。"
                 "这是系统或网络层面的错误，绝非你的关键词不好！"
                 "请勿通过频繁修改关键词来重复尝试此工具。"
-                "如需继续检索，评估是否需要启动备用工具 arxiv_tool。"
+                "如需继续检索，评估是否需要启动备用工具。"
             ),
             "papers": [],
         },
@@ -577,7 +577,7 @@ def s2_search_tool(
                 "error_type": "recent_failed_query",
                 "error": "Recent identical query failed",
                 "retryable": False,
-                "agent_hint": "相同的 S2 查询近期失败，请勿重复尝试。如需继续检索请使用 arxiv_tool。",
+                "agent_hint": "相同的 S2 查询近期失败，请勿重复尝试。如需继续检索请使用其他工具。",
                 "papers": [],
             },
             ensure_ascii=False,
